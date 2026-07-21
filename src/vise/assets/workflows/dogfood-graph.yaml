@@ -1,0 +1,105 @@
+metadata:
+  name: "Dogfood Loop"
+  description: "Dogfood loop: run on self, capture issues, triage, file, fix."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+nodes:
+  - id: "run-on-self"
+    name: "Run on Self"
+    is_start: true
+    prompt_injection: |
+      PHASE: RUN ON SELF
+      Use the project against itself to surface real-world friction.
+      1. Activate the project's main workflow on the project's own repo.
+      2. Exercise the primary user paths end-to-end.
+      3. Capture screen recordings or logs of unexpected behavior.
+      4. Note rough edges and confusing UX in a scratch file.
+      Signal: say "dogfood run complete" when session ends.
+
+  - id: "capture-issues"
+    name: "Capture Issues"
+    prompt_injection: |
+      PHASE: CAPTURE ISSUES
+      Convert raw friction notes into discrete issue candidates.
+      1. Re-read the scratch notes and split into atomic problems.
+      2. For each, write reproduction steps and observed vs expected behavior.
+      3. Tag with rough area (CLI, hooks, workflows, adapters, etc.).
+      4. Drop duplicates of already-known issues.
+      Signal: say "issues captured" when list is ready.
+
+  - id: "triage"
+    name: "Triage"
+    prompt_injection: |
+      PHASE: TRIAGE
+      Decide severity and priority for each captured issue.
+      1. Classify severity: critical / high / medium / low.
+      2. Estimate fix cost: small / medium / large.
+      3. Decide which issues belong in the next sprint vs backlog.
+      4. Drop "wontfix" candidates with a rationale note.
+      Signal: say "triaged" when classification is done.
+
+  - id: "file"
+    name: "File"
+    prompt_injection: |
+      PHASE: FILE
+      Open formal issues in the tracker for triaged items.
+      1. Create one issue per problem with full repro steps.
+      2. Apply severity, area, and milestone labels.
+      3. Link related issues and prior dogfood sessions.
+      4. Assign to the right owner if known.
+      Signal: say "filed" when all issues are opened.
+
+  - id: "fix"
+    name: "Fix"
+    is_end: true
+    prompt_injection: |
+      PHASE: FIX
+      Address the critical and high-severity issues from this round.
+      1. Take the top-priority issue and fix it on a branch.
+      2. Add a regression test that would have caught the dogfood friction.
+      3. Close the issue with the fixing commit reference.
+      4. Schedule the next dogfood round to validate the fix in context.
+      Signal: dogfood loop complete — fixes shipped.
+
+edges:
+  - id: "run-to-capture"
+    from: "run-on-self"
+    to: "capture-issues"
+    condition:
+      type: "phrase"
+      phrases:
+        - "dogfood run complete"
+        - "next phase"
+        - "advance"
+
+  - id: "capture-to-triage"
+    from: "capture-issues"
+    to: "triage"
+    condition:
+      type: "phrase"
+      phrases:
+        - "issues captured"
+        - "next phase"
+        - "advance"
+
+  - id: "triage-to-file"
+    from: "triage"
+    to: "file"
+    condition:
+      type: "phrase"
+      phrases:
+        - "triaged"
+        - "next phase"
+        - "advance"
+
+  - id: "file-to-fix"
+    from: "file"
+    to: "fix"
+    condition:
+      type: "phrase"
+      phrases:
+        - "filed"
+        - "next phase"
+        - "advance"

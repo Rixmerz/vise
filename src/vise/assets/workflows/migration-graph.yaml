@@ -1,0 +1,106 @@
+metadata:
+  name: "DB Migration Sprint"
+  description: "Database migration sprint: design schema, implement, check reversibility, benchmark, apply."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+nodes:
+  - id: "design"
+    name: "Design"
+    is_start: true
+    prompt_injection: |
+      PHASE: DESIGN
+      Plan the schema change before writing migration code.
+      1. Identify the tables, columns, indexes, and constraints involved.
+      2. Document the data shape before and after.
+      3. Note backfill needs, default values, and nullable transitions.
+      4. Decide online vs offline migration based on table size and lock cost.
+      5. Sketch rollback strategy in the same document.
+      Signal: say "migration designed" when ready to implement.
+
+  - id: "implement"
+    name: "Implement"
+    prompt_injection: |
+      PHASE: IMPLEMENT
+      Write the migration files (forward and reverse).
+      1. Use the project's migration tool conventions (alembic, prisma, sqlx, etc.).
+      2. Keep DDL changes idempotent where possible.
+      3. Split data backfill from schema change when the dataset is large.
+      4. Add the matching ORM/model code updates.
+      Signal: say "migration implemented" when files are written.
+
+  - id: "reversibility-check"
+    name: "Reversibility Check"
+    prompt_injection: |
+      PHASE: REVERSIBILITY CHECK
+      Verify the migration can be safely rolled back.
+      1. Run the forward migration against a fresh test DB.
+      2. Run the reverse migration and confirm the schema returns to baseline.
+      3. Confirm no data loss in the reverse path for production-shape data.
+      4. Document any irreversible steps explicitly.
+      Signal: say "reversible" when round-trip passes.
+
+  - id: "bench"
+    name: "Benchmark"
+    prompt_injection: |
+      PHASE: BENCHMARK
+      Measure migration cost against production-shape data.
+      1. Seed a copy of production-volume data into a staging DB.
+      2. Time the forward migration and record lock duration.
+      3. Confirm acceptable downtime window (or zero with online strategy).
+      4. Flag any query-plan regressions on hot paths.
+      Signal: say "benchmark passed" when timings are within budget.
+
+  - id: "apply"
+    name: "Apply"
+    is_end: true
+    prompt_injection: |
+      PHASE: APPLY
+      Apply the migration to the target environment.
+      1. Take a fresh backup of the target DB before running.
+      2. Run the migration with monitoring on lock and replication lag.
+      3. Verify post-migration row counts and constraint integrity.
+      4. Commit migration files with a Why: explaining the schema change.
+      Signal: migration applied — workflow complete.
+
+edges:
+  - id: "design-to-implement"
+    from: "design"
+    to: "implement"
+    condition:
+      type: "phrase"
+      phrases:
+        - "migration designed"
+        - "next phase"
+        - "advance"
+
+  - id: "implement-to-reversibility"
+    from: "implement"
+    to: "reversibility-check"
+    condition:
+      type: "phrase"
+      phrases:
+        - "migration implemented"
+        - "next phase"
+        - "advance"
+
+  - id: "reversibility-to-bench"
+    from: "reversibility-check"
+    to: "bench"
+    condition:
+      type: "phrase"
+      phrases:
+        - "reversible"
+        - "next phase"
+        - "advance"
+
+  - id: "bench-to-apply"
+    from: "bench"
+    to: "apply"
+    condition:
+      type: "phrase"
+      phrases:
+        - "benchmark passed"
+        - "next phase"
+        - "advance"

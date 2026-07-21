@@ -1,0 +1,105 @@
+metadata:
+  name: "Release Cut"
+  description: "Release cut workflow: tests, changelog, version bump, tag, notify."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+nodes:
+  - id: "tests"
+    name: "Tests"
+    is_start: true
+    prompt_injection: |
+      PHASE: TESTS
+      Confirm the suite is green before cutting a release.
+      1. Run the full test suite (unit + integration).
+      2. Run linter and type checker on the release branch.
+      3. Confirm CI is passing on the candidate commit.
+      4. If failures exist, stop the release and fix them first.
+      Signal: say "tests green" when the suite is clean.
+
+  - id: "changelog"
+    name: "Changelog"
+    prompt_injection: |
+      PHASE: CHANGELOG
+      Draft the release notes for users.
+      1. Diff against the previous tag to enumerate user-visible changes.
+      2. Group entries by Added / Changed / Fixed / Removed.
+      3. Call out breaking changes prominently.
+      4. Update CHANGELOG.md (or equivalent) with the new section.
+      Signal: say "changelog ready" when notes are written.
+
+  - id: "version-bump"
+    name: "Version Bump"
+    prompt_injection: |
+      PHASE: VERSION BUMP
+      Update the version number in all canonical locations.
+      1. Apply semver based on the changelog (major/minor/patch).
+      2. Update pyproject.toml, package.json, Cargo.toml, __version__, etc.
+      3. Verify no stale version strings remain (grep the old version).
+      4. Commit version bump and changelog together.
+      Signal: say "version bumped" when commit is ready.
+
+  - id: "tag"
+    name: "Tag"
+    prompt_injection: |
+      PHASE: TAG
+      Create the annotated git tag for the release.
+      1. Use the format vX.Y.Z (or project convention).
+      2. Annotated tag, not lightweight: include changelog summary in the message.
+      3. Push the tag to the remote so CI can build artifacts.
+      4. Verify the release pipeline picked up the tag.
+      Signal: say "tagged" when tag is pushed.
+
+  - id: "notify"
+    name: "Notify"
+    is_end: true
+    prompt_injection: |
+      PHASE: NOTIFY
+      Announce the release to stakeholders.
+      1. Post release notes to the project's announcement channel.
+      2. Update docs site or pinned issue with the new version.
+      3. If the release contains breaking changes, message dependent teams directly.
+      4. Close milestone and open the next one.
+      Signal: release announced — workflow complete.
+
+edges:
+  - id: "tests-to-changelog"
+    from: "tests"
+    to: "changelog"
+    condition:
+      type: "phrase"
+      phrases:
+        - "tests green"
+        - "next phase"
+        - "advance"
+
+  - id: "changelog-to-version-bump"
+    from: "changelog"
+    to: "version-bump"
+    condition:
+      type: "phrase"
+      phrases:
+        - "changelog ready"
+        - "next phase"
+        - "advance"
+
+  - id: "version-bump-to-tag"
+    from: "version-bump"
+    to: "tag"
+    condition:
+      type: "phrase"
+      phrases:
+        - "version bumped"
+        - "next phase"
+        - "advance"
+
+  - id: "tag-to-notify"
+    from: "tag"
+    to: "notify"
+    condition:
+      type: "phrase"
+      phrases:
+        - "tagged"
+        - "next phase"
+        - "advance"

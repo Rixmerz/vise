@@ -1,0 +1,105 @@
+metadata:
+  name: "Security Audit"
+  description: "Security audit: scan, triage, fix criticals, verify, document."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+nodes:
+  - id: "scan"
+    name: "Scan"
+    is_start: true
+    prompt_injection: |
+      PHASE: SCAN
+      Run the configured security scanners across the codebase.
+      1. Run SAST tools (bandit, semgrep, gosec, eslint-security, etc.).
+      2. Run dependency vulnerability scan (pip-audit, npm audit, cargo audit).
+      3. Run secret detection (trufflehog, gitleaks) on the working tree and history.
+      4. Persist raw findings to a scratch file for triage.
+      Signal: say "scan complete" when results are gathered.
+
+  - id: "triage"
+    name: "Triage"
+    prompt_injection: |
+      PHASE: TRIAGE
+      Classify findings by severity and exploitability.
+      1. Group by severity: critical / high / medium / low.
+      2. Mark false positives with a reason.
+      3. For each true positive, estimate blast radius.
+      4. Build the fix-order list, criticals first.
+      Signal: say "triaged" when classification is done.
+
+  - id: "fix-criticals"
+    name: "Fix Criticals"
+    prompt_injection: |
+      PHASE: FIX CRITICALS
+      Address every critical and high severity finding.
+      1. Fix the root cause, not the symptom — look for project-wide patterns.
+      2. Use parameterized queries, safe escaping, and least-privilege primitives.
+      3. Rotate any leaked credential before committing the fix.
+      4. Add regression tests where feasible.
+      Signal: say "criticals fixed" when patches are in place.
+
+  - id: "verify"
+    name: "Verify"
+    prompt_injection: |
+      PHASE: VERIFY
+      Re-run the scanners and confirm criticals are gone.
+      1. Re-run SAST, dependency, and secret scans.
+      2. Diff against the pre-fix baseline — no new findings allowed.
+      3. Confirm regression tests pass.
+      4. Confirm no functional regressions in the broader test suite.
+      Signal: say "verified" when scans are clean.
+
+  - id: "doc"
+    name: "Document"
+    is_end: true
+    prompt_injection: |
+      PHASE: DOCUMENT
+      Record what was found, what was fixed, and what remains.
+      1. Write an audit report: scope, methodology, findings, fixes.
+      2. List accepted-risk findings with rationale and review date.
+      3. Update SECURITY.md with any new disclosure or hardening guidance.
+      4. Schedule the next audit cycle.
+      Signal: audit complete — report filed.
+
+edges:
+  - id: "scan-to-triage"
+    from: "scan"
+    to: "triage"
+    condition:
+      type: "phrase"
+      phrases:
+        - "scan complete"
+        - "next phase"
+        - "advance"
+
+  - id: "triage-to-fix"
+    from: "triage"
+    to: "fix-criticals"
+    condition:
+      type: "phrase"
+      phrases:
+        - "triaged"
+        - "next phase"
+        - "advance"
+
+  - id: "fix-to-verify"
+    from: "fix-criticals"
+    to: "verify"
+    condition:
+      type: "phrase"
+      phrases:
+        - "criticals fixed"
+        - "next phase"
+        - "advance"
+
+  - id: "verify-to-doc"
+    from: "verify"
+    to: "doc"
+    condition:
+      type: "phrase"
+      phrases:
+        - "verified"
+        - "next phase"
+        - "advance"
