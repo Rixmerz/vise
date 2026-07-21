@@ -173,11 +173,11 @@ def _build_clean_context_briefing(
     if dag_schedule and isinstance(dag_schedule, dict):
         ready = dag_schedule.get("ready_tasks", [])
         lines = [
-            f"## DAG schedule",
+            "## DAG schedule",
             f"- Ready tasks: {len(ready)} — {', '.join(t['id'] for t in ready[:10])}",
             dag_schedule.get("hint", ""),
         ]
-        sections.append("\n".join(l for l in lines if l))
+        sections.append("\n".join(line for line in lines if line))
 
     sections.append("## Next action\nBegin work on this node. Call `graph_status` to verify current phase, then execute the node's instructions above.")
 

@@ -2,19 +2,13 @@
 in experience_memory.py.
 """
 import json
-import time
 from pathlib import Path
 
-import pytest
 
 from vise.engines.experience_memory import (
-    ExperienceEntry,
-    ExperienceMemoryStore,
     derive_implementation_checklist,
     format_checklist_for_prompt,
     _generalize_context_name,
-    GLOBAL_MEMORY_FILE,
-    PROJECT_MEMORIES_DIR,
 )
 
 

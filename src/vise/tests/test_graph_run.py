@@ -15,7 +15,6 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-import pytest
 
 from vise.cli.main import main
 
@@ -185,7 +184,7 @@ def test_graph_run_resolves_plain_yaml_variant(tmp_path: Path) -> None:
 
 def test_graph_run_resolves_bundled_workflow(tmp_path: Path, capsys) -> None:
     """A bundled workflow (debug-graph.yaml) is found without a project copy."""
-    project = _make_project(tmp_path)
+    _make_project(tmp_path)
     # Do NOT create a local workflow — rely on bundled 'debug-graph.yaml'
     rc = main(["graph", "run", "debug", "--emit", "--project", str(tmp_path)])
     assert rc == 0
@@ -199,20 +198,20 @@ def test_graph_run_resolves_bundled_workflow(tmp_path: Path, capsys) -> None:
 # ---------------------------------------------------------------------------
 
 def test_graph_run_unknown_workflow_exits_nonzero(tmp_path: Path) -> None:
-    project = _make_project(tmp_path)
+    _make_project(tmp_path)
     rc, _, err = _emit(tmp_path, "workflow-that-does-not-exist-xyz")
     assert rc != 0
 
 
 def test_graph_run_unknown_workflow_reports_name_in_stderr(tmp_path: Path) -> None:
-    project = _make_project(tmp_path)
+    _make_project(tmp_path)
     rc, _, err = _emit(tmp_path, "nonexistent-abc")
     assert rc != 0
     assert "nonexistent-abc" in err
 
 
 def test_graph_run_unknown_workflow_does_not_print_command(tmp_path: Path) -> None:
-    project = _make_project(tmp_path)
+    _make_project(tmp_path)
     rc, out, _ = _emit(tmp_path, "nonexistent-abc")
     assert rc != 0
     assert "claude" not in out

@@ -20,15 +20,11 @@ SKIP tests requiring a real fastembed download — guarded with importorskip.
 """
 from __future__ import annotations
 
-import importlib
-import threading
-from functools import lru_cache
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import vise.core.embeddings as emb_mod
 from vise.core.embeddings import (
     DEFAULT_MODEL,
     DEFAULT_IDLE_TIMEOUT,

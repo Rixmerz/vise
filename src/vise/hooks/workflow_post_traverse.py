@@ -138,7 +138,7 @@ def _record_experience_fallback(result: dict, project_path: str,
 
     from datetime import datetime, timezone
     changed_files = _get_changed_files(project_path)
-    file_pattern = f"src/**/*.ts" if not changed_files else changed_files[0]
+    file_pattern = "src/**/*.ts" if not changed_files else changed_files[0]
 
     entry = {
         "type": "smell_introduced" if smells_summary else "impact_high",

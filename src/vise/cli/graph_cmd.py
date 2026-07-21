@@ -135,7 +135,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         print(
-            f"[vise graph run] Searched (project→user→bundled):",
+            "[vise graph run] Searched (project→user→bundled):",
             file=sys.stderr,
         )
         print(

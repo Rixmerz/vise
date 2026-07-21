@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from vise.engines.graph_engine import EdgeCondition, Graph, GraphState, Node, Edge
+from vise.engines.graph_engine import Graph, GraphState, Node
 from vise.engines.graph_parser import parse_graph_yaml
 from vise.tools._graph_builder import _generate_graph_yaml, _get_or_create_builder, _graph_builders
 
@@ -272,7 +272,6 @@ class TestTraverseValidatorsGreen:
 
         green_result = {"passed": True, "failed_count": 0, "failed": [], "confidence": 1.0}
 
-        from vise.engines.graph_engine import take_transition
 
         with patch("vise.engines.dcc_glue._run_node_validators", new=AsyncMock(return_value=green_result)):
             # Directly test the validators_green check in _graph_transition
@@ -435,9 +434,7 @@ class TestFeatureDevGraph:
 
     def test_graph_check_phrase_and_check_tool_untouched(self) -> None:
         """graph_check_phrase / graph_check_tool functions must still exist."""
-        import inspect
         import vise.tools._graph_transition as _gt
-        members = {name for name, _ in inspect.getmembers(_gt)}
         # These are registered tools, not module-level functions; check registration
         # by verifying the module imports the required functions still exist.
         assert hasattr(_gt, "register_graph_transition_tools"), (

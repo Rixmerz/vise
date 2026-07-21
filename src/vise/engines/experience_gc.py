@@ -319,10 +319,6 @@ def gc(
     store_path = Path(store_path)
     protected_ids = protected_ids or set()
     now = datetime.now(timezone.utc)
-    recent_cutoff_iso = (
-        datetime.now(timezone.utc)
-        .replace(tzinfo=timezone.utc)
-    )
 
     report: dict[str, Any] = {
         "store_path": str(store_path),

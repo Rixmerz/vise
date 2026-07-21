@@ -4,7 +4,6 @@ import uuid
 
 from vise.engines.config import get_global_workflows_dir
 from vise.engines.graph_parser import parse_graph_yaml, GraphParseError
-from vise.core.session import resolve_project_dir
 
 
 # In-memory graph builder storage
@@ -50,7 +49,7 @@ def _generate_graph_yaml(builder: dict) -> str:
     lines.append(f'  name: "{builder["metadata"].get("name", "Untitled")}"')
     lines.append(f'  description: "{builder["metadata"].get("description", "")}"')
     lines.append(f'  version: "{builder["metadata"].get("version", "1.0.0")}"')
-    lines.append(f'  type: "graph"')
+    lines.append('  type: "graph"')
     lines.append("")
 
     # Nodes
@@ -662,7 +661,7 @@ def register_graph_builder_tools(mcp):
 
         return {
             "success": True,
-            "message": f"Graph saved successfully",
+            "message": "Graph saved successfully",
             "file": str(output_path),
             "graph_name": builder["metadata"]["name"],
             "stats": {

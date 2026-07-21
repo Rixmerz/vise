@@ -15,16 +15,12 @@ Covers:
 """
 from __future__ import annotations
 
-import struct
-import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from vise.core import embed_cache
 from vise.core.embed_cache import (
-    ToolRecord,
     _pack,
     _unpack,
     _text_key,
@@ -366,7 +362,6 @@ def test_search_top_k_limits_results(db_slug):
 
 def test_search_semantic_returns_results_ordered_by_score(db_slug):
     """With a real embedder stub, cosine scores are computed and sorted descending."""
-    dim = 4
     stub = MagicMock()
     stub.available = True
     # embed_many produces [1,0,0,0] for all tools
@@ -389,8 +384,7 @@ def test_search_semantic_returns_results_ordered_by_score(db_slug):
 def test_list_tools_handles_corrupt_schema_json(db_slug):
     """A row with malformed JSON in input_schema must not crash list_tools."""
     import sqlite3
-    from vise.core import paths
-    from vise.core.embed_cache import _db_path, _pack
+    from vise.core.embed_cache import _db_path
 
     stub = _stub_embedder()
     with patch("vise.core.embed_cache.get_embedder", return_value=stub):

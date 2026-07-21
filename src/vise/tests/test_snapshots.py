@@ -27,7 +27,6 @@ import pytest
 
 from vise.core.snapshots import (
     SNAPSHOT_REF_PREFIX,
-    Snapshot,
     _snapshot_id,
     create,
     create_for_phase_transition,

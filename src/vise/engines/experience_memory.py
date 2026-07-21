@@ -301,7 +301,7 @@ def compute_relevance(entry: ExperienceEntry, target_path: str,
 # ExperienceMemoryStore
 # ============================================================================
 
-from vise.core import paths as _paths
+from vise.core import paths as _paths  # noqa: E402
 
 GLOBAL_MEMORY_FILE = _paths.data_dir() / "experience_memory.json"
 PROJECT_MEMORIES_DIR = _paths.data_dir() / "project_memories"

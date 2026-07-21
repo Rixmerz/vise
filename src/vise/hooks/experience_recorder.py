@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _common import _DOMAIN_MAP, extract_keywords, guess_domain
+from _common import extract_keywords, guess_domain
 
 
 _APPROVE = json.dumps({"decision": "approve"})

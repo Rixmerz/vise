@@ -6,7 +6,7 @@ Uses a simple hand-rolled parser to avoid PyYAML dependency issues.
 
 import re
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any
 
 from .graph_engine import Node, Edge, EdgeCondition, Graph, Task
 
@@ -507,7 +507,7 @@ def parse_graph_yaml(content: str) -> Graph:
     # Validate graph
     errors = graph.validate()
     if errors:
-        raise GraphParseError(f"Graph validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
+        raise GraphParseError("Graph validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     return graph
 

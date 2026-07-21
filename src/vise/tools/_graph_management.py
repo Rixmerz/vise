@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from vise.core.session import resolve_project_dir
-from vise.engines.config import get_workflows_library_dir, load_enforcer_config
+from vise.engines.config import load_enforcer_config
 from vise.engines.workflow_scope import resolve_workflow_dirs
 from vise.engines.graph_engine import Graph, GraphState, generate_mermaid
 from vise.engines.graph_parser import load_graph_from_file, GraphParseError
