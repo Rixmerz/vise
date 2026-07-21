@@ -1,4 +1,4 @@
-"""Unified FSRS-style retrievability for the jig memory and experience stores.
+"""Unified FSRS-style retrievability for the vise memory and experience stores.
 
 Standard forgetting curve (FSRS approximation, no external dependency):
 
@@ -73,7 +73,7 @@ def days_since(iso_timestamp: str) -> float:
 
 
 if __name__ == "__main__":
-    # Inline self-check — run with: python -m jig.engines.fsrs
+    # Inline self-check — run with: python -m vise.engines.fsrs
 
     # 1. Monotonic decay: R at t=0 > R at t=S > R at t=9S
     r0 = retrievability(0.0)

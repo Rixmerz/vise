@@ -65,7 +65,7 @@ from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Inlined from _common.py — avoids sys.path.insert + module-file read (~7 ms).
-# Keep in sync with src/jig/hooks/_common.py.
+# Keep in sync with src/vise/hooks/_common.py.
 # ---------------------------------------------------------------------------
 _DOMAIN_MAP: dict[str, list[str]] = {
     "auth":   ["auth", "login", "session", "token", "jwt"],

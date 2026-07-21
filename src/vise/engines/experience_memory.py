@@ -671,7 +671,7 @@ def derive_implementation_checklist(
 
     _entry_scores: dict[int, float] = {}
     try:
-        # In-process embedding via fastembed + jig's global tool cache
+        # In-process embedding via fastembed + vise's global embed cache
         from vise.core.embed_cache import search as _cache_search
 
         matches = _cache_search(_task_desc, top_k=50, mcp_name="_experience")
