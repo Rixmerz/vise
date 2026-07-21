@@ -2,20 +2,59 @@
 
 Claude Code plugin (Python MCP server) with three subsystems:
 
-- **Phase-gated workflow enforcer** — graph-defined phases that gate tools until you traverse.
-- **Cross-project experience memory** — semantically indexed learnings that persist across projects.
-- **Git snapshots** — automatic orphan-ref snapshots of every edit cycle, restorable without touching your branch.
+- **Phase-gated workflow enforcer** — workflows are directed graphs of phases; each node can inject phase-specific prompts and *block* tools (e.g. Edit/Write during a "think" phase) until you `graph_traverse` forward. Per-node validator gates hold the transition until declared checks pass.
+- **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay, injected back at edit time by hooks and queryable via `experience_*` tools.
+- **Git snapshots** — automatic orphan-ref snapshots (`refs/vise/snapshots/<id>`) after every edit cycle (throttled), restorable without touching your branch or working history.
 
-Extracted from [jig](https://github.com/Rixmerz/jig) **without the MCP proxy layer** — Claude Code's native ToolSearch now covers on-demand tool discovery, so vise keeps only the differentiated core.
+The MCP surface exposes **50 tools** (`graph_*`, `experience_*`, `memory_*`, `snapshot_*`, `goal_*`, `recipe_*`, `capability_*`, `next_task_*`, `vise_version`, …).
 
-## Dev setup
+## Install
+
+vise ships as a Claude Code plugin (`.claude-plugin/plugin.json` + `.mcp.json` + `hooks/hooks.json`) and is marketplace-ready.
+
+The MCP server command is `vise-mcp`, a console script — it must resolve on `PATH`, so the Python package needs to be installed (wheel or editable):
+
+```sh
+uv venv && uv pip install -e .        # dev
+# or: uv tool install vise-mcp       # once published
+```
+
+The hook commands do **not** require the wheel — they run via `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 …` directly from the plugin checkout.
+
+### Hook wiring (`hooks/hooks.json`)
+
+| Event | Matcher | Hook |
+|---|---|---|
+| UserPromptSubmit | `*` | `workflow_suggester.py` — suggests activating a workflow for task-shaped prompts |
+| PreToolUse | `*` | `graph_enforcer.py` — blocks tools the active phase forbids (fail-open) |
+| PreToolUse | `Edit\|Write` | `experience_injector.py` — injects past learnings for the touched file |
+| PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` — captures a snapshot (30 s throttle) |
+| PostToolUse | `Bash` | `experience_recorder.py` — records learnings from commit messages |
+| PostToolUse | `mcp__.*__graph_traverse` | `workflow_post_traverse.py` — post-phase feedback |
+| PostToolUse | `mcp__.*__(graph_reset\|graph_activate)` | `workflow_override_detector.py` |
+| Stop | `*` | `goal_gate.py` — blocks ending the turn with an unfinished active goal |
+
+All hooks fail open: on any internal error they exit 0 and never block the session.
+
+## CLI
+
+```sh
+vise version
+vise graph --help        # inspect/manage workflow state offline
+vise experience --help   # query/record learnings from the shell
+```
+
+## What jig had that vise dropped, and why
+
+vise is extracted from [jig](https://github.com/Rixmerz/jig), keeping only the differentiated core:
+
+- **MCP proxy layer** (`proxy_pool` / `internal_proxy` / `execute_mcp_tool` / tool archive) — dropped. Claude Code's native ToolSearch now covers on-demand tool discovery, so proxying every configured MCP through one server is no longer needed.
+- **DCC (DeltaCodeCube) glue** — reduced to a provider-agnostic stub (`engines/dcc_glue.py`). Quality-signal enrichment is pluggable; no hard dependency on a specific code-analysis backend.
+- Legacy `JIG_*` env vars are still honored as fallbacks where they existed (e.g. `VISE_EMBED_MODEL` preferred, `JIG_EMBED_MODEL` legacy).
+
+## Dev
 
 ```sh
 uv venv && uv pip install -e .
+python -m pytest src/vise/tests/ -q   # 426 tests
 ```
-
-Run tests: `python -m pytest src/vise/tests/ -q`
-
-## Status
-
-Extraction in progress — core (paths, session, lifecycle, embeddings, embed cache) is in; enforcer, experience, and snapshot tool families land in subsequent waves.
