@@ -2,23 +2,17 @@
 graph_timeline, graph_validate, graph_override_max_visits.
 """
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 from vise.core.session import resolve_project_dir
-from vise.engines.config import load_enforcer_config
 from vise.engines.workflow_scope import resolve_workflow_dirs
 from vise.engines.graph_engine import Graph, GraphState, generate_mermaid
 from vise.engines.graph_parser import load_graph_from_file, GraphParseError
 from vise.engines.graph_state import (
     load_graph_state, initialize_graph_state,
-    get_graph_file, save_graph_state,
-)
-from vise.engines.dcc_glue import (
-    _is_dcc_available, _execute_dcc_tool, _extract_tensions,
-    _resolve_dcc_config, _run_dcc_analysis,
+    get_graph_file,
 )
 
 
@@ -192,7 +186,6 @@ def register_graph_management_tools(mcp):
         """Activate a graph from the workflows library.
 
         Copies the graph YAML to graph.yaml and initializes state.
-        Runs a DCC baseline analysis on the start node if DCC is configured.
 
         Args:
             graph_name: Name of the graph file (without -graph.yaml extension)
@@ -253,7 +246,7 @@ def register_graph_management_tools(mcp):
         target_file.write_text(graph_file.read_text())
 
         # Initialize state
-        state = initialize_graph_state(resolved_dir, graph, graph_name)
+        initialize_graph_state(resolved_dir, graph, graph_name)
         start_node = graph.get_start_node()
 
         # Auto-refresh project metadata and pattern catalog on activation
@@ -279,25 +272,6 @@ def register_graph_management_tools(mcp):
         except Exception as e:
             print(f"[vise] Pattern catalog refresh failed (non-fatal): {e}", file=sys.stderr)
 
-        # Run DCC baseline analysis on start node (non-fatal if DCC unavailable)
-        dcc_baseline = None
-        try:
-            enforcer_config = load_enforcer_config(resolved_dir)
-            should_run, analyses, token_budget = _resolve_dcc_config(start_node, enforcer_config)
-            if should_run:
-                dcc_result, _ = await _run_dcc_analysis(analyses, token_budget, resolved_dir)
-                dcc_baseline = dcc_result
-        except Exception as e:
-            print(f"[vise] DCC baseline on activate failed (non-fatal): {e}", file=sys.stderr)
-
-        # Store baseline smells for smart filtering in subsequent transitions
-        if dcc_baseline:
-            state.baseline_smells = dcc_baseline.get("smells", [])
-            try:
-                save_graph_state(resolved_dir, state)
-            except Exception as e:
-                print(f"[vise] Failed to save baseline smells (non-fatal): {e}", file=sys.stderr)
-
         return {
             "success": True,
             "session_id": sid,
@@ -310,7 +284,6 @@ def register_graph_management_tools(mcp):
                 "name": start_node.name if start_node else None
             },
             "prompt_injection": start_node.prompt_injection if start_node else None,
-            "dcc_baseline": dcc_baseline,
             "project_dir": resolved_dir
         }
 
@@ -357,11 +330,10 @@ def register_graph_management_tools(mcp):
         session_id: str | None = None
     ) -> dict:
         # readOnlyHint: True
-        """Get a unified timeline of workflow transitions, DCC tensions, and git commits.
+        """Get a unified timeline of workflow transitions and git commits.
 
         Correlates three data sources into a single chronological view:
         - Workflow transitions (from execution_path in graph state)
-        - DCC tensions and smells (from DeltaCodeCube)
         - Git commits (from git log)
 
         Args:
@@ -438,60 +410,6 @@ def register_graph_management_tools(mcp):
             print(f"[vise] Warning: failed to parse git log for timeline: {e}", file=sys.stderr)
             pass
 
-        # 3. DCC tensions (if available)
-        if _is_dcc_available():
-            try:
-                raw_tensions = await _execute_dcc_tool("cube_get_tensions", {"limit": limit}, resolved_dir)
-                tensions = _extract_tensions(raw_tensions)
-                for t in tensions:
-                    ts = t.get("detected_at", t.get("timestamp", t.get("created_at", "")))
-                    if since and ts and ts < since:
-                        continue
-                    events.append({
-                        "type": "tension",
-                        "timestamp": ts or "",
-                        "severity": t.get("severity", "unknown"),
-                        "description": t.get("description", t.get("message", t.get("type", "tension")))[:200],
-                        "source": t.get("source", t.get("file", "?")),
-                        "target": t.get("target", t.get("related_file")),
-                        "status": t.get("status", "detected"),
-                    })
-
-                # Also get smells
-                raw_smells = await _execute_dcc_tool("cube_detect_smells", {"summary_only": False, "limit": 20}, resolved_dir)
-                if raw_smells:
-                    smell_content = raw_smells
-                    if isinstance(raw_smells, dict) and "content" in raw_smells:
-                        for item in raw_smells["content"]:
-                            if item.get("type") == "text":
-                                try:
-                                    smell_content = json.loads(item["text"])
-                                except Exception as e:
-                                    print(f"[vise] Warning: failed to parse smell JSON: {e}", file=sys.stderr)
-                                    smell_content = raw_smells
-                                break
-
-                    smells_list = []
-                    if isinstance(smell_content, dict):
-                        smells_list = smell_content.get("smells", [])
-                    elif isinstance(smell_content, list):
-                        smells_list = smell_content
-
-                    for s in smells_list[:20]:
-                        ts = s.get("detected_at", s.get("timestamp", ""))
-                        if since and ts and ts < since:
-                            continue
-                        events.append({
-                            "type": "smell",
-                            "timestamp": ts or "",
-                            "severity": s.get("severity", "unknown"),
-                            "description": s.get("description", s.get("smell_type", s.get("type", "smell")))[:200],
-                            "file": s.get("file", s.get("source", "?")),
-                        })
-            except Exception as e:
-                print(f"[vise] Warning: failed to collect DCC timeline events: {e}", file=sys.stderr)
-                pass
-
         # Sort by timestamp (events without timestamps go last)
         events.sort(key=lambda e: e.get("timestamp") or "9999", reverse=False)
 
@@ -503,8 +421,6 @@ def register_graph_management_tools(mcp):
             "event_counts": {
                 "transitions": sum(1 for e in events if e["type"] == "transition"),
                 "commits": sum(1 for e in events if e["type"] == "commit"),
-                "tensions": sum(1 for e in events if e["type"] == "tension"),
-                "smells": sum(1 for e in events if e["type"] == "smell"),
             },
             "project_dir": resolved_dir,
         }

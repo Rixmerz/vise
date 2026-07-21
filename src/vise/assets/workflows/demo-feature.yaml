@@ -7,7 +7,7 @@ id: demo-feature
 name: Demo Feature Development
 description: |
   A 4-phase tutorial flow that demonstrates vise's main enforcement mechanisms:
-  tools_blocked, mcps_enabled, prompt_injection, tension_gate.
+  tools_blocked, mcps_enabled, prompt_injection, node validators.
   Copy this file to a new name and adapt to your own workflows.
 
 nodes:
@@ -48,21 +48,16 @@ nodes:
 
   # -------------------------------------------------------------------
   # Phase 3 — implement
-  # Full Edit/Write access, but a tension gate catches new architecture debt.
+  # Full Edit/Write access; the validate phase gates on tests/lint.
   # -------------------------------------------------------------------
   - id: implement
     name: Implement
-    mcps_enabled: [serena, dcc]
-    tension_gate:
-      blocks_on: [god_file, circular_dependency]
-      max_new:
-        critical: 0
-        high: 3
+    mcps_enabled: [serena]
     prompt_injection: |
       You are in the 'implement' phase. Write the code per the design.
       - Prefer focused commits (one logical change each).
-      - If DCC delta reports new smells between steps, address them before
-        adding more code — technical debt compounds cheaply here.
+      - Keep ruff/mypy (or the project's linter/type checker) clean as you
+        go — the validate phase gates on tests and lint.
       - Advance to 'validate' when tests exist.
 
   # -------------------------------------------------------------------

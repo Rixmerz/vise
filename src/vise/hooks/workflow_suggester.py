@@ -252,7 +252,7 @@ def main() -> None:
         "Multi-step task detected. Before implementing, consider:\n"
         "  1. `graph_list_available` — discover existing workflows (debug, feature-dev, etc.)\n"
         "  2. `graph_activate(name=...)` — pick one if it fits, or build a new one with `graph_builder_create`.\n"
-        "Workflows enforce phase discipline, persist context, and inject DCC/experience feedback at the right moments.\n"
+        "Workflows enforce phase discipline, persist context, and inject experience feedback at the right moments.\n"
         "Skip only if the task truly is single-shot."
     )
     sys.exit(0)

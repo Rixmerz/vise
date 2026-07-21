@@ -534,7 +534,7 @@ async def test_capability_run_async_via_node_gate_no_asyncio_error(
     # RuntimeError("asyncio.run() cannot be called from a running event loop").
     from types import SimpleNamespace
 
-    from vise.engines.dcc_glue import _run_node_validators
+    from vise.engines.node_gate import _run_node_validators
 
     monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
     _patch_capability(

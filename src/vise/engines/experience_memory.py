@@ -1,6 +1,6 @@
-"""Experience Memory System — automatic learning from DCC analysis results.
+"""Experience Memory System — automatic learning from workflow signals.
 
-Collects experiences (tensions, smells, gate blocks, resolutions) and provides
+Collects experiences (smells, gate blocks, resolutions) and provides
 relevance-ranked retrieval for file-level context injection.
 
 Storage (XDG):
@@ -823,7 +823,7 @@ def format_checklist_for_prompt(checklist: dict) -> str:
 
 
 # ============================================================================
-# Public accessors (moved from dcc_integration to break circular deps)
+# Public accessors
 # ============================================================================
 
 _experience_store: "ExperienceMemoryStore | None" = None

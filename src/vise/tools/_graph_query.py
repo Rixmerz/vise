@@ -23,10 +23,6 @@ from vise.engines.graph_state import (
     load_graph_state, initialize_graph_state,
     get_graph_file, get_node_visit_warning,
 )
-from vise.engines.dcc_glue import (
-    _is_dcc_available,
-    _get_tension_gate_info,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -173,16 +169,6 @@ def register_graph_query_tools(mcp):
             "warnings": warnings if warnings else None,
             "enabled": enforcer_config.get("enforcer_enabled", True),
             "prompt_injection": current_node.prompt_injection if current_node else None,
-            "dcc_injection": {
-                "available": _is_dcc_available(),
-                "enabled": enforcer_config.get("dcc_injection_enabled", True),
-                "node_override": current_node.dcc_context if current_node and current_node.dcc_context else None,
-            },
-            "tension_gate": _get_tension_gate_info(current_node, resolved_dir, current_node_id, state),
-            "dcc_status": {
-                "last_analysis": state.last_dcc_result,
-                "timestamp": state.last_dcc_timestamp,
-            },
             "current_outputs": current_outputs,
             "dag_info": dag_info,
             "last_activity": state.last_activity,

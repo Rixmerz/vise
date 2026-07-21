@@ -332,19 +332,6 @@ def parse_graph_yaml(content: str) -> Graph:
         elif not isinstance(tools_blocked, list):
             tools_blocked = []
 
-        # Parse dcc_context (optional)
-        dcc_context = node_data.get('dcc_context')
-        if isinstance(dcc_context, dict):
-            # Normalize: ensure 'analyses' is a list
-            analyses = dcc_context.get('analyses', [])
-            if isinstance(analyses, str):
-                analyses = [analyses]
-            elif not isinstance(analyses, list):
-                analyses = []
-            dcc_context['analyses'] = analyses
-        else:
-            dcc_context = None
-
         # Parse contracts (optional) — list of {"file": "...", "content": "..."}
         contracts_raw = node_data.get('contracts')
         contracts: list[dict] | None = None
@@ -425,7 +412,6 @@ def parse_graph_yaml(content: str) -> Graph:
             is_start=bool(node_data.get('is_start', False)),
             is_end=bool(node_data.get('is_end', False)),
             max_visits=int(node_data.get('max_visits', 10)),
-            dcc_context=dcc_context,
             contracts=contracts,
             node_type=node_type,
             tasks=tasks,

@@ -135,7 +135,7 @@ class TestValidatorsGreenEligibility:
     """Tests for the pass/fail logic in _run_node_validators + engine integration."""
 
     def test_all_validators_green_returns_passed(self, tmp_path: Path) -> None:
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(
             id="impl", name="impl",
@@ -147,7 +147,7 @@ class TestValidatorsGreenEligibility:
         assert result["failed_count"] == 0
 
     def test_one_failing_validator_blocks(self, tmp_path: Path) -> None:
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(
             id="impl", name="impl",
@@ -160,7 +160,7 @@ class TestValidatorsGreenEligibility:
 
     def test_node_with_no_validators_returns_none_fail_closed(self, tmp_path: Path) -> None:
         """Fail-closed: no validators → _run_node_validators returns None."""
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(id="impl", name="impl")  # no validators
         result = asyncio.run(_run_node_validators(node, str(tmp_path)))
@@ -178,7 +178,7 @@ class TestValidatorsGreenEligibility:
         sum(r.weight for r in results) → 0 + '1.0' → TypeError.
         Fix: parse_yaml_simple now calls float() after the int check.
         """
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         # Simulate validators with string-typed weight (the pre-fix state)
         node_str_weight = Node(
@@ -193,7 +193,7 @@ class TestValidatorsGreenEligibility:
 
     def test_weight_as_int_does_not_crash(self, tmp_path: Path) -> None:
         """weight: 1 (integer from YAML) must score correctly — no crash."""
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(
             id="impl", name="impl",
@@ -273,11 +273,11 @@ class TestTraverseValidatorsGreen:
         green_result = {"passed": True, "failed_count": 0, "failed": [], "confidence": 1.0}
 
 
-        with patch("vise.engines.dcc_glue._run_node_validators", new=AsyncMock(return_value=green_result)):
+        with patch("vise.tools._graph_transition._run_node_validators", new=AsyncMock(return_value=green_result)):
             # Directly test the validators_green check in _graph_transition
             # by calling _run_node_validators via the same import the tool uses.
             import asyncio as _asyncio
-            from vise.engines.dcc_glue import _run_node_validators as rvn
+            from vise.tools._graph_transition import _run_node_validators as rvn
             node = graph.nodes["impl"]
             result = _asyncio.run(rvn(node, str(tmp_path), state))
 
@@ -286,7 +286,7 @@ class TestTraverseValidatorsGreen:
 
     def test_traverse_blocked_when_validators_fail(self, tmp_path: Path) -> None:
         """When validators fail, the traverse tool returns validators_green_blocked."""
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(
             id="impl", name="impl",
@@ -298,7 +298,7 @@ class TestTraverseValidatorsGreen:
 
     def test_traverse_blocked_when_no_validators_on_source(self, tmp_path: Path) -> None:
         """Fail-closed: no validators on source node → edge is not eligible."""
-        from vise.engines.dcc_glue import _run_node_validators
+        from vise.engines.node_gate import _run_node_validators
 
         node = Node(id="impl", name="impl")  # no validators declared
         result = asyncio.run(_run_node_validators(node, str(tmp_path)))

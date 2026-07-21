@@ -80,7 +80,7 @@ nodes:
       PHASE: VALIDATE
       Final quality check before committing.
       1. Run linter and type checker (ruff, mypy, tsc, cargo clippy).
-      2. Review DCC smells if available — address critical/high ones.
+      2. Fix every linter/type-checker error before proceeding.
       3. If this feature crosses a SYSTEM BOUNDARY (3rd-party API, CRM,
          webhook, external DB, payment, OAuth): the validate.integration.e2e
          node-gate validator MUST pass — a LIVE request to the deployed

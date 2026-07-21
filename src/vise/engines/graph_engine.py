@@ -98,7 +98,6 @@ class Node:
     is_start: bool = False
     is_end: bool = False
     max_visits: int = 10
-    dcc_context: Optional[dict] = None
     contracts: list[dict] | None = None  # list of {"file": "path", "content": "..."}
     node_type: str = "wave"  # "wave" | "dag" | "milestone" | "advisor-gate"
     tasks: list[Task] = field(default_factory=list)  # Only for node_type="dag"
@@ -280,9 +279,6 @@ class GraphState:
         active_graph: Name of the active graph file
         max_visits_default: Default max visits for nodes without explicit limit
         total_transitions: Total number of transitions made
-        tension_gate_state: Persisted tension gate state per node (key: node_id)
-        last_dcc_result: Last DCC analysis result dict
-        last_dcc_timestamp: ISO timestamp of last DCC analysis
     """
     current_nodes: list[str] = field(default_factory=list)
     node_visits: dict[str, int] = field(default_factory=dict)
@@ -291,10 +287,7 @@ class GraphState:
     max_visits_default: int = 10
     total_transitions: int = 0
     last_activity: Optional[str] = None
-    tension_gate_state: dict[str, dict] = field(default_factory=dict)
     node_gate_state: dict[str, dict] = field(default_factory=dict)
-    last_dcc_result: Optional[dict] = None
-    last_dcc_timestamp: Optional[str] = None
     baseline_smells: list[dict] | None = None
     completed_tasks: dict[str, dict] = field(default_factory=dict)
 

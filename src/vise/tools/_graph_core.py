@@ -5,9 +5,7 @@ The original 1421-line module has been split into three focused modules:
 - _graph_query.py      (~350L): graph_status, graph_check_tool,
                                 graph_check_phrase, graph_get_ready_tasks
 - _graph_mutation.py   (~290L): graph_reset, graph_set_node,
-                                graph_acknowledge_tensions,
-                                graph_record_output, graph_mid_phase_dcc,
-                                graph_task_complete
+                                graph_record_output, graph_task_complete
 - _graph_transition.py (~700L): graph_traverse (the 547-line orchestrator)
                                 + _build_clean_context_briefing
                                 + _target_session_matches_current

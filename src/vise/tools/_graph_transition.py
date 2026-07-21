@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import datetime
 
 from vise.core.session import resolve_project_dir
-from vise.engines.config import load_enforcer_config
 from vise.engines.graph_engine import (
     Graph, GraphState, MaxVisitsExceeded,
     take_transition,
@@ -31,16 +29,7 @@ from vise.engines.graph_state import (
     load_graph_state, save_graph_state, initialize_graph_state,
     get_graph_file,
 )
-from vise.engines.dcc_glue import (
-    _resolve_dcc_config, _run_dcc_analysis,
-    _run_dcc_reindex_incremental, _run_livespec_reindex,
-    _collect_experiences_from_dcc, _check_tension_gate,
-    _run_impact_preview, _execute_dcc_tool,
-    _query_relevant_experiences,
-    _detect_project_languages, _enrich_smells_with_skills,
-    _select_skills_for_context, _record_skill_references,
-    _run_pre_transition_check,
-)
+from vise.engines.node_gate import _run_node_validators
 
 
 # ---------------------------------------------------------------------------
@@ -111,17 +100,13 @@ def _target_session_matches_current(target: str) -> bool:
 def _build_clean_context_briefing(
     prompt_injection: str | None,
     prior_summary: str | None,
-    dcc_result: dict | None,
-    experience_context: list[dict] | None,
-    skill_recs: dict | None,
     dag_schedule: dict | None,
     new_node_id: str,
 ) -> str:
     """Build a compact briefing string for clean_context injection.
 
-    Sections (in order): prior summary, next node, prompt injection, DCC snapshot,
-    experience context, skill recommendations, DAG schedule, next action.
-    Total target: under 6000 chars.
+    Sections (in order): prior summary, next node, prompt injection,
+    DAG schedule, next action. Total target: under 6000 chars.
     """
     MAX_CHARS = 6000
     sections: list[str] = []
@@ -133,42 +118,6 @@ def _build_clean_context_briefing(
 
     if prompt_injection:
         sections.append(prompt_injection.strip())
-
-    if dcc_result and isinstance(dcc_result, dict):
-        smells = dcc_result.get("smells", dcc_result.get("smell_count", None))
-        tensions = dcc_result.get("tension_count", dcc_result.get("tensions", None))
-        lines = ["## DCC snapshot"]
-        if smells is not None:
-            lines.append(f"- Smells: {smells}")
-        if tensions is not None:
-            lines.append(f"- Tensions: {tensions}")
-        if len(lines) > 1:
-            sections.append("\n".join(lines))
-
-    if experience_context:
-        lines = ["## Experience context"]
-        for entry in experience_context[:5]:
-            text = (
-                entry.get("description")
-                or entry.get("summary")
-                or entry.get("content")
-                or str(entry)
-            )
-            lines.append(f"- {str(text)[:120]}")
-        sections.append("\n".join(lines))
-
-    if skill_recs:
-        lines = ["## Skill recommendations"]
-        items = skill_recs if isinstance(skill_recs, list) else skill_recs.get("recommendations", [])
-        for rec in items[:5]:
-            if isinstance(rec, dict):
-                name = rec.get("skill", rec.get("name", ""))
-                rationale = rec.get("rationale", rec.get("reason", ""))
-                lines.append(f"- **{name}**: {str(rationale)[:80]}")
-            else:
-                lines.append(f"- {str(rec)[:100]}")
-        if len(lines) > 1:
-            sections.append("\n".join(lines))
 
     if dag_schedule and isinstance(dag_schedule, dict):
         ready = dag_schedule.get("ready_tasks", [])
@@ -259,50 +208,15 @@ def register_graph_transition_tools(mcp):
                 "project_dir": resolved_dir
             }
 
-        # Tension gate: check if current node blocks exit due to unresolved tensions
         current_node = graph.nodes.get(current_node_id)
-        gate_result = await _check_tension_gate(current_node, resolved_dir, state)
-        if gate_result and gate_result.get("blocked"):
-            # Persist updated gate state (attempt count was incremented)
-            save_graph_state(resolved_dir, state)
-            return {
-                "error": True,
-                "tension_gate_blocked": True,
-                "session_id": sid,
-                "message": (
-                    f"Tension gate blocked: {gate_result['blocking_tensions']} unresolved tension(s) "
-                    f"with severity >= {gate_result['min_severity']}. "
-                    f"Fix the issues and retry, or use graph_acknowledge_tensions() to force advance. "
-                    f"Attempt {gate_result['attempts']}/{gate_result['max_retries']} "
-                    f"(auto-passes after {gate_result['max_retries']})."
-                ),
-                "gate_details": gate_result,
-                "project_dir": resolved_dir
-            }
-
-        # Pre-transition DCC check (optional, configured per-node)
-        pre_check_result = None
-        try:
-            pre_check_result = await _run_pre_transition_check(
-                current_node, resolved_dir, baseline_smells=state.baseline_smells
-            )
-        except Exception:
-            pass  # Non-fatal
-
-        if pre_check_result and pre_check_result.get("blocked"):
-            return {
-                "error": f"Pre-transition DCC check failed: {pre_check_result.get('reason', 'quality gate blocked')}",
-                "pre_check_details": pre_check_result,
-            }
 
         # Node validation gate: block exit if declared validators / recipe fail
         if current_node and (
             getattr(current_node, "validators", None) or getattr(current_node, "recipe", None)
         ):
-            from vise.engines.dcc_glue import _run_node_validators
             node_gate = await _run_node_validators(current_node, resolved_dir, state)
             if node_gate and not node_gate["passed"]:
-                # attempt tracking (mirror tension gate); env escape hatch
+                # attempt tracking; env escape hatch
                 st = state.node_gate_state.setdefault(current_node_id, {"attempts": 0})
                 st["attempts"] += 1
                 save_graph_state(resolved_dir, state)
@@ -325,7 +239,6 @@ def register_graph_transition_tools(mcp):
         # validators_green edge: eligible only when ALL source-node validators pass.
         # Fail-closed: a source node with no validators is NOT eligible.
         if edge.condition.type == "validators_green":
-            from vise.engines.dcc_glue import _run_node_validators
             if not current_node or not (
                 getattr(current_node, "validators", None) or getattr(current_node, "recipe", None)
             ):
@@ -421,102 +334,20 @@ def register_graph_transition_tools(mcp):
         if new_node:
             contracts_written = _write_contract_files(new_node, resolved_dir)
 
-        # Run DCC analysis (global injection -- auto-detects availability)
-        enforcer_config = load_enforcer_config(resolved_dir)
-        should_run, analyses, token_budget = _resolve_dcc_config(new_node, enforcer_config)
-
-        dcc_result = None
-        dcc_raw = {}
-        if should_run:
-            # Reindex changed files before analysis so smells reflect current tree
-            # (HEAD~1 fallback inside _run_dcc_reindex_incremental when no SHA).
-            _prev_sha_for_reindex: str | None = None
-            if len(state.execution_path) >= 2:
-                _prev = state.execution_path[-2]
-                _prev_sha_for_reindex = getattr(_prev, "commit_sha", None)
-            try:
-                await _run_dcc_reindex_incremental(resolved_dir, since_sha=_prev_sha_for_reindex)
-            except Exception as e:
-                print(f"[vise] DCC pre-traverse reindex failed (non-fatal): {e}", file=sys.stderr)
-            # livespec reindex: cheap due to xxh3 hash-check; no-op if nothing changed
-            try:
-                await _run_livespec_reindex(resolved_dir, force=False)
-            except Exception as e:
-                print(f"[vise] livespec pre-traverse reindex failed (non-fatal): {e}", file=sys.stderr)
-            try:
-                dcc_result, dcc_raw = await _run_dcc_analysis(analyses, token_budget, resolved_dir)
-            except Exception as e:
-                dcc_result = {"error": str(e)}
-
-        # Store DCC result in persisted state (1G)
-        if dcc_result is not None:
-            state.last_dcc_result = dcc_result
-            state.last_dcc_timestamp = datetime.now().isoformat()
-            save_graph_state(resolved_dir, state)
-
-        # Record trend snapshot after DCC analysis
+        # Record trend snapshot on transition
         try:
             from vise.engines.graph_state import _get_centralized_state_dir
             from vise.engines.trend_tracker import record_snapshot
             _trend_state_dir = str(_get_centralized_state_dir(resolved_dir))
-            _trend_metrics = {}
-            if dcc_result:
-                # Extract numeric metrics from DCC analysis for trend tracking
-                _dcc_smells = dcc_result.get("smells", "")
-                import re
-                _smell_match = re.search(r"(\d+)\s+smells", str(_dcc_smells))
-                if _smell_match:
-                    _trend_metrics["smell_count"] = int(_smell_match.group(1))
-            record_snapshot(resolved_dir, _trend_state_dir, _trend_metrics)
+            record_snapshot(resolved_dir, _trend_state_dir, {})
         except Exception:
             pass
 
-        # Experience memory: auto-collect from DCC results
-        experience_context: list[dict] = []
-        if dcc_raw:
-            try:
-                _collect_experiences_from_dcc(dcc_raw, resolved_dir)
-            except Exception as e:
-                print(f"[vise] Warning: failed to collect DCC experiences: {e}", file=sys.stderr)
-                pass  # Non-fatal
-            try:
-                experience_context = _query_relevant_experiences(dcc_raw, resolved_dir)
-            except Exception as e:
-                print(f"[vise] Warning: failed to query relevant experiences: {e}", file=sys.stderr)
-
-        # Enrich with skill recommendations (2A, 2B, 2C)
-        skill_recs = None
-        if dcc_raw:
-            try:
-                detected_langs = await _detect_project_languages(resolved_dir)
-                skill_recs = _enrich_smells_with_skills(dcc_raw, detected_langs)
-                contextual = _select_skills_for_context(
-                    skill_recs if skill_recs else {}, new_node, detected_langs
-                )
-                if contextual:
-                    skill_recs["contextual_skills"] = contextual
-            except Exception:
-                pass
-
-        # Feedback loop: record skill references (4C)
-        if skill_recs:
-            try:
-                _record_skill_references(skill_recs, resolved_dir)
-            except Exception:
-                pass
-
-        # Impact preview: simulate wave for nodes with impact_preview configured
-        # Pass the previous node's entry commit SHA so diff is accurate (1C)
+        # Previous node's entry commit SHA (used by enrichers for accurate diffs)
         prev_entry_sha: str | None = None
         if len(state.execution_path) >= 2:
             prev_entry = state.execution_path[-2]
             prev_entry_sha = prev_entry.commit_sha if hasattr(prev_entry, 'commit_sha') else None
-
-        impact_result = None
-        try:
-            impact_result = await _run_impact_preview(new_node, resolved_dir, entry_sha=prev_entry_sha)
-        except Exception as e:
-            impact_result = {"error": str(e)}
 
         # Build prompt_injection, appending previous wave outputs if present
         base_prompt = new_node.prompt_injection if new_node else None
@@ -594,80 +425,6 @@ def register_graph_transition_tools(mcp):
                             if len(_meta_text) <= _budget:
                                 _injections.append(_meta_text)
                                 _budget -= len(_meta_text)
-                except Exception:
-                    pass
-
-                # Security findings for implementation context
-                try:
-                    _findings_result = await _execute_dcc_tool(
-                        "cube_get_findings",
-                        {"status": "open", "limit": 5},
-                        resolved_dir
-                    )
-                    if _findings_result and isinstance(_findings_result, dict):
-                        _findings = _findings_result.get("findings", [])
-                        if _findings and len(_findings) > 0:
-                            # Prioritize findings in files mentioned in the node prompt
-                            _node_text = (new_node.prompt_injection or "") if new_node else ""
-                            if _node_text:
-                                try:
-                                    import re as _re2
-                                    _mentioned_files = set(_re2.findall(r'[\w/.-]+\.\w+', _node_text))
-                                    for _f in _findings:
-                                        _f_path = _f.get("file_path", "")
-                                        _f["_in_prompt"] = any(mf in _f_path for mf in _mentioned_files)
-                                    _sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-                                    _findings.sort(
-                                        key=lambda x: (
-                                            x.get("_in_prompt", False),
-                                            _sev_rank.get(x.get("severity", ""), 0),
-                                        ),
-                                        reverse=True,
-                                    )
-                                except Exception:
-                                    pass
-                            _sec_lines = ["## Security Findings (open)"]
-                            for _f in _findings[:5]:
-                                _sev = _f.get("severity", "?")
-                                _rule = _f.get("rule_id", "?")
-                                _fpath = _f.get("file_path", "?")
-                                _line = _f.get("start_line", "?")
-                                _sec_lines.append(f"- [{_sev}] {_rule} in {_fpath}:{_line}")
-                            _sec_lines.append("→ Use `cube_security_remediation(finding_id)` for fix guidance")
-                            _sec_text = "\n".join(_sec_lines)
-                            if len(_sec_text) <= _budget:
-                                _injections.append(_sec_text)
-                                _budget -= len(_sec_text)
-                except Exception:
-                    pass
-
-                # Semantic file suggestions based on first file path in node prompt
-                try:
-                    import re as _re2
-                    _node_text = (new_node.prompt_injection or "") if new_node else ""
-                    _path_match = _re2.search(
-                        r'(?:internal|src|cmd|app|lib|services|components|pkg)/[\w/.-]+\.\w+',
-                        _node_text,
-                    )
-                    if _path_match:
-                        _ref_file = _path_match.group(0)
-                        _similar = await _execute_dcc_tool(
-                            "cube_find_similar_semantic",
-                            {"file_path": _ref_file, "top_k": 5},
-                            resolved_dir,
-                        )
-                        if _similar and isinstance(_similar, dict):
-                            _matches = _similar.get("matches", [])
-                            if _matches:
-                                _rel_lines = ["## Related Files (semantic)"]
-                                for _m in _matches[:5]:
-                                    _fp = _m.get("file_path", "?")
-                                    _sim = _m.get("similarity", 0)
-                                    _rel_lines.append(f"- `{_fp}` ({_sim:.2f})")
-                                _rel_text = "\n".join(_rel_lines)
-                                if len(_rel_text) <= _budget:
-                                    _injections.append(_rel_text)
-                                    _budget -= len(_rel_text)
                 except Exception:
                     pass
 
@@ -757,21 +514,11 @@ def register_graph_transition_tools(mcp):
             },
             "total_transitions": state.total_transitions,
             "prompt_injection": prompt_injection,
-            "dcc_analysis": dcc_result,
             "contracts_written": contracts_written,
             "dag_schedule": dag_schedule,
             "reason": reason,
             "project_dir": resolved_dir
         }
-
-        if impact_result:
-            result["impact_preview"] = impact_result
-
-        if experience_context:
-            result["experience_context"] = experience_context
-
-        if skill_recs:
-            result["skill_recommendations"] = skill_recs
 
         # clean_context: terminal injection removed with session-operator cluster.
         # The briefing is built but not injected — returned in the response for
@@ -781,9 +528,6 @@ def register_graph_transition_tools(mcp):
                 briefing = _build_clean_context_briefing(
                     prompt_injection=prompt_injection,
                     prior_summary=prior_summary,
-                    dcc_result=dcc_result,
-                    experience_context=experience_context,
-                    skill_recs=skill_recs,
                     dag_schedule=dag_schedule,
                     new_node_id=new_node.id if new_node else edge.to_node,
                 )

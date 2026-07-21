@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Workflow Post-Traverse Hook — PostToolUse for graph_traverse.
 
-Fires after every graph_traverse MCP call and records experience data from
-DCC analysis into the project experience_memory.json file. The frontend
-DCC reindex is triggered internally by WorkflowPanel polling (not this hook).
+Fires after every graph_traverse MCP call and records transition experience
+data into the project experience_memory.json file.
 
 Protocol:
   stdin:  {"tool_name": "mcp__vise__graph_traverse", "tool_result": {...}}
@@ -43,15 +42,12 @@ def _record_experience(result: dict, project_path: str) -> None:
     to_node = result.get("to_node", "")
     edge_id = result.get("traversed_edge", "")
     reason = result.get("reason", "")
-    dcc_analysis = result.get("dcc_analysis")
     impact = result.get("impact_preview", {})
 
     if not from_node and not to_node:
         return
 
     smells_summary = ""
-    if isinstance(dcc_analysis, dict):
-        smells_summary = dcc_analysis.get("smells", "")
 
     # Try to import experience_memory from vise
     wm_src = Path.home() / ".local" / "share" / "vise" / "src"
@@ -80,7 +76,7 @@ def _record_experience(result: dict, project_path: str) -> None:
 
     if changed_files:
         for rel_file in changed_files:
-            entry_type = "smell_introduced" if smells_summary else ("impact_high" if impact else "tension_caused")
+            entry_type = "smell_introduced" if smells_summary else "impact_high"
             description = f"{from_node} → {to_node}: {smells_summary[:120]}" if smells_summary else f"{from_node} → {to_node}"
             entry = ExperienceEntry(
                 type=entry_type,
@@ -99,7 +95,7 @@ def _record_experience(result: dict, project_path: str) -> None:
             store.record(entry)
     else:
         # Fallback: one generic entry scoped to source files
-        entry_type = "smell_introduced" if smells_summary else ("impact_high" if impact else "tension_caused")
+        entry_type = "smell_introduced" if smells_summary else "impact_high"
         description = f"{from_node} → {to_node}: {smells_summary[:120]}" if smells_summary else f"{from_node} → {to_node}"
         entry = ExperienceEntry(
             type=entry_type,

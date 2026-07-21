@@ -212,9 +212,6 @@ def _cmd_reset(args: argparse.Namespace) -> int:
         "max_visits_default": 10,
         "total_transitions": 0,
         "last_activity": None,
-        "tension_gate_state": {},
-        "last_dcc_result": None,
-        "last_dcc_timestamp": None,
         "completed_tasks": {},
     }
 

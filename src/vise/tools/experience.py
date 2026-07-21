@@ -35,7 +35,7 @@ def register_experience(mcp):
         # readOnlyHint: True
         """Query experience memory for relevant memories about a file.
 
-        Returns past experiences (tensions, smells, gate blocks) that are
+        Returns past experiences (smells, gate blocks, resolutions) that are
         relevant to the given file path, ranked by relevance score.
 
         Args:
@@ -219,7 +219,7 @@ def register_experience(mcp):
         """List experience memories with optional filters.
 
         Args:
-            type_filter: Filter by type (e.g. "tension_caused", "smell_introduced")
+            type_filter: Filter by type (e.g. "gate_blocked", "smell_introduced")
             scope_filter: Filter by scope ("global" or "project")
             min_confidence: Minimum confidence threshold (0.0-1.0)
             limit: Maximum entries to return (default 20)

@@ -53,7 +53,7 @@ def load_enforcer_config(project_dir: str) -> dict:
             return json.loads(config_file.read_text())
         except Exception as e:
             print(f"[vise] warning: failed to load enforcer config: {e}", file=sys.stderr)
-    return {"enforcer_enabled": True, "mid_phase_dcc": True}
+    return {"enforcer_enabled": True}
 
 
 def save_enforcer_config(project_dir: str, config: dict) -> None:

@@ -106,7 +106,6 @@ INTERNAL_BINDINGS: dict[str, tuple[str, str]] = {
     "meta.notion_drift": ("notion", "notion_drift_check"),
     "workflow.traverse": ("graph", "graph_traverse"),
     "workflow.status": ("graph", "graph_status"),
-    "code.security.findings": ("dcc", "cube_get_findings"),
     "validate.integration.e2e": ("e2e", "e2e_check"),
 }
 

@@ -74,10 +74,7 @@ def load_graph_state(project_dir: str) -> GraphState:
             max_visits_default=data.get('max_visits_default', 10),
             total_transitions=data.get('total_transitions', 0),
             last_activity=data.get('last_activity'),
-            tension_gate_state=data.get('tension_gate_state', {}),
             node_gate_state=data.get('node_gate_state', {}),
-            last_dcc_result=data.get('last_dcc_result'),
-            last_dcc_timestamp=data.get('last_dcc_timestamp'),
             baseline_smells=data.get('baseline_smells'),
             completed_tasks=data.get('completed_tasks', {}),
         )
@@ -123,10 +120,7 @@ def save_graph_state(project_dir: str, state: GraphState):
         'max_visits_default': state.max_visits_default,
         'total_transitions': state.total_transitions,
         'last_activity': state.last_activity,
-        'tension_gate_state': state.tension_gate_state,
         'node_gate_state': state.node_gate_state,
-        'last_dcc_result': state.last_dcc_result,
-        'last_dcc_timestamp': state.last_dcc_timestamp,
         'completed_tasks': state.completed_tasks,
         **({'baseline_smells': state.baseline_smells} if state.baseline_smells is not None else {}),
     }
