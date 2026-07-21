@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vise": {
+      "command": "vise-mcp",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vise-mcp"
+version = "0.1.0a1"
+description = "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Rixmerz" },
+]
+keywords = ["mcp", "claude-code", "workflow", "agent", "memory", "snapshots"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastmcp>=2.0.0",
+    "fastembed>=0.4.0",
+    "rich",
+    "numpy",
+    "pydantic",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+vise = "vise.cli.main:main"
+vise-mcp = "vise.__main__:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vise"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/vise/assets" = "vise/assets"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/vise",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["src/vise/tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
