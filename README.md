@@ -45,6 +45,8 @@ Inside a Claude Code session with vise loaded:
 3. **Roll back** — `snapshot_list` then `snapshot_restore(snap_id=...)` to undo an edit cycle without `git reset`.
 4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
 
+> Note: vise's MCP tools take a `project_dir` argument — pass the absolute project root on the first call of a session; it is remembered and later calls can omit it.
+
 ## How it works
 
 vise wires into Claude Code through `hooks/hooks.json`:
@@ -103,6 +105,8 @@ uv venv && uv pip install -e '.[dev]'
 python -m pytest src/vise/tests/ -q
 ruff check src/
 ```
+
+Or, to reuse the plugin venv (`~/.local/share/vise/venv`), run `./install.sh --dev` — it additionally installs the `[dev]` extras (pytest, pytest-asyncio, ruff) there.
 
 ## Status
 

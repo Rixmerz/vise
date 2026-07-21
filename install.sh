@@ -6,6 +6,13 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${HOME}/.local/share/vise/venv"
 
+DEV=0
+for arg in "$@"; do
+  case "$arg" in
+    --dev) DEV=1 ;;
+  esac
+done
+
 # 1. claude CLI must exist
 if ! command -v claude >/dev/null 2>&1; then
   echo "error: 'claude' CLI not found in PATH." >&2
@@ -29,6 +36,17 @@ else
   "${VENV_DIR}/bin/python" -c "import fastmcp, fastembed" \
     || { echo "error: venv install failed (fastmcp/fastembed still unimportable)." >&2; exit 1; }
   echo "ok: venv ready at ${VENV_DIR}."
+fi
+
+# 2b. Dev extras (--dev): pytest, pytest-asyncio, ruff into the venv.
+if [ "$DEV" = "1" ]; then
+  if [ ! -x "${VENV_DIR}/bin/python" ]; then
+    mkdir -p "$(dirname "$VENV_DIR")"
+    python3 -m venv "$VENV_DIR"
+    "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
+  fi
+  "${VENV_DIR}/bin/pip" install --quiet -e "${REPO_DIR}[dev]"
+  echo "ok: dev extras installed into ${VENV_DIR}."
 fi
 
 # 3. Register marketplace + install plugin (idempotent).
