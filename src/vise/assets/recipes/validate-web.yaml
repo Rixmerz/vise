@@ -1,0 +1,15 @@
+name: validate-web
+description: >
+  Mechanical web-layout validation via layoutlint (overflow/clip/collision/misalignment/off-page).
+
+inputs:
+  - target
+  - contract
+
+steps:
+  - id: layout
+    capability: validate.web.layout
+    description: Run layoutlint geometric checks against the declared contract.
+    args:
+      target: "{{ inputs.target }}"
+      contract: "{{ inputs.contract }}"

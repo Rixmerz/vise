@@ -14,20 +14,21 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] in ("--help", "-h", "help") or not args:
         print("vise — phase-gated workflows, experience memory, git snapshots")
         print(f"version {__version__}")
-        print("usage: vise [version|graph|help]   (run the MCP server with `vise-mcp`)")
+        print("usage: vise [version|graph|experience|help]   (run the MCP server with `vise-mcp`)")
         return 0
-    if args[0] == "graph":
+    if args[0] in ("graph", "experience"):
         import argparse
 
-        from vise.cli import graph_cmd
+        from vise.cli import experience_cmd, graph_cmd
 
         parser = argparse.ArgumentParser(prog="vise")
         sub = parser.add_subparsers(dest="command")
         graph_cmd.add_parser(sub)
+        experience_cmd.add_parser(sub)
         ns = parser.parse_args(args)
         func = getattr(ns, "func", None)
         if func is None:
-            parser.parse_args(["graph", "--help"])
+            parser.parse_args([args[0], "--help"])
             return 2
         return int(func(ns) or 0)
     print(f"vise: unknown command {args[0]!r}", file=sys.stderr)

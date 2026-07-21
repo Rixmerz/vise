@@ -1,0 +1,4 @@
+check the status of the current deployment
+is the service running and healthy
+show deployment health and uptime
+get the current state of the deployed application

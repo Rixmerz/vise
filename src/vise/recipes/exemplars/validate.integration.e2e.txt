@@ -1,0 +1,6 @@
+send a real request to the deployed endpoint and confirm the side effect landed
+post to the live entrypoint then assert the record exists in the target system
+did the form submission actually create the contact in the CRM
+verify the webhook reached the external system and the row was written
+run a live end-to-end against the real route, not a unit-mocked helper
+confirm the third-party API call actually fired and persisted

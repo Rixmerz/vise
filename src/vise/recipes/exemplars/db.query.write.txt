@@ -1,0 +1,4 @@
+insert a new row into the database
+run an UPDATE or DELETE statement
+write data to the database
+execute a mutating SQL query

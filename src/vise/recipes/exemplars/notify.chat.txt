@@ -1,0 +1,4 @@
+send a message to Slack
+post a notification to a chat channel
+notify the team in Discord or Teams
+send a chat message with this text

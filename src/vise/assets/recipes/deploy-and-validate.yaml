@@ -1,0 +1,32 @@
+name: deploy-and-validate
+description: >
+  Deploy a service, tail its startup logs, and assert the expected
+  health-check string appears within the output.
+
+inputs:
+  - service_name
+  - image_tag
+  - health_pattern
+
+steps:
+  - id: deploy
+    capability: deploy.update
+    description: Roll out the new image to the service
+    args:
+      service: "{{ inputs.service_name }}"
+      image: "{{ inputs.image_tag }}"
+
+  - id: tail
+    capability: deploy.tail_logs
+    description: Capture startup logs from the newly deployed service
+    args:
+      service: "{{ inputs.service_name }}"
+      lines: 100
+
+  - id: validate
+    capability: meta.assert
+    description: Verify the health-check pattern appears in startup logs
+    args:
+      condition: match
+      pattern: "{{ inputs.health_pattern }}"
+      against: "{{ steps.tail.output.logs }}"

@@ -1,0 +1,6 @@
+check the rendered page for layout overflow
+is this component clipped or cut off
+are these elements misaligned or off by pixels
+validate component padding, border, and alignment geometry
+did the image spill outside its box
+is anything off-screen or colliding

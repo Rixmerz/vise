@@ -1,0 +1,4 @@
+create a new deployment
+deploy this application for the first time
+provision and launch a new service instance
+initialize and deploy this project to production

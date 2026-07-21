@@ -1,0 +1,53 @@
+name: loop-ci-sweeper
+description: >
+  L2 assisted CI sweeper: poll deploy/CI status, classify failures with AI,
+  summarise a proposed fix, and PROPOSE a chat notification. The runner
+  halts before sending the notification (notify.chat is a sideeffect) and
+  returns {paused_for_approval} for human sign-off. Graduable to L3 once
+  the D readiness gate passes and JIG_GOAL_GATE=1 is armed.
+  Trigger from an external systemd timer or crontab at the cadence below.
+
+# External scheduler hint:
+#   */30 * * * *  vise recipe run loop-ci-sweeper --input environment=staging
+cadence: "*/30 * * * *"
+
+# Estimated token budget for the D cost gate (author estimate).
+cost: 5000
+
+tier: L2
+
+inputs:
+  - environment  # deploy environment to watch (e.g. "staging", "production")
+
+steps:
+  - id: status
+    capability: deploy.status
+    description: Poll current deploy/CI status for the environment
+    args:
+      environment: "{{ inputs.environment }}"
+
+  - id: classify
+    capability: ai.classify
+    description: Classify any failures reported in the status output
+    args:
+      text: "{{ steps.status.output.status }}"
+      labels:
+        - flaky_test
+        - infra_failure
+        - code_regression
+        - timeout
+        - unknown
+
+  - id: summarize
+    capability: ai.summarize
+    description: Summarise the failure classification and propose a fix workflow
+    args:
+      text: "{{ steps.classify.output.label }}"
+      max_tokens: 512
+
+  - id: notify
+    capability: notify.chat
+    description: >
+      Deliver the fix proposal via chat (L2 halts here for approval).
+    args:
+      message: "{{ steps.summarize.output.summary }}"

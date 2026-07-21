@@ -1,0 +1,4 @@
+format this code file
+auto-format the source code
+run the code formatter on this file
+apply style formatting to the codebase

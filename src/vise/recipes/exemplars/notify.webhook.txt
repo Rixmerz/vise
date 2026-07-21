@@ -1,0 +1,4 @@
+send a webhook notification to this URL
+fire a POST request to this webhook endpoint
+trigger this webhook with a JSON payload
+dispatch an HTTP callback to the registered URL

@@ -1,0 +1,22 @@
+name: scrape-and-store
+description: >
+  Scrape a URL and store the extracted content to a file.
+  Requires web.scrape and fs.write capabilities to be assigned.
+
+inputs:
+  - url
+  - output_path
+
+steps:
+  - id: scrape
+    capability: web.scrape
+    description: Fetch and extract content from the target URL
+    args:
+      url: "{{ inputs.url }}"
+
+  - id: store
+    capability: fs.write
+    description: Persist scraped content to the output file
+    args:
+      path: "{{ inputs.output_path }}"
+      content: "{{ steps.scrape.output.content }}"

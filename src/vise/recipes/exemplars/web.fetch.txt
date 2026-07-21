@@ -1,0 +1,4 @@
+fetch raw HTML from this URL
+download the raw content of a web page
+make an HTTP GET request and return the response body
+retrieve the raw bytes from a remote URL

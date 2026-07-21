@@ -1,0 +1,4 @@
+lint this source file for errors
+run the linter and report issues
+check the code for style and logic violations
+run ruff or eslint on this file

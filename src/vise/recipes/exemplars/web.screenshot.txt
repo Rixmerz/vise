@@ -1,0 +1,4 @@
+take a screenshot of this URL
+capture a visual snapshot of a web page
+render the page and return an image
+screenshot this website

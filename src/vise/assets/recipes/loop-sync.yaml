@@ -1,0 +1,42 @@
+name: loop-sync
+description: >
+  L1 notion-drift report: checks every .claude/notions/*.md file for staleness
+  by comparing its produced_at timestamp against the last-modified time of each
+  path listed in sources_scanned (git log -1 fallback: filesystem mtime). Emits
+  a structured summary of stale notions so the team knows which ones need to be
+  regenerated. Pure read — no writes, no side effects.
+
+# External scheduler hint — vise is not a daemon; the OS fires this line:
+#   0 8 * * *  vise recipe run loop-sync --input project_dir=<path>
+cadence: "0 8 * * *"
+
+# Estimated token budget for the D cost gate (author estimate).
+cost: 1000
+
+tier: L1
+
+inputs:
+  - project_dir   # absolute path to the project being checked
+
+steps:
+  - id: drift
+    capability: meta.notion_drift
+    description: >
+      Scan .claude/notions/ and compare each notion's produced_at timestamp
+      against the last-modified time of every path in sources_scanned.
+      Returns {ok, total, stale_count, fresh_count, notions[]}.
+    args:
+      project_dir: "{{ inputs.project_dir }}"
+
+  - id: summarize
+    capability: ai.summarize
+    description: Summarise the drift report into a human-readable triage note
+    args:
+      text: "{{ steps.drift.output.notions }}"
+      max_tokens: 256
+
+  - id: notify
+    capability: notify.chat
+    description: Deliver the notion-drift summary via chat
+    args:
+      message: "{{ steps.summarize.output.summary }}"

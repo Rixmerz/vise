@@ -1,0 +1,4 @@
+roll back the deployment to the previous version
+revert the service to the last known good release
+undo the last deployment
+restore the prior stable version of the application

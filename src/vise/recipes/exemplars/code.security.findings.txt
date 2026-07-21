@@ -1,0 +1,4 @@
+find security vulnerabilities in this code
+scan for security issues and CVEs
+report security findings for this file
+check for injection flaws and auth issues

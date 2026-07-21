@@ -1,0 +1,4 @@
+show the current workflow status
+what phase is the active workflow on
+report the state of the running workflow graph
+get workflow progress and current node

@@ -1,0 +1,4 @@
+run database migrations
+apply pending schema migrations
+upgrade the database schema to the latest version
+execute alembic or flyway migrations

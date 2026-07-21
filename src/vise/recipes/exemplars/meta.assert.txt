@@ -1,0 +1,4 @@
+assert that this condition is true
+verify this invariant holds
+check that this value matches the expectation
+fail with an error if this assertion does not pass

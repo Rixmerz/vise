@@ -1,0 +1,4 @@
+generate an embedding vector for this text
+embed this sentence into a dense vector
+compute a semantic embedding for this string
+convert this text to a numeric vector representation

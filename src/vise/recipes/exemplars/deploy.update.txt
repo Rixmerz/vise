@@ -1,0 +1,4 @@
+update the existing deployment with new code
+push a new release to the running service
+redeploy the application with the latest changes
+update the live environment to this version

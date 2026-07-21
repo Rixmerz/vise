@@ -1,0 +1,4 @@
+tail the live logs of the deployed service
+stream recent log output from the running deployment
+show the last N lines of the application log
+watch log output from the production service

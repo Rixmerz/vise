@@ -1,0 +1,4 @@
+search for files matching this pattern
+find files containing this text
+grep through the filesystem for this string
+list files matching a glob pattern

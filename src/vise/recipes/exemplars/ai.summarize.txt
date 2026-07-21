@@ -1,0 +1,4 @@
+summarize this document
+generate a concise summary of this text
+produce a TL;DR for this article
+condense this content into key points

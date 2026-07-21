@@ -1,0 +1,4 @@
+list all available tools and capabilities
+show the registered MCP tools
+enumerate what tools vise knows about
+get a list of all proxies and their tools

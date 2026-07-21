@@ -1,0 +1,43 @@
+name: pr-review-bundle
+description: >
+  Run a full PR review bundle: diff the branch, summarise the changes
+  with AI, run security findings, and post a review comment.
+
+inputs:
+  - pr_number
+  - base_branch
+
+steps:
+  - id: diff
+    capability: vcs.diff
+    description: Get the unified diff for the PR
+    args:
+      base: "{{ inputs.base_branch }}"
+      pr: "{{ inputs.pr_number }}"
+
+  - id: summarize
+    capability: ai.summarize
+    description: Produce a concise summary of the diff
+    args:
+      text: "{{ steps.diff.output.diff }}"
+      max_tokens: 512
+
+  - id: security
+    capability: code.security.findings
+    description: Retrieve open security findings for the changed files
+    args:
+      pr: "{{ inputs.pr_number }}"
+
+  - id: comment
+    capability: vcs.pr.comment
+    description: Post the review summary and security findings as a PR comment
+    args:
+      pr: "{{ inputs.pr_number }}"
+      body: |
+        ## AI Review Summary
+
+        {{ steps.summarize.output.summary }}
+
+        ## Security Findings
+
+        {{ steps.security.output.findings }}

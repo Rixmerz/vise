@@ -1,0 +1,8 @@
+the overlay keeps replaying its open animation once a second at rest
+why does the UI flicker and blink when nothing is happening
+the input caret jumps to the start while I am typing
+the button loses its hover state in the middle of a hover
+confirm the region has zero childList mutations at rest over a few seconds
+check node identity is stable across poll ticks with a MutationObserver
+stale data from the previous context flashes for a frame on switch
+verify the poll-driven re-render does not recreate the DOM at rest

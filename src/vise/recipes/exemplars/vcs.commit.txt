@@ -1,0 +1,4 @@
+commit the staged changes to git
+create a git commit with this message
+save changes to the version control history
+commit and push these files

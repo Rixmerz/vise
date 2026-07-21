@@ -1,0 +1,62 @@
+name: loop-pr-babysitter
+description: >
+  L2 assisted loop: watch an open PR — diff it, run tests, check security
+  findings, summarise the result with AI, and PROPOSE a review comment.
+  The runner halts before posting the comment (vcs.pr.comment is a
+  sideeffect) and returns {paused_for_approval} for human sign-off.
+  Trigger from an external systemd timer or crontab at the cadence below.
+
+# External scheduler hint:
+#   0 */2 * * *  vise recipe run loop-pr-babysitter --input pr_number=<N> base_branch=main
+cadence: "0 */2 * * *"
+
+# Estimated token budget for the D cost gate (author estimate).
+cost: 8000
+
+tier: L2
+
+inputs:
+  - pr_number    # PR number to watch
+  - base_branch  # branch to diff against (e.g. "main")
+
+steps:
+  - id: diff
+    capability: vcs.diff
+    description: Fetch the unified diff for the PR
+    args:
+      pr: "{{ inputs.pr_number }}"
+      base: "{{ inputs.base_branch }}"
+
+  - id: tests
+    capability: code.test.run
+    description: Run the test suite against the PR branch
+    args:
+      pr: "{{ inputs.pr_number }}"
+
+  - id: security
+    capability: code.security.findings
+    description: Retrieve open security findings for the changed files
+    args:
+      pr: "{{ inputs.pr_number }}"
+
+  - id: summarize
+    capability: ai.summarize
+    description: Summarise diff, test results, and security findings
+    args:
+      text: "{{ steps.diff.output.diff }}"
+      max_tokens: 768
+
+  - id: comment
+    capability: vcs.pr.comment
+    description: >
+      Post the review summary as a PR comment (L2 halts here for approval).
+    args:
+      pr: "{{ inputs.pr_number }}"
+      body: |
+        ## Automated PR Review
+
+        {{ steps.summarize.output.summary }}
+
+        ## Security Findings
+
+        {{ steps.security.output.findings }}

@@ -1,0 +1,4 @@
+classify this text into a category
+label this document with the correct type
+determine the intent of this message
+categorize this input using a classifier

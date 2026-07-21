@@ -1,0 +1,4 @@
+inspect the database schema
+list all tables and their columns
+describe the structure of this database
+show table definitions and indexes

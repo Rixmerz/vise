@@ -1,0 +1,30 @@
+name: validate-ui-no-flicker
+description: >
+  Real-browser, at-rest flicker check for poll-driven render architectures
+  (pub/sub store, no VDOM/diffing, timer-driven setState). Installs a
+  MutationObserver on the region root and asserts 0 childList mutations over
+  a quiet window with stable node identity. A green typecheck and a passing
+  unit suite say NOTHING about flicker — this recipe is what proves the
+  region survives the poll tick at rest.
+
+# CONTRACT — the bound MCP MUST accept these inputs and return {ok: bool, ...}.
+# Ships UNBOUND on purpose (GAP-first): the intended runner is the `watcher`
+# MCP (eval_js to install a MutationObserver-in-repose, get_tree for node
+# identity). capability_audit surfaces validate.ui.no-flicker as a GAP until
+# you bind a concrete watcher MCP via capability_set.
+inputs:
+  - target        # region root: CSS selector (and url if navigation needed)
+  - window_ms     # quiet observation window at rest (e.g. 3500)
+  - assert        # {childlist_mutations: 0, node_identity_stable: true}
+
+steps:
+  - id: no-flicker
+    capability: validate.ui.no-flicker
+    description: >
+      Bring the region to rest, observe childList mutations on the root over
+      window_ms via MutationObserver, and confirm 0 mutations with stable
+      node identity (same element reference survives the poll ticks).
+    args:
+      target: "{{ inputs.target }}"
+      window_ms: "{{ inputs.window_ms }}"
+      assert: "{{ inputs.assert }}"

@@ -1,0 +1,97 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_suggester.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/graph_enforcer.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_injector.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_recorder.py\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__graph_traverse",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_post_traverse.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__(graph_reset|graph_activate)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_override_detector.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/goal_gate.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

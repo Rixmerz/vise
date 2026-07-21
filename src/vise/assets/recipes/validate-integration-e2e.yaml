@@ -1,0 +1,29 @@
+name: validate-integration-e2e
+description: >
+  Live end-to-end check for a feature crossing a SYSTEM BOUNDARY (3rd-party
+  API, CRM, webhook, external DB, payment). Fires a REAL request at the
+  DEPLOYED entrypoint, then asserts the side-effect record actually exists
+  in the target system. Green unit/integration tests are necessary but NOT
+  sufficient — this recipe is what proves the wire is actually connected.
+
+# CONTRACT — the bound MCP MUST accept these inputs and return {ok: bool, ...}.
+# Ships UNBOUND on purpose: which endpoint and which record to assert is
+# project-specific, so capability_audit surfaces validate.integration.e2e
+# as a GAP until you bind a concrete e2e-runner MCP via capability_set.
+inputs:
+  - target        # URL of the DEPLOYED entrypoint (the real route, not a helper)
+  - method        # HTTP verb the production caller uses (POST, PUT, ...)
+  - payload       # request body mirroring the real client's serialization
+  - assert        # {system, record_query, expect} — the side-effect proof
+
+steps:
+  - id: e2e
+    capability: validate.integration.e2e
+    description: >
+      POST the real payload to the deployed entrypoint, then query the target
+      system to confirm the side-effect record was actually created.
+    args:
+      target: "{{ inputs.target }}"
+      method: "{{ inputs.method }}"
+      payload: "{{ inputs.payload }}"
+      assert: "{{ inputs.assert }}"

@@ -1,0 +1,4 @@
+read the contents of a file
+open and return text from this path
+load a file from the filesystem
+get the content of this local file

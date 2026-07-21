@@ -1,0 +1,4 @@
+run a SELECT query against the database
+read rows from a table
+execute a read-only SQL statement
+fetch records matching this filter from the database

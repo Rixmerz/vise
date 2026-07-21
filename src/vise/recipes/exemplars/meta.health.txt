@@ -1,0 +1,4 @@
+check vise health and version
+report vise system status
+is vise running correctly
+show version and health of the vise service

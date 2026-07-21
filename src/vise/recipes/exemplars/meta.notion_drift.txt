@@ -1,0 +1,8 @@
+check if notion files are stale
+detect drift in project notions
+find outdated notion docs relative to source files
+are any notions stale or out of date
+check which notions need to be refreshed
+scan notion files for freshness against source timestamps
+report drifted notions whose sources changed
+notion staleness check

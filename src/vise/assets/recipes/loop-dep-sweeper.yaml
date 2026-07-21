@@ -1,0 +1,50 @@
+name: loop-dep-sweeper
+description: >
+  L2 assisted dependency sweeper: scan dependency manifests, fetch latest
+  version data, summarise pinned bumps and changelog with AI, and PROPOSE
+  a PR comment with the upgrade plan. The runner halts before posting the
+  comment (vcs.pr.comment is a sideeffect) and returns {paused_for_approval}
+  for human sign-off.
+  Trigger from an external systemd timer or crontab at the cadence below.
+
+# External scheduler hint (weekly, Monday 06:00):
+#   0 6 * * 1  vise recipe run loop-dep-sweeper --input manifest_glob="**/package.json"
+cadence: "0 6 * * 1"
+
+# Estimated token budget for the D cost gate (author estimate).
+cost: 6000
+
+tier: L2
+
+inputs:
+  - manifest_glob  # glob pattern for dependency manifests (e.g. "**/package.json")
+
+steps:
+  - id: scan
+    capability: fs.search
+    description: Locate dependency manifest files matching the glob
+    args:
+      pattern: "{{ inputs.manifest_glob }}"
+
+  - id: fetch_versions
+    capability: web.fetch
+    description: Fetch latest version metadata from the package registry
+    args:
+      url: "https://registry.npmjs.org/-/all/static/today.json"
+
+  - id: summarize
+    capability: ai.summarize
+    description: Propose pinned version bumps and summarise relevant changelogs
+    args:
+      text: "{{ steps.scan.output.results }}"
+      max_tokens: 768
+
+  - id: propose
+    capability: vcs.pr.comment
+    description: >
+      Post the upgrade plan as a PR comment (L2 halts here for approval).
+    args:
+      body: |
+        ## Dependency Sweep Report
+
+        {{ steps.summarize.output.summary }}

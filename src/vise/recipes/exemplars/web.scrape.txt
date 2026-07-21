@@ -1,0 +1,4 @@
+scrape this URL and return cleaned markdown
+extract article body from a webpage
+fetch and parse a web page's main content
+strip boilerplate and return readable text from the page

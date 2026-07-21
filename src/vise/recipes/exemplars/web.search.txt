@@ -1,0 +1,4 @@
+search the web for this query
+find recent articles about this topic online
+run a web search and return top results
+look up this term on the internet

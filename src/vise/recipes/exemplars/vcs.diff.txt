@@ -1,0 +1,4 @@
+show the diff between these two commits
+get the git diff for changed files
+compare working tree to the last commit
+display what changed in this branch

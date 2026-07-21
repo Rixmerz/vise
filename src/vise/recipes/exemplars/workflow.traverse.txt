@@ -1,0 +1,4 @@
+advance to the next workflow phase
+traverse to the next node in the workflow graph
+move the workflow forward one step
+proceed to the next phase of the active workflow

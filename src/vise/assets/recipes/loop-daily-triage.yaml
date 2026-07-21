@@ -1,0 +1,43 @@
+name: loop-daily-triage
+description: >
+  Daily L1 triage loop: scan open security findings, summarise with AI,
+  and deliver a report via chat notification. No writes or side effects —
+  safe to run unattended as a report-only loop. Trigger from an external
+  systemd timer or crontab at the cadence below.
+
+# External scheduler hint — vise is not a daemon; the OS fires this line:
+#   0 9 * * *  vise recipe run loop-daily-triage
+cadence: "0 9 * * *"
+
+# Estimated token budget for the D cost gate (author estimate).
+cost: 4000
+
+tier: L1
+
+inputs:
+  - project_dir   # absolute path to the project being triaged
+
+steps:
+  - id: findings
+    capability: code.security.findings
+    description: Retrieve open security findings for the project
+    args:
+      project: "{{ inputs.project_dir }}"
+
+  - id: health
+    capability: meta.health
+    description: Check vise health status
+    args: {}
+
+  - id: summarize
+    capability: ai.summarize
+    description: Summarise findings and health status into a triage report
+    args:
+      text: "{{ steps.findings.output.findings }}"
+      max_tokens: 512
+
+  - id: notify
+    capability: notify.chat
+    description: Deliver the triage report via chat
+    args:
+      message: "{{ steps.summarize.output.summary }}"
