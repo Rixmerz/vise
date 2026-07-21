@@ -456,6 +456,9 @@ nodes:
     mcps_enabled:
       - "*"
     max_visits: 30
+    validators:
+      - type: tests_pass
+        weight: 1.0
     prompt_injection: |
       ======================================================================
       FASE 7: IMPLEMENTAR FIX

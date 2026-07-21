@@ -443,3 +443,30 @@ class TestFeatureDevGraph:
         assert hasattr(_gt, "register_graph_transition_tools"), (
             "register_graph_transition_tools must still exist in _graph_transition"
         )
+
+
+# ---------------------------------------------------------------------------
+# validator gates on bundled output-producing nodes
+# ---------------------------------------------------------------------------
+
+class TestBundledValidatorGates:
+    """Output-producing nodes in bundled workflows declare node-gate validators."""
+
+    @staticmethod
+    def _load(stem: str):
+        from vise.engines.graph_parser import load_graph_from_file
+        assets_dir = Path(__file__).resolve().parent.parent / "assets" / "workflows"
+        return load_graph_from_file(assets_dir / f"{stem}.yaml")
+
+    def test_feature_dev_test_node_declares_validators(self) -> None:
+        graph = self._load("feature-dev-graph")
+        types = [v["type"] for v in graph.nodes["test"].validators]
+        assert "tests_pass" in types
+        assert "lint_pass" in types
+        assert graph.validate() == []
+
+    def test_debug_fix_node_declares_validators(self) -> None:
+        graph = self._load("debug-graph")
+        types = [v["type"] for v in graph.nodes["fix"].validators]
+        assert "tests_pass" in types
+        assert graph.validate() == []

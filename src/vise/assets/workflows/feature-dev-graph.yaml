@@ -44,6 +44,11 @@ nodes:
 
   - id: "test"
     name: "Test"
+    validators:
+      - type: tests_pass
+        weight: 1.0
+      - type: lint_pass
+        weight: 0.5
     prompt_injection: |
       PHASE: TEST
       Add or update tests covering the new behavior.
