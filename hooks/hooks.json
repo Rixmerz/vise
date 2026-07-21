@@ -81,6 +81,30 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/precompact_state.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/session_restore.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
