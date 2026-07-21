@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 
 mcp: FastMCP = FastMCP(
     name="vise",
+    version=__version__,
     instructions=(
         "vise enforces phase-gated workflows, records cross-project experience "
         "memory, and keeps automatic git snapshots of your edits."
