@@ -17,6 +17,7 @@ nodes:
   # -------------------------------------------------------------------
   - id: understand
     name: Understand
+    is_start: true
     tools_blocked: [Edit, Write]
     mcps_enabled: [serena, sequentialthinking]  # only navigation + reasoning
     prompt_injection: |
@@ -66,6 +67,7 @@ nodes:
   # -------------------------------------------------------------------
   - id: validate
     name: Validate
+    is_end: true
     tools_blocked: [Edit, Write]
     prompt_injection: |
       You are in the 'validate' phase. Goals:
@@ -75,12 +77,16 @@ nodes:
         4. Complete the workflow when the suite is green.
 
 edges:
-  - from: understand
+  - id: understand-to-design
+    from: understand
     to: design
-  - from: design
+  - id: design-to-implement
+    from: design
     to: implement
-  - from: implement
+  - id: implement-to-validate
+    from: implement
     to: validate
-  - from: validate
+  - id: validate-to-implement
+    from: validate
     to: implement      # allow looping back when tests fail
     condition: tests_failing

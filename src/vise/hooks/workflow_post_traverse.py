@@ -42,7 +42,6 @@ def _record_experience(result: dict, project_path: str) -> None:
     to_node = result.get("to_node", "")
     edge_id = result.get("traversed_edge", "")
     reason = result.get("reason", "")
-    impact = result.get("impact_preview", {})
 
     if not from_node and not to_node:
         return
@@ -65,7 +64,7 @@ def _record_experience(result: dict, project_path: str) -> None:
     except ImportError:
         _record_experience_fallback(result, project_path,
                                      from_node, to_node, edge_id, reason,
-                                     smells_summary, impact)
+                                     smells_summary)
         return
 
     project_name = Path(project_path).name
@@ -117,7 +116,7 @@ def _record_experience(result: dict, project_path: str) -> None:
 
 def _record_experience_fallback(result: dict, project_path: str,
                                  from_node: str, to_node: str, edge_id: str,
-                                 reason: str, smells_summary: str, impact: dict) -> None:
+                                 reason: str, smells_summary: str) -> None:
     """Fallback when experience_memory module is unavailable."""
     project_name = Path(project_path).name
     wm_dir = Path.home() / ".local" / "share" / "vise"
