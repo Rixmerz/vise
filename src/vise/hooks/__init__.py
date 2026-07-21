@@ -1,0 +1,1 @@
+"""vise Claude Code hooks."""
