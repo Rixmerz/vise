@@ -42,6 +42,11 @@
             "type": "command",
             "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/edit_feedback.py\"",
+            "timeout": 5
           }
         ]
       },

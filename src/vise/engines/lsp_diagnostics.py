@@ -220,11 +220,14 @@ def _run_mypy(file_path: str) -> list[dict[str, Any]] | None:
 def lsp_diagnostics(
     project_dir: str,
     file_path: str,
+    tools: tuple[str, ...] = ("ruff", "mypy"),
 ) -> dict[str, Any]:
     """Run available checkers on *file_path* and return normalised diagnostics.
 
-    Checkers tried (in order): ruff, mypy.  Each is optional — if absent it is
-    silently skipped.  If ALL are absent the result is ``{"available": False}``.
+    Checkers tried (in order): ruff, mypy — filtered by *tools* (default both;
+    pass ``tools=("ruff",)`` for a fast lint-only pass).  Each is optional — if
+    absent it is silently skipped.  If ALL are absent the result is
+    ``{"available": False}``.
 
     Returns::
 
@@ -242,15 +245,17 @@ def lsp_diagnostics(
         all_diags: list[dict[str, Any]] = []
         tools_run: list[str] = []
 
-        ruff_result = _run_ruff(file_path)
-        if ruff_result is not None:
-            all_diags.extend(ruff_result)
-            tools_run.append("ruff")
+        if "ruff" in tools:
+            ruff_result = _run_ruff(file_path)
+            if ruff_result is not None:
+                all_diags.extend(ruff_result)
+                tools_run.append("ruff")
 
-        mypy_result = _run_mypy(file_path)
-        if mypy_result is not None:
-            all_diags.extend(mypy_result)
-            tools_run.append("mypy")
+        if "mypy" in tools:
+            mypy_result = _run_mypy(file_path)
+            if mypy_result is not None:
+                all_diags.extend(mypy_result)
+                tools_run.append("mypy")
 
         if not tools_run:
             return {
