@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_suggester.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_suggester.py\"",
             "timeout": 3
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/graph_enforcer.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/graph_enforcer.py\"",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_injector.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_injector.py\"",
             "timeout": 5
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
             "timeout": 10
           }
         ]
@@ -50,12 +50,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_recorder.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/experience_recorder.py\"",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\"",
             "timeout": 10
           }
         ]
@@ -65,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_post_traverse.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_post_traverse.py\"",
             "timeout": 10
           }
         ]
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_override_detector.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/workflow_override_detector.py\"",
             "timeout": 5
           }
         ]
@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" python3 \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/goal_gate.py\"",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/goal_gate.py\"",
             "timeout": 10
           }
         ]

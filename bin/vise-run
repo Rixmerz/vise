@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# vise launcher — prefers the dedicated venv created by install.sh,
+# falls back to system python3. Used by .mcp.json and hooks/hooks.json
+# so a single script decides which interpreter runs vise.
+set -euo pipefail
+
+VENV_PY="${HOME}/.local/share/vise/venv/bin/python"
+
+if [ -x "$VENV_PY" ]; then
+  exec "$VENV_PY" "$@"
+fi
+exec python3 "$@"

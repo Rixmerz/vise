@@ -1,0 +1,14 @@
+{
+  "name": "vise",
+  "owner": {
+    "name": "Rixmerz"
+  },
+  "plugins": [
+    {
+      "name": "vise",
+      "source": "./",
+      "description": "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code",
+      "version": "0.1.0a1"
+    }
+  ]
+}
