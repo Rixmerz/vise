@@ -1,44 +1,38 @@
 ---
 name: agent-autoheal
-description: Diagnose a failing subagent and rewrite its .claude/agents/<name>.md definition to prevent recurrence. Use after a subagent returns wrong/incomplete work, fails review, or repeats the same mistake twice.
+description: Two-path protocol for failing subagents. Hot path (during task) — re-brief the same agent with the quoted failure, record the failure shape, escalate after 2 misses; never edits agent files. Cold path (batched heal) — only when experience memory shows >=2 failures of the same shape for one agent, classify root cause and apply ONE surgical fix. Use after a subagent fails review/validators, or when experience_query surfaces a repeat failure pattern for an agent.
 ---
 
 # agent-autoheal
 
-Operational procedure for healing a failing subagent definition.
+## Hot path — during task (cheap, NEVER edits agents)
 
-## 1. Capture evidence
+- Dispatch → review/validators fail → **RE-BRIEF**: re-dispatch the SAME agent, quoting the concrete failure verbatim in the prompt.
+- Pass → done. Record the failure: `experience_record` with tag `agent:<name>` + a short failure-shape slug (e.g. `agent:tester missed-entrypoint`).
+- Fail 2nd time → **escalate**: different agent, or the orchestrator does it. Never a 3rd identical attempt.
 
-- Collect: failing subagent's name, the exact prompt it received, its full report, and the review verdict / diff showing the failure.
-- Quote the actual failure verbatim. Never diagnose from memory or a paraphrase.
+## Cold path — the actual heal (batched, evidence-driven)
 
-## 2. Classify the root cause (pick exactly one)
+**Trigger:** `experience_query` shows ≥2 failures of the SAME shape for `agent:<name>`. One failure = anecdote; two = pattern.
 
-- **(a) Briefing gap** — the prompt lacked context. Fix the orchestrator's dispatch pattern, NOT the agent .md.
-- **(b) Charter gap** — the agent .md is missing a rule/constraint/tool guidance.
-- **(c) Capability gap** — the agent lacks a tool it needs. Add it to frontmatter `tools:`.
-- **(d) Knowledge gap** — a project convention is missing. Add to the agent .md or a runbook.
-- **(e) Model/effort mismatch** — task too hard/easy for the agent's model or effort setting.
+Only then:
 
-## 3. Rewrite
+1. Read the N incidents.
+2. Classify the common root cause (pick one):
+   - **(a) Briefing gap** — fix the orchestrator's dispatch pattern, NOT the agent.
+   - **(b) Charter gap** — add ONE surgical DO/DON'T rule (<10 lines) to `.claude/agents/<name>.md`, with the concrete example from the incidents.
+   - **(c) Tool gap** — add the tool to frontmatter `tools:`.
+   - **(d) Procedure gap** — write/extend a runbook (`.claude/runbooks/<agent>/<case>.md`), not the charter.
+   - **(e) Model/effort mismatch** — adjust model or effort setting.
+3. Apply the one fix.
 
-- Edit `.claude/agents/<name>.md`: add the specific rule derived from the failure, phrased as DO/DON'T with the concrete example from step 1.
-- One failure = one targeted addition. Never rewrite the whole charter.
-- Keep the addition under ~10 lines.
+## Verification
 
-## 4. Record
+- The next REAL dispatch is the test — no synthetic re-runs.
+- Agent .md files are read fresh per spawn — no session restart needed.
 
-- Call `experience_record` with the failure→fix pair so the lesson persists cross-project.
-- If the same failure shape recurs, promote the fix to a runbook (`.claude/runbooks/<agent>/<case>.md`).
+## Guards
 
-## 5. Verify
-
-- Re-dispatch the SAME task to the improved agent.
-- The fix is proven only when the re-run passes review.
-- Agent .md files are read fresh at each spawn — no session restart needed; changes take effect on next dispatch.
-
-## 6. Guards
-
-- Max 2 heal iterations per agent per task; then escalate to human.
-- Never delete existing rules while adding a new one.
-- Keep agent files under ~150 lines; if over, split content into runbooks.
+- Never delete existing rules while adding one.
+- Agent files <150 lines; over → split into runbooks.
+- One incident never justifies a charter edit.
