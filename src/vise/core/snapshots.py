@@ -74,7 +74,36 @@ def _snapshot_id() -> str:
 
 
 def _journal_path(project: Path) -> Path:
-    return paths.ensure(paths.project_state_dir(project)) / "snapshots.jsonl"
+    state_dir = paths.ensure(paths.project_state_dir(project))
+    _ensure_state_dir_gitignored(Path(project))
+    return state_dir / "snapshots.jsonl"
+
+
+def _ensure_state_dir_gitignored(project: Path) -> None:
+    """Ensure `.vise/` is ignored in the target project's .gitignore.
+
+    Idempotent: appends `.vise/` only when the project has a `.git` dir and
+    no existing .gitignore line already covers it. Never raises.
+    """
+    try:
+        if not (project / ".git").is_dir():
+            return
+        gitignore = project / ".gitignore"
+        if gitignore.exists():
+            lines = {
+                line.strip().rstrip("/")
+                for line in gitignore.read_text(encoding="utf-8").splitlines()
+            }
+            if ".vise" in lines or "/.vise" in lines:
+                return
+            existing = gitignore.read_text(encoding="utf-8")
+            prefix = "" if (not existing or existing.endswith("\n")) else "\n"
+            with gitignore.open("a", encoding="utf-8") as fh:
+                fh.write(f"{prefix}.vise/\n")
+        else:
+            gitignore.write_text(".vise/\n", encoding="utf-8")
+    except OSError as exc:
+        log.warning("[vise.snapshot] could not update .gitignore (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------

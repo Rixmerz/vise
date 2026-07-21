@@ -12,14 +12,16 @@ The MCP surface exposes **50 tools** (`graph_*`, `experience_*`, `memory_*`, `sn
 
 vise ships as a Claude Code plugin (`.claude-plugin/plugin.json` + `.mcp.json` + `hooks/hooks.json`) and is marketplace-ready.
 
-The MCP server command is `vise-mcp`, a console script — it must resolve on `PATH`, so the Python package needs to be installed (wheel or editable):
+The MCP server runs directly from the plugin checkout — `.mcp.json` launches `python3 -m vise` with `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src"`, the same portable pattern the hooks use. No installed wheel required for plugin usage.
+
+For non-plugin usage (standalone MCP server on PATH), install the package and use the `vise-mcp` console script instead:
 
 ```sh
 uv venv && uv pip install -e .        # dev
 # or: uv tool install vise-mcp       # once published
 ```
 
-The hook commands do **not** require the wheel — they run via `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 …` directly from the plugin checkout.
+The hook commands likewise run via `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 …` directly from the plugin checkout.
 
 ### Hook wiring (`hooks/hooks.json`)
 

@@ -296,6 +296,50 @@ def test_prune_returns_correct_delete_count(git_repo: Path):
 
 
 # ---------------------------------------------------------------------------
+# .gitignore auto-ignore of .vise/
+# ---------------------------------------------------------------------------
+
+def test_create_adds_vise_to_gitignore_when_missing(git_repo: Path):
+    create(git_repo, label="x")
+    gitignore = git_repo / ".gitignore"
+    assert gitignore.exists()
+    assert ".vise/" in gitignore.read_text(encoding="utf-8").splitlines()
+    # git actually ignores it
+    rc = subprocess.run(
+        ["git", "-C", str(git_repo), "check-ignore", ".vise"],
+        capture_output=True,
+    ).returncode
+    assert rc == 0
+
+
+def test_create_appends_vise_preserving_existing_gitignore(git_repo: Path):
+    (git_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    create(git_repo)
+    lines = (git_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines == ["node_modules/", ".vise/"]
+
+
+def test_create_gitignore_idempotent(git_repo: Path):
+    create(git_repo)
+    create(git_repo)
+    lines = (git_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines.count(".vise/") == 1
+
+
+def test_create_respects_existing_vise_variants(git_repo: Path):
+    (git_repo / ".gitignore").write_text(".vise\n", encoding="utf-8")
+    create(git_repo)
+    text = (git_repo / ".gitignore").read_text(encoding="utf-8")
+    assert text == ".vise\n"  # untouched — already covered
+
+
+def test_gitignore_untouched_outside_git_repo(tmp_path: Path):
+    from vise.core.snapshots import _journal_path
+    _journal_path(tmp_path)
+    assert not (tmp_path / ".gitignore").exists()
+
+
+# ---------------------------------------------------------------------------
 # create_for_phase_transition
 # ---------------------------------------------------------------------------
 

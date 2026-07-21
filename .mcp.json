@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "vise": {
-      "command": "vise-mcp",
-      "args": []
+      "command": "python3",
+      "args": ["-m", "vise"],
+      "env": {
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/src"
+      }
     }
   }
 }
