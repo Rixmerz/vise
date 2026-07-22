@@ -119,6 +119,62 @@ def test_tests_pass_validator_records_source_exit_code_and_log(
     assert "3 passed" in log.read_text(encoding="utf-8")
 
 
+def test_tests_pass_validator_skips_on_pytest_no_tests_collected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    v = TestsPassValidator(weight=0.4)
+    goal = _make_goal(str(tmp_path))
+    mock_result = MagicMock()
+    mock_result.returncode = 5  # pytest: no tests collected
+    mock_result.stdout = "no tests ran in 0.01s\n"
+    mock_result.stderr = ""
+    with patch("shutil.which", return_value="/usr/bin/pytest"), \
+            patch("subprocess.run", return_value=mock_result):
+        result = v.run(goal)
+    assert result.passed is True, "exit 5 (no tests collected) must not block the gate"
+    assert result.exit_code == 5
+    assert "no tests collected" in result.evidence
+    assert result.full_output_path, "exit-5 pass must still persist evidence (auditability)"
+    assert Path(result.full_output_path).exists()
+
+
+def test_tests_pass_validator_uses_vise_test_cmd_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    monkeypatch.setenv("VISE_TEST_CMD", "pnpm check")
+    v = TestsPassValidator(weight=0.4)  # default pytest -> env should win
+    goal = _make_goal(str(tmp_path))
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "ok\n"
+    mock_result.stderr = ""
+    with patch("shutil.which", return_value="/usr/bin/pnpm") as which, \
+            patch("subprocess.run", return_value=mock_result) as run:
+        result = v.run(goal)
+    assert result.passed is True
+    which.assert_called_with("pnpm")  # not pytest
+    assert list(run.call_args.args[0]) == ["pnpm", "check"]
+
+
+def test_tests_pass_validator_env_override_ignored_when_test_cmd_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    monkeypatch.setenv("VISE_TEST_CMD", "pnpm check")
+    v = TestsPassValidator(weight=0.4, test_cmd=("go", "test", "./..."))  # explicit wins
+    goal = _make_goal(str(tmp_path))
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "ok\n"
+    mock_result.stderr = ""
+    with patch("shutil.which", return_value="/usr/bin/go"), \
+            patch("subprocess.run", return_value=mock_result) as run:
+        v.run(goal)
+    assert list(run.call_args.args[0]) == ["go", "test", "./..."]
+
+
 def test_tests_pass_validator_forces_fail_on_failure_marker_despite_exit_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

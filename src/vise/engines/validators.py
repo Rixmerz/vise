@@ -155,16 +155,42 @@ class TestsPassValidator:
     test_cmd: tuple[str, ...] = ("pytest", "-q")
 
     def run(self, goal: Goal) -> ValidatorRecord:
-        if not shutil.which(self.test_cmd[0]):
+        # Set-once project override: the graph node hardcodes `pytest` via
+        # `type: tests_pass`, which is wrong for any non-Python repo. Rather
+        # than autodetect the runner (guessing pm + script name, JS-only,
+        # fragile), let the project name its own test command once in
+        # .claude/settings.json env. Explicit YAML `test_cmd` still wins.
+        cmd = self.test_cmd
+        env_cmd = os.environ.get("VISE_TEST_CMD", "").strip()
+        if env_cmd and cmd == ("pytest", "-q"):
+            import shlex
+            cmd = tuple(shlex.split(env_cmd))
+
+        if not cmd or not shutil.which(cmd[0]):
             return ValidatorRecord(
                 name=self.name, passed=False, confidence_contribution=0.0,
-                weight=self.weight, evidence=f"{self.test_cmd[0]} not on PATH", at=_now(),
+                weight=self.weight, evidence=f"{cmd[0] if cmd else '<empty>'} not on PATH", at=_now(),
                 source="mechanical", exit_code=None,
             )
         r = subprocess.run(
-            list(self.test_cmd), cwd=goal.project_dir,
+            list(cmd), cwd=goal.project_dir,
             capture_output=True, text=True, check=False, timeout=600,
         )
+        # pytest exit 5 = "no tests collected". Non-blocking (blocking here was
+        # the original false negative), but NOT a silent green: the evidence
+        # names the escape hatch so a JS/TS repo that happens to have pytest on
+        # PATH doesn't read as "verified" when zero tests ran. Scoped to pytest;
+        # other runners give exit 5 a different meaning.
+        if cmd[0] == "pytest" and r.returncode == 5:
+            combined = (r.stdout or "") + (r.stderr or "")
+            log_path = _persist_evidence(goal, self.name, combined)
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence="pytest: no tests collected (skipped) — set VISE_TEST_CMD if this repo's tests run elsewhere",
+                at=_now(), source="mechanical", exit_code=r.returncode,
+                full_output_path=log_path,
+            )
         passed = r.returncode == 0
         combined = (r.stdout or "") + (r.stderr or "")
         ev = (r.stdout.splitlines()[-1] if r.stdout else "") or r.stderr[:200]
