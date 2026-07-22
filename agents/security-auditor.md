@@ -2,6 +2,8 @@
 name: security-auditor
 description: Audits code for security findings — auth, input validation, secrets, injection, dependency risk. Use proactively before merging changes to auth, input handling, or other security-sensitive surfaces. Never modifies code.
 model: opus
+effort: high
+color: orange
 disallowedTools: Write, Edit
 skills:
   - ponytail

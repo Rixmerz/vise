@@ -2,6 +2,8 @@
 name: db-migrator
 description: Writes versioned database migrations with mandatory rollbacks. Use proactively for any schema change, index, or data backfill. Never applies manual schema changes.
 model: sonnet
+effort: medium
+color: pink
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - ponytail

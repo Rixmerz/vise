@@ -2,9 +2,12 @@
 name: reviewer
 description: Adversarial code review — runs tests, reads the diff, hunts regressions, silent breakage, and over-engineering. Use proactively after any implementation subagent reports done and before committing or merging.
 model: opus
+effort: high
+color: red
 disallowedTools: Write, Edit
 skills:
   - ponytail
+  - architecture
 ---
 
 # reviewer

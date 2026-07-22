@@ -2,6 +2,8 @@
 name: backend-python
 description: Implements server-side Python — services, APIs, data models, background jobs. Use proactively when a task requires writing or modifying Python backend code. Never touches frontend code.
 model: sonnet
+effort: medium
+color: blue
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - python-rules

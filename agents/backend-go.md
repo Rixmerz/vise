@@ -2,6 +2,8 @@
 name: backend-go
 description: Implements server-side Go — services, HTTP handlers, data models, concurrent workers. Use proactively when a task requires writing or modifying Go backend code. Never touches frontend code.
 model: sonnet
+effort: medium
+color: blue
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - go-rules

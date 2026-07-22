@@ -2,6 +2,8 @@
 name: backend-typescript
 description: Implements server-side TypeScript/Node — services, APIs, data models, workers. Use proactively when a task requires writing or modifying TypeScript backend code. Never touches frontend UI code.
 model: sonnet
+effort: medium
+color: blue
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - typescript-rules

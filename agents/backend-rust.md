@@ -2,6 +2,8 @@
 name: backend-rust
 description: Implements server-side Rust — services, APIs, data models, async workers. Use proactively when a task requires writing or modifying Rust backend code. Never touches frontend code.
 model: sonnet
+effort: medium
+color: blue
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - rust-rules

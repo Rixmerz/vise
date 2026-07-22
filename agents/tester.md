@@ -2,6 +2,8 @@
 name: tester
 description: Writes unit and integration tests that catch real bugs — AAA structure, entrypoint-level coverage, every return path. Use proactively after implementation completes or when a change lands without test coverage.
 model: sonnet
+effort: medium
+color: yellow
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - ponytail

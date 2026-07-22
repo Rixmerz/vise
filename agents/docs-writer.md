@@ -2,6 +2,8 @@
 name: docs-writer
 description: Writes and updates documentation — README, changelogs, API docs. Use proactively after a feature lands or when docs drift from behavior.
 model: sonnet
+effort: low
+color: cyan
 tools: Read, Write, Edit, Glob, Grep
 skills:
   - ponytail

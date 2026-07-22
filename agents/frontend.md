@@ -2,6 +2,8 @@
 name: frontend
 description: Implements frontend UI — components, pages, hooks, state management, styling. Use proactively when a task requires writing or modifying frontend/UI code. Never touches backend code.
 model: sonnet
+effort: medium
+color: green
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - typescript-rules

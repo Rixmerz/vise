@@ -2,6 +2,8 @@
 name: debugger
 description: Diagnoses bugs evidence-first — minimal reproduction, layer attribution, smallest fix. Use proactively when encountering errors, failing tests, or unexpected behavior.
 model: sonnet
+effort: high
+color: purple
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - ponytail
