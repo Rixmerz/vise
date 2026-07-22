@@ -62,5 +62,39 @@ else
   claude plugin install vise@vise
 fi
 
+# 4. LSP binaries: vise declares language servers for 12 ecosystems in
+#    plugin.json, but does NOT ship the binaries. Each server starts lazily
+#    (only when a file of its type is opened) and is a no-op if its command is
+#    absent (strict:false). Report which are present and how to get the rest.
+echo
+echo "LSP language servers (declared by vise, installed separately):"
+_lsp_hints=(
+  "rust-analyzer:rustup component add rust-analyzer"
+  "gopls:go install golang.org/x/tools/gopls@latest"
+  "pyright-langserver:npm i -g pyright"
+  "typescript-language-server:npm i -g typescript typescript-language-server"
+  "clangd:brew install llvm  # or apt install clangd"
+  "intelephense:npm i -g intelephense"
+  "ruby-lsp:gem install ruby-lsp"
+  "lua-language-server:brew install lua-language-server"
+  "jdtls:brew install jdtls"
+  "kotlin-lsp:see github.com/Kotlin/kotlin-lsp"
+  "sourcekit-lsp:ships with the Swift toolchain (swift.org)"
+  "csharp-ls:dotnet tool install --global csharp-ls"
+)
+_missing=0
+for entry in "${_lsp_hints[@]}"; do
+  cmd="${entry%%:*}"; hint="${entry#*:}"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    printf '  \033[32m✓\033[0m %s\n' "$cmd"
+  else
+    printf '  \033[33m·\033[0m %-28s missing — %s\n' "$cmd" "$hint"
+    _missing=$((_missing + 1))
+  fi
+done
+if [ "$_missing" -gt 0 ]; then
+  echo "  ($_missing not installed — that's fine; each stays dormant until you open that language.)"
+fi
+
 echo
 echo "vise installed. Restart Claude Code (or start a new session) to load it."

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: snapshot the workspace + inject a delta summary.
+"""PostToolUse hook: OPT-IN per-edit snapshot + delta summary.
 
-Fires after Bash/Edit/Write tool calls that touched the workspace. Uses
-a lockfile throttle so bursts of edits don't flood the snapshot history.
-When a snapshot is created, computes a lightweight delta (files changed
-since the previous snapshot) and injects it back into Claude's context
-via PostToolUse ``additionalContext``.
+Snapshots are semantic-first: the primary trigger is a workflow *phase
+transition* (``graph_traverse`` -> ``create_for_phase_transition``), which
+yields low-noise, meaningful restore points. This per-edit temporal snapshot
+is redundant with git and noisy across edit bursts, so it is **OFF by
+default** and only runs when ``VISE_SNAPSHOT_ON_EDIT`` is truthy
+(``1``/``true``/``yes``/``on``) — a black-box recorder for users who want it.
+
+When enabled, it fires after Bash/Edit/Write tool calls that touched the
+workspace, uses a lockfile throttle so bursts of edits don't flood the
+snapshot history, and injects a lightweight delta (files changed since the
+previous snapshot) back into Claude's context via ``additionalContext``.
 
 Protocol:
 
@@ -103,6 +109,16 @@ def _emit_context(text: str) -> None:
 def main() -> int:
     payload = _read_input()
     if _should_skip(payload):
+        return 0
+
+    # Snapshots are semantic by default: they fire on workflow phase
+    # transitions (graph_traverse -> create_for_phase_transition), which give
+    # meaningful, low-noise restore points ("roll back the 'implement' phase").
+    # The legacy per-edit temporal snapshot below is redundant with git and
+    # noisy across edit bursts, so it is OFF by default. Opt back in with
+    # VISE_SNAPSHOT_ON_EDIT=1 for a per-edit black-box recorder.
+    _optin = os.environ.get("VISE_SNAPSHOT_ON_EDIT", "").strip().lower()
+    if _optin not in ("1", "true", "yes", "on"):
         return 0
 
     project = _project_dir()
