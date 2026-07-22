@@ -211,14 +211,29 @@ class LintPassValidator:
     name: str = "lint_pass"
 
     def run(self, goal: Goal) -> ValidatorRecord:
-        if not shutil.which("ruff"):
+        # Set-once project override, mirroring tests_pass/VISE_TEST_CMD: the node
+        # hardcodes ruff, wrong for any non-Python repo. Let the project name its
+        # own lint command once in .claude/settings.json env.
+        env_cmd = os.environ.get("VISE_LINT_CMD", "").strip()
+        if env_cmd:
+            import shlex
+            cmd: tuple[str, ...] = tuple(shlex.split(env_cmd))
+        else:
+            cmd = ("ruff", "check", ".", "--exclude", ".claude")
+
+        if not cmd or not shutil.which(cmd[0]):
+            # Lint is advisory (low weight). A missing linter must NOT block the
+            # gate on a repo that simply doesn't use it — skip-pass (fail-open),
+            # consistent with lsp_clean. Evidence names the escape hatch.
+            missing = cmd[0] if cmd else "<empty>"
             return ValidatorRecord(
-                name=self.name, passed=False, confidence_contribution=0.0,
-                weight=self.weight, evidence="ruff missing", at=_now(),
-                source="mechanical", exit_code=None,
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence=f"lint skipped: {missing} not on PATH — set VISE_LINT_CMD to lint this repo",
+                at=_now(), source="asserted", exit_code=None,
             )
         r = subprocess.run(
-            ["ruff", "check", ".", "--exclude", ".claude"], cwd=goal.project_dir,
+            list(cmd), cwd=goal.project_dir,
             capture_output=True, text=True, check=False, timeout=60,
         )
         passed = r.returncode == 0
@@ -519,6 +534,38 @@ class LspCleanValidator:
             )
 
 
+@dataclass
+class UnknownValidator:
+    """Fail-closed stand-in for a validator config with an unrecognized type.
+
+    Built by ``build_validators`` when a config's ``type``/``name`` matches no
+    registry key. Always fails so a typo — or a validator from a newer vise the
+    current install can't run — blocks the gate instead of passing unchecked.
+    """
+    bad_type: str
+    weight: float = 1.0
+    name: str = "unknown_validator"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        return ValidatorRecord(
+            name=self.name, passed=False, confidence_contribution=0.0,
+            weight=self.weight,
+            evidence=(
+                f"unknown validator type {self.bad_type!r} — fix the graph or "
+                f"upgrade vise; valid types: {sorted(_REGISTRY)}"
+            ),
+            at=_now(), source="mechanical", exit_code=None,
+        )
+
+
+def _isfloatable(v: Any) -> bool:
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 # --- registry --------------------------------------------------------------
 
 _REGISTRY: dict[str, Callable[..., Validator]] = {
@@ -548,6 +595,15 @@ def build_validators(configs: list[dict]) -> list[Validator]:
             if name_as_type in _REGISTRY:
                 t = name_as_type
             else:
+                # Fail closed: silently dropping an unknown type let the node
+                # pass with nothing checked (false green). A synthetic failing
+                # validator surfaces the misconfig without crashing either path
+                # — a typo OR a newer-version validator this vise can't enforce
+                # must block, not pass unseen.
+                out.append(UnknownValidator(
+                    bad_type=str(t if t is not None else cfg.get("name")),
+                    weight=float(cfg.get("weight", 1.0)) if _isfloatable(cfg.get("weight")) else 1.0,
+                ))
                 continue
         kwargs = {k: v for k, v in cfg.items() if k not in ("type", "name")}
         if "cmd" in kwargs and isinstance(kwargs["cmd"], list):

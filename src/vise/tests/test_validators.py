@@ -12,6 +12,7 @@ from vise.engines.validators import (
     CapabilityValidator,
     CommandExitValidator,
     FileExistsValidator,
+    LintPassValidator,
     TestsPassValidator,
     aggregate_confidence,
     build_validators,
@@ -192,6 +193,46 @@ def test_tests_pass_validator_forces_fail_on_failure_marker_despite_exit_zero(
     assert "forced-fail" in result.evidence
 
 
+def test_lint_pass_skips_open_when_linter_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VISE_LINT_CMD", raising=False)
+    v = LintPassValidator()
+    goal = _make_goal(str(tmp_path))
+    with patch("shutil.which", return_value=None):
+        result = v.run(goal)
+    assert result.passed is True, "missing linter must not block the gate (advisory)"
+    assert "VISE_LINT_CMD" in result.evidence
+
+
+def test_lint_pass_uses_vise_lint_cmd_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VISE_LINT_CMD", "pnpm lint")
+    v = LintPassValidator()
+    goal = _make_goal(str(tmp_path))
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "ok\n"
+    mock_result.stderr = ""
+    with patch("shutil.which", return_value="/usr/bin/pnpm") as which, \
+            patch("subprocess.run", return_value=mock_result) as run:
+        result = v.run(goal)
+    assert result.passed is True
+    which.assert_called_with("pnpm")  # not ruff
+    assert list(run.call_args.args[0]) == ["pnpm", "lint"]
+
+
+def test_build_validators_unknown_type_fails_closed() -> None:
+    from types import SimpleNamespace
+
+    vs = build_validators([{"type": "test_pass"}])  # typo of tests_pass
+    assert len(vs) == 1
+    rec = vs[0].run(SimpleNamespace(project_dir="/tmp"))
+    assert rec.passed is False, "unknown validator type must block the gate, not vanish"
+    assert "unknown validator type" in rec.evidence
+
+
 def test_file_exists_validator_fails_listing_missing(tmp_path: Path) -> None:
     v = FileExistsValidator(paths=("missing_file.txt",), weight=0.5)
     goal = _make_goal(str(tmp_path))
@@ -322,14 +363,18 @@ def test_build_validators_reads_config_list(tmp_path: Path) -> None:
     assert vs[1].name == "command_exit"
 
 
-def test_build_validators_ignores_unknown_type() -> None:
+def test_build_validators_unknown_type_yields_failing_validator() -> None:
+    from vise.engines.validators import UnknownValidator
+
     configs = [
         {"type": "totally_unknown_type", "weight": 0.5},
         {"type": "files_exist", "paths": ["x.txt"], "weight": 0.5},
     ]
     vs = build_validators(configs)
-    assert len(vs) == 1
-    assert vs[0].name == "files_exist"
+    assert len(vs) == 2, "unknown type is kept as a fail-closed validator, not dropped"
+    unknown = [v for v in vs if isinstance(v, UnknownValidator)]
+    assert len(unknown) == 1
+    assert unknown[0].weight == pytest.approx(0.5)
 
 
 def test_build_validators_converts_lists_to_tuples() -> None:
@@ -361,11 +406,13 @@ def test_build_validators_type_takes_precedence_over_name() -> None:
     assert vs[0].name == "lint_pass"
 
 
-def test_build_validators_name_unknown_is_still_skipped() -> None:
-    """name that doesn't match any registry key should be skipped, not crash."""
+def test_build_validators_name_unknown_fails_closed() -> None:
+    """A name that matches no registry key becomes a fail-closed validator, not a silent drop."""
+    from vise.engines.validators import UnknownValidator
+
     configs = [{"name": "totally_bogus_validator", "weight": 0.5}]
     vs = build_validators(configs)
-    assert vs == []
+    assert len(vs) == 1 and isinstance(vs[0], UnknownValidator)
 
 
 def test_build_validators_name_fallback_does_not_pass_name_as_kwarg() -> None:
