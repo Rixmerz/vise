@@ -1,11 +1,12 @@
 ---
 name: go-rules
-description: Go coding conventions — context discipline, error wrapping, goroutine safety, small interfaces. Use when writing or reviewing Go code.
+description: Go coding conventions — context discipline, error wrapping, goroutine safety, small interfaces. Use ONLY when the file under edit or review is Go (.go); do NOT apply to any other language.
 ---
 
 # Go Rules
 
-> Always apply these rules when writing or reviewing Go code.
+> Apply ONLY when the file under edit or review is Go (`.go`). If the current
+> file is not Go, do not use this skill — it does not apply to other languages.
 
 ## DO
 - `context.Context` always first parameter

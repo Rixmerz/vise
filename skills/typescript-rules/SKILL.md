@@ -1,11 +1,13 @@
 ---
 name: typescript-rules
-description: TypeScript coding conventions — strict types, discriminated unions, boundary validation. Use when writing or reviewing TypeScript code.
+description: TypeScript coding conventions — strict types, discriminated unions, boundary validation. Use ONLY when the file under edit or review is TypeScript/JavaScript (.ts/.tsx/.js/.jsx); do NOT apply to any other language.
 ---
 
 # TypeScript Rules
 
-> Always apply these rules when writing or reviewing TypeScript code.
+> Apply ONLY when the file under edit or review is TypeScript/JavaScript
+> (`.ts`/`.tsx`/`.js`/`.jsx`). If the current file is not TS/JS, do not use this
+> skill — it does not apply to other languages.
 
 ## DO
 - Use `strict: true` in tsconfig

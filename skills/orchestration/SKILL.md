@@ -20,6 +20,7 @@ agent carries nothing. Pass its name as `subagent_type`.
 | Work | Agent |
 |------|-------|
 | Server-side Python / Go / Rust / TypeScript | `vise:backend-python` · `vise:backend-go` · `vise:backend-rust` · `vise:backend-typescript` |
+| Server-side Java / C# / Kotlin / Ruby / PHP / C·C++ | `vise:backend-java` · `vise:backend-csharp` · `vise:backend-kotlin` · `vise:backend-ruby` · `vise:backend-php` · `vise:backend-cpp` |
 | UI — components, pages, hooks, styling | `vise:frontend` |
 | Schema change, index, data backfill | `vise:db-migrator` |
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |

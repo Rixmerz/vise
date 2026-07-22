@@ -1,11 +1,12 @@
 ---
 name: rust-rules
-description: Rust coding conventions — error handling, ownership idioms, unsafe discipline, cargo tooling. Use when writing or reviewing Rust code.
+description: Rust coding conventions — error handling, ownership idioms, unsafe discipline, cargo tooling. Use ONLY when the file under edit or review is Rust (.rs); do NOT apply to any other language.
 ---
 
 # Rust Rules
 
-> Always apply these rules when writing or reviewing Rust code.
+> Apply ONLY when the file under edit or review is Rust (`.rs`). If the current
+> file is not Rust, do not use this skill — it does not apply to other languages.
 
 ## DO
 - Use `?` for error propagation

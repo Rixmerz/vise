@@ -1,11 +1,13 @@
 ---
 name: python-rules
-description: Python coding conventions — modern typing, async discipline, safe subprocess, tooling. Use when writing or reviewing Python code.
+description: Python coding conventions — modern typing, async discipline, safe subprocess, tooling. Use ONLY when the file under edit or review is Python (.py/.pyi); do NOT apply to any other language.
 ---
 
 # Python Rules
 
-> Always apply these rules when writing or reviewing Python code.
+> Apply ONLY when the file under edit or review is Python (`.py`/`.pyi`). If the
+> current file is not Python, do not use this skill — it does not apply to other
+> languages.
 
 ## DO
 - Use type hints on all function signatures

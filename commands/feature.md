@@ -1,6 +1,7 @@
 ---
 description: Start the phase-gated feature workflow — design → implement → test → validate → commit
 argument-hint: <what to build>
+effort: high
 ---
 
 Drive this feature through the vise `feature-dev` workflow.

@@ -1,5 +1,6 @@
 ---
 description: Show where the active vise workflow and goal stand right now
+effort: low
 ---
 
 Report the current vise state concisely:

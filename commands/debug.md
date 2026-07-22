@@ -1,6 +1,7 @@
 ---
 description: Start the evidence-first debug workflow — reproduce → classify → analyze → fix → verify
 argument-hint: <the bug / failing behavior>
+effort: high
 ---
 
 Drive this bug through the vise `debug` workflow.
