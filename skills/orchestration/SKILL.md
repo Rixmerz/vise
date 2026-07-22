@@ -11,6 +11,27 @@ work from a self-contained brief. Never delegate thinking — architecture,
 naming, tradeoff analysis stay with the engineer. Aggressively delegate
 execution — grepping, multi-file edits, test writing, scans.
 
+## The fleet — dispatch by name, not `general-purpose`
+
+vise ships specialist agents. Delegate to the one that matches the work — a
+named specialist carries its own coding rules and effort tuning; a generic
+agent carries nothing. Pass its name as `subagent_type`.
+
+| Work | Agent |
+|------|-------|
+| Server-side Python / Go / Rust / TypeScript | `vise:backend-python` · `vise:backend-go` · `vise:backend-rust` · `vise:backend-typescript` |
+| UI — components, pages, hooks, styling | `vise:frontend` |
+| Schema change, index, data backfill | `vise:db-migrator` |
+| A bug — reproduce, attribute, smallest fix | `vise:debugger` |
+| Unit / integration tests for landed code | `vise:tester` |
+| README, changelog, API docs | `vise:docs-writer` |
+| Adversarial review before commit/merge | `vise:reviewer` (read-only) |
+| Security surface (auth, input, secrets) | `vise:security-auditor` (read-only) |
+
+Match the backend agent to the file's language, not the task's vibe. No
+specialist fits (infra, config, glue) → `general-purpose`. Design/naming/
+tradeoffs are never in this table — those stay with the engineer.
+
 ## Maximize parallelism
 
 - Independent tasks → multiple Agent calls in **one message**. Frontend +

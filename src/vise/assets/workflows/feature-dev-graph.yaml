@@ -36,7 +36,11 @@ nodes:
     #   - {type: capability, capability: "validate.web.layout", args: {target: "<url>", contract: {}}, weight: 1.0}
     prompt_injection: |
       PHASE: IMPLEMENT
-      Write the code following the design. Use Edit/Write/Bash freely.
+      Build the code following the design. Delegate execution to the matching
+      specialist (see the orchestration skill's fleet table): backend work to
+      vise:backend-<lang>, UI to vise:frontend, schema to vise:db-migrator.
+      Independent streams (backend + frontend + db) → dispatch in parallel,
+      partitioned by file ownership. Do trivial/glue edits yourself.
       1. Implement layer by layer: data → service → handler.
       2. Match existing naming and error-handling conventions.
       3. Keep changes focused — avoid unrelated refactors.
