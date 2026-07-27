@@ -12,10 +12,10 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
 - **Git snapshots** — automatic orphan-ref snapshots (`refs/vise/snapshots/<id>`) after every edit cycle (30 s throttle). Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal.
-- **Recipes & capabilities** — declarative multi-step recipes (`recipe_run`) with capability bindings that survive MCP renames.
+- **Recipes & capabilities** — declarative multi-step recipes with capability bindings that survive MCP renames. `recipe_run` resolves a recipe into an ordered **plan** and hands it back for *you* to execute: vise is an MCP server and cannot call another server's tools, so it advises and Claude Code acts — the same division as `graph_traverse`'s prompt injection. A step whose capability is unbound halts the plan and names `capability_set`.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
 
-The MCP surface exposes **50 tools**: `graph_*`, `experience_*`, `snapshot_*`, `goal_*`, `recipe_*`, `capability_*`, `vise_version`, …
+The MCP surface exposes **49 tools**: `graph_*` (27), `goal_*` (7), `experience_*` (5), `snapshot_*` (4), `recipe_*` (3), `capability_*` (2), `vise_version`. Counted from the registry, not by hand — `test_asset_honesty.py` holds the authoritative list.
 
 ## Install
 

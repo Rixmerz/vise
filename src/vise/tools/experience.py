@@ -81,18 +81,18 @@ def register_experience(mcp):
         scored.sort(key=lambda x: x[1], reverse=True)
         top = scored[:top_n]
 
-        # Record recall for returned entries (FSRS bump: last_reviewed + stability)
-        _dirty_stores: set[int] = set()
+        # Record recall for returned entries (FSRS bump: last_reviewed + stability).
+        # Keyed by id() because the stores are not hashable; holding the object
+        # itself means each dirty store is saved exactly once without a second
+        # pass re-deriving it from `top`.
+        _dirty_stores: dict[int, object] = {}
         for entry, _score in top:
             store = stores_by_entry.get(entry.id)
             if store is not None:
                 store._bump_recall(entry)  # type: ignore[attr-defined]
-                _dirty_stores.add(id(store))
-        for store_id in _dirty_stores:
-            for s in [stores_by_entry.get(e.id) for e, _ in top]:
-                if s is not None and id(s) == store_id:
-                    s.save()  # type: ignore[attr-defined]
-                    break
+                _dirty_stores[id(store)] = store
+        for store in _dirty_stores.values():
+            store.save()  # type: ignore[attr-defined]
 
         return {
             "file_path": file_path,
