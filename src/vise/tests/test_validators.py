@@ -629,6 +629,57 @@ async def test_capability_run_async_envelope_is_error_fails(
     assert rec.exit_code == 1
 
 
+def test_capability_run_sync_undispatchable_stub_fails_without_blaming_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A resolved capability whose _call_tool returns vise's own 'no dispatch
+    layer' stub must fail, name the tool + args, and NOT say 'bind via
+    capability_set' — the binding is fine, vise just can't dispatch it."""
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    _patch_capability(
+        monkeypatch, resolved=("layoutlint", "check"),
+        tool_output={
+            "status": "unresolved",
+            "reason": "no MCP dispatch layer — bind capabilities to built-in handlers or run in-host",
+            "mcp_name": "layoutlint",
+            "tool_name": "check",
+        },
+    )
+    v = CapabilityValidator(capability="validate.web.layout", args={"target": "x"})
+    rec = v.run(_make_goal(str(tmp_path)))
+    assert rec.passed is False
+    assert "layoutlint.check" in rec.evidence
+    assert "target" in rec.evidence
+    assert "capability_set" not in rec.evidence
+
+
+def test_capability_validator_unresolved_still_blames_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The distinct unresolved-capability path (resolve_capability returns
+    None) must keep the capability_set guidance — that IS the fix there."""
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    _patch_capability(monkeypatch, resolved=None, tool_output=None)
+    v = CapabilityValidator(capability="validate.web.layout")
+    rec = v.run(_make_goal(str(tmp_path)))
+    assert rec.passed is False
+    assert "capability_set" in rec.evidence
+
+
+def test_capability_run_sync_monkeypatched_dispatcher_still_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The in-host embedding seam survives: a monkeypatched _call_tool
+    returning a real successful result must still pass the gate."""
+    monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
+    _patch_capability(
+        monkeypatch, resolved=("layoutlint", "check"), tool_output={"ok": True},
+    )
+    v = CapabilityValidator(capability="validate.web.layout", args={"target": "x"})
+    rec = v.run(_make_goal(str(tmp_path)))
+    assert rec.passed is True
+
+
 @pytest.mark.asyncio
 async def test_capability_run_async_via_node_gate_no_asyncio_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

@@ -123,6 +123,21 @@ def _unwrap_tool_output(output: Any) -> tuple[Any, bool]:
     return output, False
 
 
+def _is_dispatch_stub(output: Any, mcp: str, tool: str) -> bool:
+    """True if *output* is vise's own ``_call_tool`` stub reply — i.e. the
+    capability resolved fine, but vise has no dispatch layer to actually call
+    it (as opposed to the capability being unresolved, which fails earlier in
+    ``CapabilityValidator._resolve`` and must keep blaming the binding).
+    """
+    return (
+        isinstance(output, dict)
+        and output.get("status") == "unresolved"
+        and output.get("mcp_name") == mcp
+        and output.get("tool_name") == tool
+        and "no MCP dispatch layer" in str(output.get("reason", ""))
+    )
+
+
 def _capability_passed(unwrapped: Any, is_error: bool) -> bool:
     """Pass predicate shared by run/run_async.
 
@@ -357,12 +372,29 @@ class CapabilityValidator:
             )
         return resolved
 
-    def _record_from_output(self, goal, output: Any) -> ValidatorRecord:
+    def _record_from_output(self, goal, mcp: str, tool: str, output: Any) -> ValidatorRecord:
         """Build a ValidatorRecord from a raw ``_call_tool`` return.
 
         Unwraps the MCP JSON-RPC envelope, applies the shared pass predicate,
         and persists the unwrapped summary as evidence. Shared by run/run_async.
+
+        A resolved capability vise itself cannot dispatch (the ``_call_tool``
+        stub) is a distinct failure mode from "unresolved" — the binding is
+        fine, vise just has no cross-MCP dispatch layer. Never blame
+        ``capability_set`` for that; tell the caller which tool to run.
         """
+        if _is_dispatch_stub(output, mcp, tool):
+            evidence = (
+                f"capability '{self.capability}' resolved to {mcp}.{tool} but vise "
+                f"has no dispatch layer to call it — run {mcp}.{tool} with args "
+                f"{self.args!r} yourself, then re-traverse to record the result"
+            )
+            log_path = _persist_evidence(goal, self.name, evidence)
+            return ValidatorRecord(
+                name=self.name, passed=False, confidence_contribution=0.0,
+                weight=self.weight, evidence=evidence[:500], at=_now(),
+                source="mechanical", exit_code=None, full_output_path=log_path,
+            )
         unwrapped, is_error = _unwrap_tool_output(output)
         passed = _capability_passed(unwrapped, is_error)
         combined = repr(unwrapped)
@@ -399,7 +431,7 @@ class CapabilityValidator:
             output = asyncio.run(_call_tool(mcp, tool, self.args))
         except Exception as e:
             return self._record_from_raise(goal, mcp, tool, e)
-        return self._record_from_output(goal, output)
+        return self._record_from_output(goal, mcp, tool, output)
 
     async def run_async(self, goal) -> ValidatorRecord:
         """Loop-aware path for the node-gate (already inside a running loop).
@@ -417,7 +449,7 @@ class CapabilityValidator:
             output = await _call_tool(mcp, tool, self.args)
         except Exception as e:
             return self._record_from_raise(goal, mcp, tool, e)
-        return self._record_from_output(goal, output)
+        return self._record_from_output(goal, mcp, tool, output)
 
 
 # --- lsp_clean validator ---------------------------------------------------
