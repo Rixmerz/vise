@@ -4,13 +4,13 @@ Phase-gated workflows, cross-project experience memory, and git snapshots for Cl
 
 [![status: alpha](https://img.shields.io/badge/status-alpha-orange)]() [![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)]() [![license: MIT](https://img.shields.io/badge/license-MIT-green)]()
 
-vise is a Python MCP server + hook suite that gives Claude Code sessions structure and memory: workflows are enforced as directed graphs of phases, learnings persist across projects, and every edit cycle is snapshotted for instant rollback.
+vise is a Python MCP server + hook suite that gives Claude Code sessions structure and memory: workflows are enforced as directed graphs of phases, learnings persist across projects, and workflow phase transitions are snapshotted for instant rollback (opt-in per-edit snapshots also available).
 
 ## Features
 
 - **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, …) plus a `graph_builder_*` API to author your own.
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
-- **Git snapshots** — automatic orphan-ref snapshots (`refs/vise/snapshots/<id>`) after every edit cycle (30 s throttle). Restore any snapshot without touching your branch or reflog.
+- **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal.
 - **Recipes & capabilities** — declarative multi-step recipes with capability bindings that survive MCP renames. `recipe_run` resolves a recipe into an ordered **plan** and hands it back for *you* to execute: vise is an MCP server and cannot call another server's tools, so it advises and Claude Code acts — the same division as `graph_traverse`'s prompt injection. A step whose capability is unbound halts the plan and names `capability_set`.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
@@ -56,7 +56,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 | UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
-| PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) |
+| PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) — **opt-in**, no-ops unless `VISE_SNAPSHOT_ON_EDIT` is truthy |
 | PostToolUse | `Bash` | `experience_recorder.py` | Records learnings from commit `Why:` messages |
 | PostToolUse | `mcp__.*__graph_traverse` | `workflow_post_traverse.py` | Post-phase feedback |
 | PostToolUse | `mcp__.*__(graph_reset\|graph_activate)` | `workflow_override_detector.py` | Detects workflow overrides |
@@ -92,11 +92,13 @@ Environment variables (all optional):
 | `VISE_AUTO_ACTIVATE` | Auto-activate suggested workflows |
 | `VISE_WORKFLOW_SUGGEST` | Toggle the workflow suggester hook |
 | `VISE_NODE_GATE_OVERRIDE` | One-shot bypass of a node validator gate |
+| `VISE_SNAPSHOT_ON_EDIT` | Enable per-edit snapshot capture (off by default; phase-transition snapshots always fire) |
 | `VISE_AUTONOMY` | Autonomy level for loop recipes |
 | `VISE_LOOP_COST_CAP` | Cost cap for loop recipes |
 | `VISE_EMBED_MODEL` / `VISE_EMBED_IDLE_TIMEOUT` | fastembed model + idle unload |
 | `VISE_TELEMETRY_DIR` / `VISE_USAGE_DIR` | Telemetry/usage output dirs |
 | `VISE_JUDGE_CMD` | External judge command for AI validators |
+| `VISE_TEST_CMD` / `VISE_LINT_CMD` | Command the `tests_pass` / `lint_pass` node-gate validators run. Set these when auto-detection picks the wrong runner, or when the repo's linter isn't on PATH — `lint_pass` then reports `lint skipped … set VISE_LINT_CMD to lint this repo` instead of passing unchecked |
 
 ## LSP servers
 

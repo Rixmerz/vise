@@ -81,6 +81,21 @@ def register_experience(mcp):
         scored.sort(key=lambda x: x[1], reverse=True)
         top = scored[:top_n]
 
+        # Zero matches at project scope can mean "no memory anywhere" or
+        # "this container repo has no per-project store" (commits happen in
+        # sub-repos) — those read identically unless we say which. Only
+        # loads the global store when there's actually nothing to report,
+        # and only for the scopes that didn't already include it.
+        hint = None
+        if not top and scope not in ("global", "both"):
+            global_store = get_experience_store()
+            if global_store.entries:
+                hint = (
+                    f"0 matches at scope='project' ({len(merged)} project memories "
+                    f"searched), but the global store has {len(global_store.entries)} "
+                    "entries — pass scope=\"global\" or scope=\"both\" to search it too."
+                )
+
         # Record recall for returned entries (FSRS bump: last_reviewed + stability).
         # Keyed by id() because the stores are not hashable; holding the object
         # itself means each dirty store is saved exactly once without a second
@@ -115,6 +130,7 @@ def register_experience(mcp):
                 }
                 for entry, score in top
             ],
+            "hint": hint,
             "session_id": sid,
             "project_dir": resolved_dir,
         }
