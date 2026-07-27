@@ -34,14 +34,14 @@ Index layout: ~/.local/share/vise/experience_index/
   detail/P_<key>.json    — output fields (description, resolution, occurrences);
                            strictly parallel to the score file (same i = same entry)
 
-Parent-dir key:  "/" → "_",  "." → "DOT"   e.g. "src/jig/cli" → "P_src_jig_cli"
+Parent-dir key:  "/" → "_",  "." → "DOT"   e.g. "src/vise/cli" → "P_src_vise_cli"
 Root patterns (parent=".") are written to score/P_DOT.json and always loaded.
 
 Why parent-dir (not extension-keyed)
 -------------------------------------
 The scoring formula has a parent-directory fallback: if a glob pattern does not
 fullmatch the target but shares the same parent dir, path_score = 0.7.  This
-means "src/jig/cli/*.py" scores well against "src/jig/cli/run_cmd.ts".
+means "src/vise/cli/*.py" scores well against "src/vise/cli/run_cmd.ts".
 An extension-keyed index silently misses these cross-extension matches.
 Parent-dir bucketing is both correct and smaller (~150 candidates vs 3169).
 
@@ -132,6 +132,11 @@ def _fast_glob_match(pattern: str, target: str) -> bool:
 # Index helpers
 # ---------------------------------------------------------------------------
 
+# Mirrors experience_index_builder.SCHEMA_VERSION — bump both together when
+# the score/detail field split changes shape.
+SCHEMA_VERSION = 2
+
+
 def _index_dir() -> Path:
     return _xdg.experience_index_dir()
 
@@ -151,6 +156,8 @@ def _index_is_fresh(idx_dir: Path, store: Path) -> bool:
         return False
     try:
         meta = json.loads(meta_path.read_bytes())
+        if meta.get("schema_version") != SCHEMA_VERSION:
+            return False
         return abs(meta.get("store_mtime", 0) - store.stat().st_mtime) < 0.001
     except Exception:
         return False
@@ -273,6 +280,19 @@ def _score_entry(
     return path_score * 0.30 + kw_score * 0.25 + domain_score * 0.20 + conf * 0.15
 
 
+def _project_multiplier(entry_origin: str, current_project: str) -> float:
+    """Demote (never filter) entries recorded on a different project.
+
+    Cross-project memory is deliberate — an entry from another project still
+    surfaces when its pattern match is strong. It just loses to a same-project
+    entry on an otherwise-equal score. Entries with no origin (legacy records,
+    or when the current project can't be resolved) are never demoted.
+    """
+    if not current_project or not entry_origin or entry_origin == current_project:
+        return 1.0
+    return 0.5
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -340,11 +360,13 @@ def main() -> None:
 
     for i, entry in enumerate(score_entries):
         s = _score_entry(entry, file_path, target_kws, target_domain, target_parent)
+        s *= _project_multiplier(entry.get("project_origin", ""), project_name)
         if s > 0.10:
             scored.append((entry, s, i if using_index else -1))
 
     for entry in proj_extra:
         s = _score_entry(entry, file_path, target_kws, target_domain, target_parent)
+        s *= _project_multiplier(entry.get("project_origin", ""), project_name)
         if s > 0.10:
             scored.append((entry, s, -1))
 
@@ -370,7 +392,9 @@ def main() -> None:
         occurrences = detail.get("occurrences", 1)
         desc = detail.get("description", "")[:80]
         resolution = detail.get("resolution", "")
-        lines.append(f"  [{score:.2f}] {desc} ({occurrences}x)")
+        origin = entry.get("project_origin", "")
+        prefix = f"[from {origin}] " if origin and project_name and origin != project_name else ""
+        lines.append(f"  [{score:.2f}] {prefix}{desc} ({occurrences}x)")
         if resolution:
             lines.append(f"    → {resolution[:100]}")
 

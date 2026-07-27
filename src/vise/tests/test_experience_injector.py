@@ -549,6 +549,80 @@ class TestContractPreservation:
 
 
 # ---------------------------------------------------------------------------
+# _project_multiplier — cross-project ranking
+# ---------------------------------------------------------------------------
+
+class TestProjectMultiplier:
+    def test_same_project_full_score(self):
+        assert inj._project_multiplier("crm", "crm") == 1.0
+
+    def test_empty_origin_full_score(self):
+        assert inj._project_multiplier("", "crm") == 1.0
+
+    def test_unresolved_current_project_full_score(self):
+        assert inj._project_multiplier("vise", "") == 1.0
+
+    def test_cross_project_demoted(self):
+        assert inj._project_multiplier("vise", "crm") == 0.5
+
+
+class TestProjectAwareRanking:
+    """Same-project entries outrank equal-scoring cross-project entries, but
+    cross-project entries still surface when they are the only match."""
+
+    def _run_main(self, monkeypatch, tmp_path, entries, current_project="crm"):
+        store = tmp_path / "experience_memory.json"
+        idx_dir = tmp_path / "experience_index"
+        _make_store(entries, store)
+        bld.build(store, idx_dir)
+
+        monkeypatch.setattr(inj, "_store_path", lambda: store)
+        monkeypatch.setattr(inj, "_index_dir", lambda: idx_dir)
+        monkeypatch.setenv("FILE", "src/foo/bar.py")
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", f"/some/path/{current_project}")
+
+        stdin_data = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "src/foo/bar.py"}})
+        monkeypatch.setattr("sys.stdin", io.StringIO(stdin_data))
+        captured_stderr = io.StringIO()
+        monkeypatch.setattr("sys.stderr", captured_stderr)
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+
+        inj.main()
+        return captured_stderr.getvalue()
+
+    def test_same_project_ranks_above_equal_cross_project(self, monkeypatch, tmp_path):
+        entries = [
+            {**_make_entry("src/foo/*.py", ["foo"], "general", 0.9,
+                           "cross-project match", "res-cross"), "project_origin": "vise"},
+            {**_make_entry("src/foo/*.py", ["foo"], "general", 0.9,
+                           "same-project match", "res-same"), "project_origin": "crm"},
+        ]
+        stderr = self._run_main(monkeypatch, tmp_path, entries, current_project="crm")
+        # Same-project entry must be listed first (higher/equal score, tie broken by demotion)
+        cross_idx = stderr.index("cross-project match")
+        same_idx = stderr.index("same-project match")
+        assert same_idx < cross_idx
+
+    def test_cross_project_still_surfaces_when_only_match(self, monkeypatch, tmp_path):
+        entries = [
+            {**_make_entry("src/foo/*.py", ["foo"], "general", 0.9,
+                           "only match", "res"), "project_origin": "vise"},
+        ]
+        stderr = self._run_main(monkeypatch, tmp_path, entries, current_project="crm")
+        assert "only match" in stderr
+        assert "[from vise]" in stderr
+
+    def test_legacy_entry_no_origin_keeps_full_score(self, monkeypatch, tmp_path):
+        entries = [
+            {**_make_entry("src/foo/*.py", ["foo"], "general", 0.9,
+                           "legacy match", "res"), "project_origin": ""},
+        ]
+        stderr = self._run_main(monkeypatch, tmp_path, entries, current_project="crm")
+        assert "legacy match" in stderr
+        assert "[from" not in stderr
+
+
+# ---------------------------------------------------------------------------
 # main() integration — stdin/stdout/stderr contract
 # ---------------------------------------------------------------------------
 

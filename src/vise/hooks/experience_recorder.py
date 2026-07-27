@@ -28,6 +28,50 @@ from vise.hooks import _xdg
 
 _APPROVE = json.dumps({"decision": "approve"})
 
+# Path components that mark a file as generated/vendored — never worth
+# recording a pattern for (it will never recur in a meaningful way).
+_GENERATED_DIR_NAMES = frozenset({
+    "_fresh", "dist", "build", "node_modules", ".vite", "__pycache__",
+    ".next", "coverage", "vendor", "_site", ".venv",
+})
+_GENERATED_PATH_MARKERS = ("target/debug", "target/release")
+
+# A bare-root generalized pattern ("./*.json") carries no locality — parent
+# "." plus only an extension. Patterns with a real category tail
+# ("./*Service.ts") are still useful and excluded by this regex.
+_BARE_ROOT_PATTERN_RE = re.compile(r"^\./\*\.[A-Za-z0-9]+$")
+
+
+def _is_generated_path(path: str) -> bool:
+    if any(part in _GENERATED_DIR_NAMES for part in Path(path).parts):
+        return True
+    posix_path = path.replace("\\", "/")
+    return any(marker in posix_path for marker in _GENERATED_PATH_MARKERS)
+
+
+def _looks_like_hash(segment: str) -> bool:
+    """Mixed-alnum segment of 8+ chars — typical build-tool content hash."""
+    return len(segment) >= 8 and segment.isalnum() and not segment.isalpha() and not segment.isdigit()
+
+
+def _is_junk_file(path: str) -> bool:
+    """True if *path* should never be recorded as an experience source.
+
+    Covers generated/vendored trees, lockfiles, minified bundles, and
+    content-hashed build output.
+    """
+    if _is_generated_path(path):
+        return True
+    name = Path(path).name.lower()
+    if name.endswith((".lock", ".min.js", ".min.css")):
+        return True
+    return any(_looks_like_hash(seg) for seg in re.split(r"[-_.]", Path(path).stem))
+
+
+def _is_junk_pattern(pattern: str) -> bool:
+    """True if *pattern* generalized to a bare-root glob with no locality."""
+    return bool(_BARE_ROOT_PATTERN_RE.fullmatch(pattern))
+
 
 def _generalize_path(path: str) -> str:
     """Convert a specific file path to a glob pattern.
@@ -219,6 +263,8 @@ def main():
     except Exception:
         changed_files = []
 
+    changed_files = [f for f in changed_files if not _is_junk_file(f)]
+
     if not changed_files:
         print(_APPROVE)
         return
@@ -231,9 +277,12 @@ def main():
 
     new_entries = []
     for file_path in changed_files:
+        file_pattern = _generalize_path(file_path)
+        if _is_junk_pattern(file_pattern):
+            continue
         entry = {
             "type": commit_type,
-            "file_pattern": _generalize_path(file_path),
+            "file_pattern": file_pattern,
             "keywords": extract_keywords(file_path),
             "domain": guess_domain(file_path),
             "description": commit_subject,
@@ -246,6 +295,10 @@ def main():
             "commit_hash": commit_hash,
         }
         new_entries.append(entry)
+
+    if not new_entries:
+        print(_APPROVE)
+        return
 
     # -----------------------------------------------------------------------
     # Persist to project store and global store

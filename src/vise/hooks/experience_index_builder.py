@@ -12,15 +12,15 @@ Index layout under ~/.local/share/vise/experience_index/:
                                 parallel to the score file (same index = same entry)
 
 Parent dir key encoding:  "/" → "_",  "." → "DOT"
-  "src/jig/cli"  → "P_src_jig_cli"
+  "src/vise/cli"  → "P_src_vise_cli"
   "."            → "P_DOT"          (root patterns — always loaded at query time)
 
 Why parent-dir bucketing (not extension bucketing)
 --------------------------------------------------
 The original scoring uses a parent-directory fallback: if a glob pattern does
 not fullmatch the target path, but the pattern's parent dir equals the target's
-parent dir, path_score = 0.7.  This means "src/jig/cli/*.py" scores well
-against "src/jig/cli/run_cmd.ts" (different extension, same dir).  An
+parent dir, path_score = 0.7.  This means "src/vise/cli/*.py" scores well
+against "src/vise/cli/run_cmd.ts" (different extension, same dir).  An
 extension-keyed index silently drops these cross-extension matches.
 
 Parent-dir bucketing is correct: load the target's parent-dir bucket (which
@@ -42,12 +42,19 @@ from pathlib import Path
 from vise.hooks import _xdg
 
 # Fields written to score files — the only data read at query time.
-_SCORE_FIELDS = frozenset({"file_pattern", "keywords", "domain", "confidence"})
+# project_origin is needed here (not detail) because ranking happens before
+# the top-3 cut — see experience_injector._project_multiplier.
+_SCORE_FIELDS = frozenset({"file_pattern", "keywords", "domain", "confidence", "project_origin"})
 
 # Fields written to detail files — read only for the final top-3 winners.
 _DETAIL_FIELDS = frozenset({"description", "resolution", "occurrences"})
 
 LOCK_TTL = 30.0
+
+# Bump when the score/detail field split changes shape — forces existing
+# indexes (built under the old schema) to rebuild instead of being read stale.
+# Mirrored in experience_injector.SCHEMA_VERSION.
+SCHEMA_VERSION = 2
 
 
 def _store_path() -> Path:
@@ -120,7 +127,11 @@ def build(store: Path, idx_dir: Path) -> None:
 
     _write_atomic(
         idx_dir / "meta.json",
-        {"store_mtime": store.stat().st_mtime, "entry_count": len(entries)},
+        {
+            "store_mtime": store.stat().st_mtime,
+            "entry_count": len(entries),
+            "schema_version": SCHEMA_VERSION,
+        },
         pid,
     )
 
