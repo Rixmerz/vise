@@ -5,6 +5,9 @@ description: >
   SHIPS UNBOUND — vcs.diff, ai.summarize, code.security.findings and
   vcs.pr.comment have no default binding, so recipe_run halts at step 1
   until you bind them via capability_set.
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 # GAP — vise bundles no VCS, AI or security-scanner MCP. Every step below
 # dispatches on a capability that resolves UNBOUND out of the box; recipe_run

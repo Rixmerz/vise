@@ -4,6 +4,9 @@ description: >
   SHIPS UNBOUND — web.scrape and fs.write have no default binding, so
   recipe_run halts at step 1 until you bind a scraper MCP and a
   filesystem-write MCP via capability_set.
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 # GAP — vise bundles no scraper and no fs-write MCP. Both steps below
 # dispatch on capabilities that resolve UNBOUND out of the box; recipe_run

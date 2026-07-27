@@ -5,6 +5,9 @@ description: >
   SHIPS UNBOUND — deploy.update and deploy.tail_logs have no default
   binding, so recipe_run halts at step 1 until you bind a deploy MCP
   via capability_set.
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 # GAP — vise bundles no deploy MCP. Every step below dispatches on a
 # capability that resolves UNBOUND out of the box; recipe_run returns

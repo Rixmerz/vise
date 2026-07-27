@@ -6,6 +6,9 @@ description: >
   a quiet window with stable node identity. A green typecheck and a passing
   unit suite say NOTHING about flicker — this recipe is what proves the
   region survives the poll tick at rest.
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 # CONTRACT — the bound MCP MUST accept these inputs and return {ok: bool, ...}.
 # Ships UNBOUND on purpose (GAP-first): the intended runner is the `watcher`

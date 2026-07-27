@@ -1,6 +1,9 @@
 name: validate-web
 description: >
   Mechanical web-layout validation via layoutlint (overflow/clip/collision/misalignment/off-page).
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 inputs:
   - target

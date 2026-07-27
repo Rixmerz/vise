@@ -10,6 +10,9 @@ description: >
   no default binding, so recipe_run halts at step 1 until you bind them via
   capability_set. The cadence below is documentation, not a scheduler: the
   plugin installs no cron entry or systemd timer — you create it yourself.
+  Once bound, recipe_run does not execute the steps — vise ships no MCP
+  dispatch layer — it returns an ordered plan (resolved tool + rendered args
+  per step) for the calling agent to execute itself.
 
 # GAP — vise bundles no filesystem-search, HTTP, AI or VCS MCP. The steps
 # below dispatch on capabilities that resolve UNBOUND out of the box;
