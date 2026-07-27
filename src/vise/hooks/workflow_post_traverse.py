@@ -71,7 +71,7 @@ def _record_experience(result: dict, project_path: str) -> None:
 
     project_name = Path(project_path).name
     store = ExperienceMemoryStore()
-    store.load(scope="project", project_name=project_name)
+    store.load(scope="project", project_name=project_name, project_dir=project_path)
 
     changed_files = _get_changed_files(project_path)
 
@@ -121,7 +121,7 @@ def _record_experience_fallback(result: dict, project_path: str,
                                  reason: str, smells_summary: str) -> None:
     """Fallback when experience_memory module is unavailable."""
     project_name = Path(project_path).name
-    mem_file = _xdg.project_memory_path(project_name)
+    mem_file = _xdg.project_memory_path(project_path)
     mem_file.parent.mkdir(parents=True, exist_ok=True)
 
     existing: dict = {"entries": []}

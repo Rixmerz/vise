@@ -102,9 +102,24 @@ def experience_memory_path() -> Path:
     return data_dir() / "experience_memory.json"
 
 
-def project_memory_path(project_name: str) -> Path:
-    """Per-project experience memory store."""
-    return data_dir() / "project_memories" / project_name / "experience_memory.json"
+def project_memory_dir(project_dir: str | Path) -> Path:
+    """``<data_dir>/project_memories/<key>`` — same collision-proof key as ``project_state_dir``.
+
+    Reuses ``project_state_dir``'s resolved key (basename, or the hashed
+    sibling on a detected collision) so the two trees (``states/`` and
+    ``project_memories/``) can never diverge for the same project. Two
+    different directories sharing a basename resolve to the same memory
+    directory only until one of them claims the basename via the states
+    tree (``claim_project_state_dir``) — identical semantics to state
+    resolution, by design (one resolver, two trees).
+    """
+    key = project_state_dir(project_dir).name
+    return data_dir() / "project_memories" / key
+
+
+def project_memory_path(project_dir: str | Path) -> Path:
+    """Per-project experience memory store for *project_dir* (a directory, not a bare name)."""
+    return project_memory_dir(project_dir) / "experience_memory.json"
 
 
 def experience_index_dir() -> Path:
@@ -152,6 +167,7 @@ __all__ = [
     "experience_memory_path",
     "goal_dir",
     "graph_state_path",
+    "project_memory_dir",
     "project_memory_path",
     "project_state_dir",
     "src_dir",

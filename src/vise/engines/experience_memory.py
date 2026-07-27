@@ -318,16 +318,28 @@ class ExperienceMemoryStore:
         self._file_path: Path | None = None
         self._query_embedding = None
 
-    def _resolve_path(self, scope: str, project_name: str | None) -> Path:
+    def _resolve_path(self, scope: str, project_name: str | None,
+                       project_dir: str | Path | None = None) -> Path:
         if scope == "project" and project_name:
+            if project_dir is not None:
+                from vise.hooks import _xdg
+                return _xdg.project_memory_path(project_dir)
+            # Legacy callers that only have a bare name (no collision-proofing).
             return PROJECT_MEMORIES_DIR / project_name / "experience_memory.json"
         return GLOBAL_MEMORY_FILE
 
-    def load(self, scope: str = "global", project_name: str | None = None) -> None:
-        """Load entries from JSON file."""
+    def load(self, scope: str = "global", project_name: str | None = None,
+              project_dir: str | Path | None = None) -> None:
+        """Load entries from JSON file.
+
+        Pass *project_dir* (the actual project directory) when available so
+        the store resolves the same collision-proof key as ``states/`` —
+        see ``vise.hooks._xdg.project_memory_path``. Without it, falls back
+        to the legacy bare-``project_name`` path (no collision-proofing).
+        """
         self._scope = scope
         self._project_name = project_name
-        self._file_path = self._resolve_path(scope, project_name)
+        self._file_path = self._resolve_path(scope, project_name, project_dir)
 
         if not self._file_path.exists():
             self.entries = []
@@ -491,8 +503,8 @@ class ExperienceMemoryStore:
             "by_scope": by_scope,
             "by_severity": by_severity,
             "avg_confidence": round(sum(confidences) / len(confidences), 3) if confidences else 0.0,
-            "oldest": min((e.first_seen for e in self.entries), default=None),
-            "newest": max((e.last_seen for e in self.entries), default=None),
+            "oldest": min((e.first_seen for e in self.entries if e.first_seen), default=None),
+            "newest": max((e.last_seen for e in self.entries if e.last_seen), default=None),
         }
 
 
@@ -648,7 +660,7 @@ def derive_implementation_checklist(
 
     project_store = ExperienceMemoryStore()
     project_name = Path(project_dir).name
-    project_store.load(scope="project", project_name=project_name)
+    project_store.load(scope="project", project_name=project_name, project_dir=project_dir)
 
     all_entries = merge_stores(global_store, project_store)
 
@@ -842,5 +854,5 @@ def get_project_experience_store(project_dir: str) -> "ExperienceMemoryStore":
     """Return a project-scoped experience store for *project_dir*."""
     project_name = Path(project_dir).name
     store = ExperienceMemoryStore()
-    store.load("project", project_name)
+    store.load("project", project_name, project_dir=project_dir)
     return store

@@ -303,7 +303,7 @@ def main():
     # -----------------------------------------------------------------------
     # Persist to project store and global store
     # -----------------------------------------------------------------------
-    project_store_path = _xdg.project_memory_path(project_name)
+    project_store_path = _xdg.project_memory_path(project_dir)
     global_store_path = _xdg.experience_memory_path()
 
     for store_path in (project_store_path, global_store_path):

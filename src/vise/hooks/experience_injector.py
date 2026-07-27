@@ -340,8 +340,8 @@ def main() -> None:
     # Per-project entries always from their own small store (appended as-is;
     # they carry all fields so detail lookup is not needed for them).
     proj_extra: list[dict] = []
-    if project_name:
-        proj_store = _xdg.project_memory_path(project_name)
+    if project_dir:
+        proj_store = _xdg.project_memory_path(project_dir)
         if proj_store.exists():
             try:
                 proj_extra = json.loads(proj_store.read_bytes()).get("entries", [])

@@ -44,79 +44,6 @@ def _synthesize_and_activate_workflow(goal, resolved_dir: str) -> str:
     return ""
 
 
-def _deploy_agents_inline(resolved_dir: str, tech_stack: list[str]) -> list[str]:
-    """Deploy agents/skills/rules for *tech_stack* into *resolved_dir*.
-
-    Returns the list of agent dest_names that were written.
-    """
-    import shutil
-
-    try:
-        from vise.tools.deployment import (
-            _agents_source,
-            _build_agent_frontmatter,
-            _parse_agent_frontmatter,
-            _plan_agent_deployments,
-            _resolve_agents_for_stack,
-            _resolve_rules_for_stack,
-            _resolve_skills_for_stack,
-            _rules_source,
-            _skills_source,
-        )
-    except ImportError:
-        # vise does not ship the agent-deployment hub — no-op gracefully.
-        return []
-    hub_agents_dir = _agents_source()
-    hub_skills_dir = _skills_source()
-    hub_rules_dir = _rules_source()
-
-    target = Path(resolved_dir)
-    target_agents_dir = target / ".claude" / "agents"
-    target_skills_dir = target / ".claude" / "skills"
-    target_rules_dir = target / ".claude" / "rules"
-    target_agents_dir.mkdir(parents=True, exist_ok=True)
-    target_skills_dir.mkdir(parents=True, exist_ok=True)
-    target_rules_dir.mkdir(parents=True, exist_ok=True)
-
-    agent_base_names = _resolve_agents_for_stack(tech_stack)
-    agent_plans = _plan_agent_deployments(agent_base_names, tech_stack)
-    skills_to_deploy = _resolve_skills_for_stack(tech_stack)
-    rules_to_deploy = _resolve_rules_for_stack(tech_stack)
-
-    agents_deployed: list[str] = []
-
-    for plan in agent_plans:
-        src = hub_agents_dir / f"{plan['source_name']}.md"
-        dst = target_agents_dir / f"{plan['dest_name']}.md"
-        if not src.exists():
-            continue
-        content = src.read_text(encoding="utf-8")
-        fm, body = _parse_agent_frontmatter(content)
-        fm["name"] = plan["name_override"]
-        if plan["description_prefix"] and "description" in fm:
-            fm["description"] = plan["description_prefix"] + fm["description"]
-        fm["skills"] = ", ".join(plan["skills"])
-        dst.write_text(_build_agent_frontmatter(fm) + "\n" + body, encoding="utf-8")
-        agents_deployed.append(plan["dest_name"])
-
-    for skill_name in skills_to_deploy:
-        src_dir = hub_skills_dir / skill_name
-        dst_dir = target_skills_dir / skill_name
-        if not src_dir.exists():
-            continue
-        if dst_dir.exists():
-            shutil.rmtree(dst_dir)
-        shutil.copytree(src_dir, dst_dir)
-
-    for rule_name in rules_to_deploy:
-        src = hub_rules_dir / rule_name
-        dst = target_rules_dir / rule_name
-        if src.exists() and not dst.exists():
-            shutil.copy2(src, dst)
-
-    return agents_deployed
-
-
 def register_goal(mcp) -> None:
 
     @mcp.tool()
@@ -325,8 +252,8 @@ def register_goal(mcp) -> None:
         session_id: str | None = None,
     ) -> dict:
         """Atomic bootstrap: set goal, synthesize+activate workflow, enable
-        autonomy, and (optionally) deploy subagents + queue a restart_claude
-        sequence so the fresh Claude session loads the agents and resumes work.
+        autonomy, and (optionally) queue a restart_claude sequence so a fresh
+        Claude session resumes work.
 
         All side effects happen in this single MCP call so the model cannot
         half-execute the bootstrap.
@@ -340,11 +267,12 @@ def register_goal(mcp) -> None:
             preferred_model: Optional Claude Code model spec, e.g. "opus".
             enable_autonomy: Set VISE_AUTONOMY=1 in .claude/settings.json.
             synthesize_workflow: Synthesize and activate a workflow from the goal.
-            deploy_subagents: Deploy specialized agents for the detected stack.
-                When ``/setup-agents`` has already deployed them and queued
-                the restart, pass ``False`` here from the post-restart
-                ``/vise-goal`` call to avoid re-deploying and re-queuing.
-            tech_stack: Override auto-detected tech stack for agent deployment.
+            deploy_subagents: Gate the restart_claude enqueue (Step 6) — vise
+                does not ship an agent-deployment hub, so this never deploys
+                agents itself. Kept for callers that pass ``False`` post-restart
+                to avoid re-queuing.
+            tech_stack: Accepted for API compatibility; unused (no deployment
+                step consumes it).
             project_dir: Project directory. Optional after set_session.
             session_id: Optional session id.
         """
@@ -449,32 +377,11 @@ def register_goal(mcp) -> None:
                     "scheduled_items": [],
                 }
 
-        # --- Step 5: Deploy subagents ---
+        # Step 5 (agent deployment) was removed: vise ships no agent-deployment
+        # hub, so this never wrote anything — see git history for the deleted
+        # `_deploy_agents_inline`. `agents_deployed` stays empty; `deploy_subagents`
+        # still gates the restart_claude enqueue below (Step 6).
         agents_deployed: list[str] = []
-        if deploy_subagents:
-            try:
-                # Auto-detect stack if not provided
-                stack: list[str] = list(tech_stack) if tech_stack else []
-                if not stack:
-                    try:
-                        from vise.engines.project_metadata import get as metadata_get
-                        meta = metadata_get(resolved_dir)
-                        stack = list(meta.get("tech_stack", []))
-                    except Exception:
-                        stack = []
-
-                agents_deployed = _deploy_agents_inline(resolved_dir, stack)
-            except Exception as exc:
-                return {
-                    "ok": False,
-                    "step": "deploy_subagents",
-                    "error": str(exc),
-                    "goal_id": goal_id,
-                    "workflow_name": workflow_name,
-                    "autonomy_enabled": autonomy_enabled,
-                    "agents_deployed": [],
-                    "scheduled_items": [],
-                }
 
         # --- Step 6: Record next_task + enqueue schedule items ---
         scheduled_items: list[str] = []
@@ -499,13 +406,11 @@ def register_goal(mcp) -> None:
         if deploy_subagents and pane_target:
             try:
                 from vise.engines import next_task as nt_engine
-                resume_agents = ", ".join(agents_deployed) if agents_deployed else "core agents"
                 nt_engine.record(
                     project_dir=resolved_dir,
                     summary=(
                         f"Goal bootstrap complete. Goal `{goal_id}` set: {goal[:100]}. "
-                        f"Workflow: {workflow_name or 'none'}. "
-                        f"Agents deployed: {resume_agents}."
+                        f"Workflow: {workflow_name or 'none'}."
                     ),
                     task_description=f"Resume goal {goal_id}: {goal[:80]}",
                 )
@@ -514,7 +419,6 @@ def register_goal(mcp) -> None:
                     f"Resume goal `{goal_id}`: {goal[:100]}. "
                     f"Workflow `{workflow_name or 'active workflow'}` is active. "
                     f"Target confidence: {g.target_confidence}. "
-                    f"Deployed subagents: {resume_agents}. "
                     "Call `graph_status` to see the current phase and continue."
                 )
 
@@ -526,13 +430,13 @@ def register_goal(mcp) -> None:
                 scheduled_items.append("prompt")
 
             except Exception as exc:
-                # Non-fatal: goal is set, autonomy enabled, agents deployed
+                # Non-fatal: goal is set, autonomy enabled
                 scheduled_items = [f"schedule_error: {exc}"]
 
         next_msg = (
             "daemon will execute prompt (clear_first=True)"
             if pane_target and scheduled_items and not any("error" in s for s in scheduled_items)
-            else "no pane target — restart Claude manually to load deployed agents"
+            else "no pane target — restart Claude manually to resume"
         )
 
         return {
