@@ -130,7 +130,13 @@ def get_state_path(project_dir):
 GRAPH_INNER_ALLOWLIST = frozenset({
     "graph_enforcer_toggle",
     "graph_status",
+    # graph_reset is NOT an exit — it returns to the start node, which is the
+    # most restrictive node in every bundled workflow. graph_deactivate is the
+    # real one; graph_set_node is the manual override. Both must stay callable
+    # or a stale workflow has no in-band way out.
     "graph_reset",
+    "graph_deactivate",
+    "graph_set_node",
     "graph_list_available",
     "graph_timeline",
 })

@@ -12,6 +12,7 @@ from vise.engines.graph_engine import Graph, GraphState, generate_mermaid
 from vise.engines.graph_parser import load_graph_from_file, GraphParseError
 from vise.engines.graph_state import (
     load_graph_state, initialize_graph_state,
+    deactivate_graph_state,
     get_graph_file,
 )
 
@@ -285,6 +286,38 @@ def register_graph_management_tools(mcp):
             },
             "prompt_injection": start_node.prompt_injection if start_node else None,
             "project_dir": resolved_dir
+        }
+
+    @mcp.tool()
+    def graph_deactivate(project_dir: str | None = None, session_id: str | None = None) -> dict:
+        """End the active workflow. Nothing is gated afterwards.
+
+        This is the exit that `graph_reset` is not: reset returns to the START
+        node, which is the most restrictive node in every bundled workflow, so
+        it re-arms the gate instead of releasing it. And disabling the enforcer
+        does not clear state — it mutes gating for every future workflow too.
+        Use this when a workflow no longer describes the work, typically one
+        left active by an earlier session.
+
+        Execution history is kept; only the active pointer is cleared.
+
+        Args:
+            project_dir: Absolute path to the project directory (optional after set_session)
+            session_id: Optional session ID for parallel session isolation
+        """
+        resolved_dir, sid = resolve_project_dir(project_dir, session_id)
+        result = deactivate_graph_state(resolved_dir)
+        return {
+            "success": True,
+            "session_id": sid,
+            **result,
+            "message": (
+                f"Workflow '{result.get('was_active_name') or result.get('was_active')}' "
+                "deactivated — no gating active"
+                if result.get("deactivated")
+                else "No active workflow to deactivate"
+            ),
+            "project_dir": resolved_dir,
         }
 
     @mcp.tool()

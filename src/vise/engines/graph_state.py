@@ -285,6 +285,46 @@ def reset_graph_state(project_dir: str, graph: Graph) -> GraphState:
     return state
 
 
+def deactivate_graph_state(project_dir: str) -> dict:
+    """End the active workflow: no graph active, nothing gated.
+
+    A workflow could be started but never finished. `reset_graph_state` returns
+    to the START node, which in every bundled workflow is the most restrictive
+    one — so reset re-arms the gate instead of releasing it. The only other exit
+    was disabling the enforcer, which its own docstring says does NOT clear
+    state, so it silently mutes gating for every FUTURE workflow too. Result: a
+    workflow abandoned in one session blocks unrelated work in the next, with no
+    honest way out. Nobody hit this while the enforcer was broken and never
+    blocked anything (see hooks/_xdg.py); it surfaced the first time the gate
+    actually fired — and the bundled debug workflow has no node at all from
+    which the trap could be fixed, since even its terminal node blocks Edit.
+
+    Execution history is preserved: this records that the workflow ended, it
+    does not pretend it never ran.
+    """
+    state = load_graph_state(project_dir)
+    ended = state.active_graph
+    if not ended:
+        return {"deactivated": False, "reason": "no active workflow"}
+
+    state.execution_path.append(
+        PathEntry(
+            from_node=state.current_nodes[0] if state.current_nodes else None,
+            to_node=None,
+            edge_id=None,
+            timestamp=datetime.now().isoformat(),
+            reason=f"Workflow '{ended}' deactivated",
+        )
+    )
+    display = state.active_graph_name
+    state.active_graph = None
+    state.active_graph_name = None
+    state.current_nodes = []
+    state.last_activity = datetime.now().isoformat()
+    save_graph_state(project_dir, state)
+    return {"deactivated": True, "was_active": ended, "was_active_name": display}
+
+
 def get_node_visit_warning(state: GraphState, node_id: str, max_visits: int) -> Optional[str]:
     """Check if a node is approaching its max visits limit.
 
