@@ -2,6 +2,15 @@ name: pr-review-bundle
 description: >
   Run a full PR review bundle: diff the branch, summarise the changes
   with AI, run security findings, and post a review comment.
+  SHIPS UNBOUND — vcs.diff, ai.summarize, code.security.findings and
+  vcs.pr.comment have no default binding, so recipe_run halts at step 1
+  until you bind them via capability_set.
+
+# GAP — vise bundles no VCS, AI or security-scanner MCP. Every step below
+# dispatches on a capability that resolves UNBOUND out of the box; recipe_run
+# returns "capability '<name>' is unresolved — use capability_set to assign
+# a tool" at the first such step. That is the intended GAP-first behaviour:
+# a false binding would report a green instead of surfacing the missing tool.
 
 inputs:
   - pr_number

@@ -1,7 +1,15 @@
 name: scrape-and-store
 description: >
   Scrape a URL and store the extracted content to a file.
-  Requires web.scrape and fs.write capabilities to be assigned.
+  SHIPS UNBOUND — web.scrape and fs.write have no default binding, so
+  recipe_run halts at step 1 until you bind a scraper MCP and a
+  filesystem-write MCP via capability_set.
+
+# GAP — vise bundles no scraper and no fs-write MCP. Both steps below
+# dispatch on capabilities that resolve UNBOUND out of the box; recipe_run
+# returns "capability '<name>' is unresolved — use capability_set to assign
+# a tool" at the first such step. That is the intended GAP-first behaviour:
+# a false binding would report a green instead of surfacing the missing tool.
 
 inputs:
   - url

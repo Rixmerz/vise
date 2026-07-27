@@ -6,6 +6,16 @@ description: >
   comment (vcs.pr.comment is a sideeffect) and returns {paused_for_approval}
   for human sign-off.
   Trigger from an external systemd timer or crontab at the cadence below.
+  SHIPS UNBOUND — fs.search, web.fetch, ai.summarize and vcs.pr.comment have
+  no default binding, so recipe_run halts at step 1 until you bind them via
+  capability_set. The cadence below is documentation, not a scheduler: the
+  plugin installs no cron entry or systemd timer — you create it yourself.
+
+# GAP — vise bundles no filesystem-search, HTTP, AI or VCS MCP. The steps
+# below dispatch on capabilities that resolve UNBOUND out of the box;
+# recipe_run returns "capability '<name>' is unresolved — use capability_set
+# to assign a tool" at the first such step. That is the intended GAP-first
+# behaviour: a false binding would report a green instead of the missing tool.
 
 # External scheduler hint (weekly, Monday 06:00):
 #   0 6 * * 1  vise recipe run loop-dep-sweeper --input manifest_glob="**/package.json"

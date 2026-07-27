@@ -1,11 +1,15 @@
-# Universal Debug Workflow v2.0
-# Multi-strategy debugging: tests, FlowTrace, profiling, hybrid
+# Universal Debug Workflow v2.1
+# Multi-strategy debugging: tests, native profiling/tracing, hybrid
 # Flow: understand -> reproduce -> classify -> [strategy] -> analyze -> hypothesize -> fix -> verify -> report
+#
+# Every instruction below uses tools that actually exist: Bash, Read, Grep,
+# Glob. vise bundles no instrumentation MCP and has no generic MCP dispatch
+# tool — see the GAP note in the strategy-flowtrace node.
 
 metadata:
   name: "Universal Debug"
-  description: "Multi-strategy debugging. Classifies the bug, selects the optimal tool (tests, FlowTrace, profiling, hybrid), and runs an evidence-based debug cycle."
-  version: "2.0.0"
+  description: "Multi-strategy debugging. Classifies the bug, selects the optimal strategy (targeted tests, native profiling/tracing, hybrid), and runs an evidence-based debug cycle."
+  version: "2.1.0"
   type: "graph"
   author: "AgentCockpit"
   target_model: "sonnet"
@@ -157,11 +161,11 @@ nodes:
 
       3. PERFORMANCE: Slow, timeout, excessive CPU/memory use,
          N+1 queries, hot loops
-         -> Strategy: FlowTrace profiling (or native)
+         -> Strategy: native profiler (perf, pprof, cProfile, ...)
 
       4. INTEGRATION: Failure between services, broken API contract,
          missing headers, auth issues
-         -> Strategy: FlowTrace tracing (or request replay)
+         -> Strategy: request replay + log/trace inspection
 
       5. CONCURRENCY: Race condition, deadlock, intermittent corrupt data,
          non-deterministic ordering
@@ -234,10 +238,11 @@ nodes:
       ======================================================================
 
   # ---------------------------------------------------------------------------
-  # STRATEGY B: FLOWTRACE / PROFILING (performance, integration)
+  # STRATEGY B: PROFILING / TRACING (performance, integration)
+  # (node id kept as "strategy-flowtrace" for edge + in-flight-state stability)
   # ---------------------------------------------------------------------------
   - id: "strategy-flowtrace"
-    name: "Strategy: FlowTrace / Profiling"
+    name: "Strategy: Profiling / Tracing"
     model: sonnet
     mcps_enabled:
       - "vise"
@@ -248,52 +253,47 @@ nodes:
     max_visits: 20
     prompt_injection: |
       ======================================================================
-      STRATEGY: FLOWTRACE / PROFILING
+      STRATEGY: PROFILING / TRACING
       ======================================================================
 
       For performance and integration bugs, you need to observe the
-      runtime behavior.
+      runtime behavior. Use the language's NATIVE profiler via Bash.
 
-      IMPORTANT: FlowTrace is NOT a direct MCP. Access it via vise:
-      ```
-      execute_mcp_tool(
-        mcp_name="flowtrace",
-        tool_name="flowtrace_detect",
-        arguments={"projectPath": "/path/to/project"}
-      )
-      ```
-      Tool names use underscores: flowtrace_detect, flowtrace_init,
-      log_open, log_search, dashboard_bottlenecks, etc.
+      GAP — no instrumentation MCP is bundled. vise ships no auto-tracer and
+      no generic MCP dispatch tool, so there is nothing to call for
+      whole-program instrumentation out of the box. If you have such an MCP,
+      bind it once with capability_set and drive it via a recipe; until then
+      this phase runs entirely on native tooling, which is sufficient for
+      almost every performance and integration bug.
 
-      IF FLOWTRACE AVAILABLE and language supported (Node.js, Java, Python):
-      1. execute_mcp_tool("flowtrace", "flowtrace_detect", {projectPath}) -> language
-      2. execute_mcp_tool("flowtrace", "flowtrace_init", {projectPath, autoYes: true})
-      3. execute_mcp_tool("flowtrace", "flowtrace_cleanup", {projectPath})
-      4. execute_mcp_tool("flowtrace", "flowtrace_build", {projectPath})
-      5. execute_mcp_tool("flowtrace", "flowtrace_execute", {projectPath})
-      6. execute_mcp_tool("flowtrace", "log_open", {path: "flowtrace.jsonl"})
-      7. For PERFORMANCE:
-         - execute_mcp_tool("flowtrace", "dashboard_bottlenecks", {path, top: 10})
-         - execute_mcp_tool("flowtrace", "log_aggregate", {sessionId, groupBy, metric})
-         - execute_mcp_tool("flowtrace", "log_topK", {sessionId, byField, k: 20})
-      8. For INTEGRATION:
-         - execute_mcp_tool("flowtrace", "log_timeline", {sessionId, filter})
-         - execute_mcp_tool("flowtrace", "log_flow", {sessionId, keys})
-         - execute_mcp_tool("flowtrace", "log_errors", {sessionId})
+      FOR PERFORMANCE — run the profiler with Bash, write output to a file:
+      - Rust:    cargo bench | tee bench.txt ; cargo flamegraph (criterion)
+      - Go:      go test -bench=. -cpuprofile cpu.out ; go tool pprof -top cpu.out
+      - Node.js: node --prof app.js && node --prof-process isolate-*.log > prof.txt
+                 npx clinic doctor -- node app.js
+      - Python:  python -m cProfile -o prof.out script.py
+                 python -c "import pstats;pstats.Stats('prof.out').sort_stats('cumtime').print_stats(20)"
+                 py-spy top --pid <pid>
+      - JVM:     java -XX:+FlightRecorder ... ; jcmd <pid> Thread.print
+      - General: /usr/bin/time -v, perf record/report, strace -c, ltrace -c
 
-      IF FLOWTRACE NOT AVAILABLE or language not supported:
-      - Rust: cargo bench, flamegraph, criterion
-      - Go: go test -bench, pprof
-      - Node.js: --prof, clinic.js
-      - Python: cProfile, py-spy
-      - General: time, strace, ltrace
-      - Run native profilers with Bash
+      FOR INTEGRATION — replay the request and read what crosses the wire:
+      - Replay the failing call with Bash: curl -v -w '%{time_total}' ...
+      - Capture both sides: run the service with its debug/verbose log level
+        and tee the output to a file, then Grep it for the request id.
+      - Diff the observed request/response against the API contract
+        (Read the OpenAPI/schema file, compare headers, status, body shape).
+      - Bisect the hop: call the dependency directly with the same payload.
+        If the direct call works, the bug is in your caller, not the service.
 
-      COLLECT:
-      - Duration metrics per method/function
-      - Bottlenecks with impact score
-      - Error patterns in traces
-      - Event timeline for integration
+      COLLECT (as files you can re-Read in the analyze phase):
+      - Duration metrics per method/function (profiler top-N output)
+      - The hot path / bottleneck ranking
+      - Verbose request + response for the failing integration call
+      - Error patterns and timestamps from the service logs
+
+      Write and Edit are blocked. Bash is available — running a profiler and
+      writing its report to a scratch file is observation, not modification.
 
       SIGNAL: When you have enough observations, say "observations collected"
 
@@ -317,17 +317,13 @@ nodes:
       STRATEGY: HYBRID (Tests + Instrumentation)
       ======================================================================
 
-      For concurrency and memory bugs, combine stress tests with
-      instrumentation.
+      For concurrency and memory bugs, combine stress tests with the
+      runtime's built-in instrumentation (sanitizers, race detectors,
+      allocation trackers). All of it runs through Bash.
 
-      IMPORTANT: FlowTrace is NOT a direct MCP. Access it via vise:
-      ```
-      execute_mcp_tool(
-        mcp_name="flowtrace",
-        tool_name="<tool_name>",
-        arguments={...}
-      )
-      ```
+      GAP — no instrumentation MCP is bundled (see the profiling strategy
+      node). Sanitizers and race detectors are shipped with the toolchains
+      themselves, so this phase needs nothing extra installed.
 
       FOR CONCURRENCY:
       - Run tests with sanitizers:
@@ -337,9 +333,12 @@ nodes:
       - Stress tests: run the same test N times looking for intermittency
         cargo test [name] -- --test-threads=1
         for i in {1..100}; do cargo test [name]; done
-      - If FlowTrace available (via execute_mcp_tool):
-        execute_mcp_tool("flowtrace", "log_timeline", {sessionId, filter})
-        execute_mcp_tool("flowtrace", "log_flow", {sessionId, keys: ["thread"]})
+      - Get an ordering timeline out of the runtime itself:
+        Go:     GODEBUG=schedtrace=1000 go test -race ./...
+        Rust:   RUST_LOG=trace cargo test -- --nocapture 2>&1 | tee race.log
+        Python: python -X faulthandler -X dev script.py 2>&1 | tee race.log
+        JVM:    jcmd <pid> Thread.print  (thread dump during the hang)
+        Then Grep the log for the interleaving around the failure.
 
       FOR MEMORY:
       - Run with sanitizers:
@@ -348,9 +347,11 @@ nodes:
         node --max-old-space-size=256 script.js
       - Look for growth patterns:
         Run the test several times, observe RSS with ps/top
-      - If FlowTrace available (via execute_mcp_tool):
-        execute_mcp_tool("flowtrace", "log_aggregate", {sessionId, groupBy, metric})
-        execute_mcp_tool("flowtrace", "dashboard_analyze", {path})
+      - Attribute the growth to an allocation site:
+        Go:     go test -memprofile mem.out && go tool pprof -top mem.out
+        Python: python -X tracemalloc=10 script.py  (top allocation frames)
+        Node:   node --heapsnapshot-signal=SIGUSR2 app.js, then diff snapshots
+        Native: valgrind --leak-check=full, heaptrack, or ASAN's leak report
 
       COLLECT:
       - Sanitizer output (errors, warnings)
@@ -389,11 +390,12 @@ nodes:
       - Is there a common pattern in the failures?
       - What function/line does the stack trace point to?
 
-      FLOWTRACE DATA (via execute_mcp_tool):
-      - execute_mcp_tool("flowtrace", "log_search", {sessionId, filter})
-      - execute_mcp_tool("flowtrace", "log_aggregate", {sessionId, groupBy, metric})
-      - execute_mcp_tool("flowtrace", "log_flow", {sessionId, keys})
-      - execute_mcp_tool("flowtrace", "dashboard_bottlenecks", {path, top})
+      PROFILE / TRACE ARTIFACTS (the files the strategy phase produced):
+      - Read the profiler report / bench output you wrote to disk
+      - Grep the captured logs for the failing request id, error string,
+        or thread name to isolate the relevant window
+      - Re-run a narrower query with Bash when the file is too large
+        (go tool pprof -top, pstats.print_stats(N), grep -c, awk sums)
 
       PROFILING DATA:
       - Where is the execution time concentrated?
@@ -504,13 +506,14 @@ nodes:
       3. The tests that failed before must now PASS
       4. No new test must FAIL
 
-      VERIFICATION WITH FLOWTRACE (if used, via execute_mcp_tool):
-      1. execute_mcp_tool("flowtrace", "flowtrace_cleanup", {projectPath})
-      2. execute_mcp_tool("flowtrace", "flowtrace_build", {projectPath})
-      3. execute_mcp_tool("flowtrace", "flowtrace_execute", {projectPath})
-      4. execute_mcp_tool("flowtrace", "log_open", {path})
-      5. execute_mcp_tool("flowtrace", "log_errors", {sessionId})
-      6. Compare metrics before/after
+      VERIFICATION WITH PROFILING / TRACING (only if that strategy was used):
+      1. Re-run the EXACT same profiler or replay command from the strategy
+         phase, writing to a new output file (do not overwrite the "before")
+      2. Compare before/after side by side — same metric, same units
+      3. State the delta explicitly (e.g. "p95 1.8s -> 0.2s", "allocs
+         420k -> 3k"). A fix with no measurable delta is not verified.
+      4. For integration: replay the failing call and confirm the response
+         now matches the contract (status, headers, body shape)
 
       CRITERIA:
       - The original error does NOT appear
@@ -546,7 +549,7 @@ nodes:
       FORMAT:
       ## Bug Report
       - **Bug type**: [serialization|logic|performance|concurrency|integration|memory]
-      - **Strategy used**: [tests|flowtrace|hybrid]
+      - **Strategy used**: [tests|profiling|hybrid]
       - **Symptoms**: [what the user reported]
       - **Root cause**: [identified by the evidence]
       - **Evidence**: [specific data: test output, traces, metrics]
@@ -554,7 +557,8 @@ nodes:
       - **Verification**: [tests that passed, before/after comparison]
 
       Optionally:
-      - flowtrace.cleanup to clean up the debug logs
+      - Delete the scratch profiling artifacts you created (prof.out,
+        cpu.out, *.log, isolate-*.log) so they do not get committed
       - Suggest additional regression tests
 
       ======================================================================

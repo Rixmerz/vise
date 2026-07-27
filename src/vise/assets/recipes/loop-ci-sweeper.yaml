@@ -4,8 +4,18 @@ description: >
   summarise a proposed fix, and PROPOSE a chat notification. The runner
   halts before sending the notification (notify.chat is a sideeffect) and
   returns {paused_for_approval} for human sign-off. Graduable to L3 once
-  the D readiness gate passes and JIG_GOAL_GATE=1 is armed.
+  the D readiness gate passes and VISE_GOAL_GATE=1 is armed.
   Trigger from an external systemd timer or crontab at the cadence below.
+  SHIPS UNBOUND — deploy.status, ai.classify, ai.summarize and notify.chat
+  have no default binding, so recipe_run halts at step 1 until you bind them
+  via capability_set. The cadence below is documentation, not a scheduler:
+  the plugin installs no cron entry or systemd timer — you create it yourself.
+
+# GAP — vise bundles no deploy, AI or chat MCP. The steps below dispatch on
+# capabilities that resolve UNBOUND out of the box; recipe_run returns
+# "capability '<name>' is unresolved — use capability_set to assign a tool"
+# at the first such step. That is the intended GAP-first behaviour: a false
+# binding would report a green instead of surfacing the missing tool.
 
 # External scheduler hint:
 #   */30 * * * *  vise recipe run loop-ci-sweeper --input environment=staging

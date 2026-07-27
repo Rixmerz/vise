@@ -4,6 +4,16 @@ description: >
   and deliver a report via chat notification. No writes or side effects —
   safe to run unattended as a report-only loop. Trigger from an external
   systemd timer or crontab at the cadence below.
+  SHIPS UNBOUND — code.security.findings, ai.summarize and notify.chat have
+  no default binding, so recipe_run halts at step 1 until you bind them via
+  capability_set. The cadence below is documentation, not a scheduler: the
+  plugin installs no cron entry or systemd timer — you create it yourself.
+
+# GAP — vise bundles no security-scanner, AI or chat MCP. The steps below
+# dispatch on capabilities that resolve UNBOUND out of the box; recipe_run
+# returns "capability '<name>' is unresolved — use capability_set to assign
+# a tool" at the first such step. That is the intended GAP-first behaviour:
+# a false binding would report a green instead of surfacing the missing tool.
 
 # External scheduler hint — vise is not a daemon; the OS fires this line:
 #   0 9 * * *  vise recipe run loop-daily-triage

@@ -2,6 +2,15 @@ name: deploy-and-validate
 description: >
   Deploy a service, tail its startup logs, and assert the expected
   health-check string appears within the output.
+  SHIPS UNBOUND — deploy.update and deploy.tail_logs have no default
+  binding, so recipe_run halts at step 1 until you bind a deploy MCP
+  via capability_set.
+
+# GAP — vise bundles no deploy MCP. Every step below dispatches on a
+# capability that resolves UNBOUND out of the box; recipe_run returns
+# "capability '<name>' is unresolved — use capability_set to assign a tool"
+# at the first such step. That is the intended GAP-first behaviour: a false
+# binding would report a green instead of surfacing the missing tool.
 
 inputs:
   - service_name

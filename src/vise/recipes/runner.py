@@ -3,7 +3,8 @@
 Responsibilities:
 - Render step args via the template renderer
 - Resolve each capability to (mcp_name, tool_name)
-- Dispatch to execute_mcp_tool or built-in handlers
+- Dispatch via the _call_tool seam (built-in handlers, or a host-injected
+  dispatcher — vise itself ships no generic MCP dispatch tool)
 - Bind step outputs for downstream {{ steps.ID.output.K }} references
 - Record telemetry via trend_tracker.record_snapshot
 - Redact env refs before storing telemetry
@@ -443,8 +444,8 @@ async def run_recipe(
 async def _call_tool(mcp_name: str, tool_name: str, args: dict) -> Any:
     """Tool dispatch seam.
 
-    vise ships no MCP proxy dispatch layer (jig's internal_proxy/proxy_pool
-    were deliberately not extracted). Capability calls that resolve to an
+    vise ships no MCP proxy dispatch layer — that was a deliberate omission,
+    since Claude Code's native tool discovery covers it. Capability calls that resolve to an
     external MCP tool return a structured failure instead of crashing.
     Tests and in-host embedders monkeypatch this function to inject a real
     dispatcher.

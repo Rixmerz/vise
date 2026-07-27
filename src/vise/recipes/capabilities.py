@@ -39,11 +39,11 @@ CAPABILITIES: frozenset[str] = frozenset({
     # boundary (3rd-party API, CRM, webhook, external DB, payment). The
     # bound tool fires a REAL request at the DEPLOYED entrypoint, then
     # asserts the side-effect record actually exists in the target system.
-    # Bound globally to the internal stdlib e2e-runner (see INTERNAL_BINDINGS
-    # below): the engine is dependency-free and project-agnostic, so it is
-    # bound for every project out of the box. Project-specificity lives in
-    # the recipe/validator INPUTS (which endpoint, which record to assert),
-    # supplied at use time — not in the binding.
+    # Ships UNBOUND on purpose (GAP-first): which endpoint to hit and which
+    # record to assert is project-specific, so it is deliberately absent from
+    # INTERNAL_BINDINGS and capability_audit surfaces it as a GAP until you
+    # bind a concrete e2e-runner MCP via capability_set. A false binding would
+    # make the gate report a green instead of the GAP.
     # See rules/lazy/third-party-integration-gate.md for the contract.
     "validate.integration.e2e",
     # deploy
@@ -86,8 +86,9 @@ CAPABILITIES: frozenset[str] = frozenset({
     "meta.record_experience",
     "meta.assert",
     # Notion drift check — detects stale notions by comparing produced_at to
-    # source-file mtimes (git log -1 fallback: fs mtime). Bound internally;
-    # NOT a GAP. Ships as a read-only L1-compatible capability.
+    # source-file mtimes (git log -1 fallback: fs mtime). Read-only,
+    # L1-compatible. Ships UNBOUND (GAP-first): vise bundles no drift-check
+    # tool, so bind one via capability_set before running loop-sync.
     "meta.notion_drift",
     # workflow (vise-internal)
     "workflow.traverse",
@@ -98,15 +99,20 @@ CAPABILITIES: frozenset[str] = frozenset({
 # Vise-internal capability bindings
 # These map capability names to (mcp_name, tool_name) for tools that are
 # built into vise and do not live in external proxies.
+#
+# INVARIANT: only bind a tool that actually exists in vise's MCP surface
+# (capability_*, experience_*, goal_*, graph_*, recipe_*, snapshot_*,
+# vise_version). A binding to a nonexistent tool is worse than no binding —
+# the gate reports a false green instead of surfacing the GAP, and the
+# unbound path (runner.py: "use capability_set to assign a tool") never fires.
+# meta.list, meta.notion_drift and validate.integration.e2e are deliberately
+# absent: they resolve unbound until the user binds a real MCP.
 # ---------------------------------------------------------------------------
 INTERNAL_BINDINGS: dict[str, tuple[str, str]] = {
     "meta.record_experience": ("experience", "experience_record"),
-    "meta.list": ("vise", "proxy_list"),
     "meta.health": ("vise", "vise_version"),
-    "meta.notion_drift": ("notion", "notion_drift_check"),
     "workflow.traverse": ("graph", "graph_traverse"),
     "workflow.status": ("graph", "graph_status"),
-    "validate.integration.e2e": ("e2e", "e2e_check"),
 }
 
 

@@ -120,14 +120,14 @@ nodes:
     is_end: true
     prompt_injection: |
       PHASE: CLOSE
-      Capture continuity and emit summary.
-      1. Call next_task_record(summary=<final>, task_description=<original>,
-         files_changed=[<paths>]).
-      2. Call experience_record on contracts/<feature>.openapi.yaml with
+      Capture the lesson and emit the summary.
+      1. Call experience_record on contracts/<feature>.openapi.yaml with
          event_type=feature_shipped and a Why line describing the contract
          drift class avoided.
-      3. Summarize for the user (3-5 sentences): deliverable, surfaces,
+      2. Summarize for the user (3-5 sentences): deliverable, surfaces,
          contract file, E2E result.
+      Continuity needs no call here — vise persists session state
+      automatically via its PreCompact and SessionStart hooks.
       Signal: workflow complete.
 
 edges:
