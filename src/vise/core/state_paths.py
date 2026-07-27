@@ -8,6 +8,16 @@ Layout produced:
     ~/.local/share/vise/states/<project_slug>/                 ← state_dir()
     ~/.local/share/vise/states/<project_slug>/graph_state.json ← graph_state_path()
 
+``state_dir``/``probe_state_dir`` resolve to the plain ``<basename>``
+directory unless a DIFFERENT project already claimed that basename (see
+``vise.hooks._xdg.project_state_dir``/``claim_project_state_dir``), in
+which case a collision-proof ``<basename>-<hash>`` sibling is used
+instead. This keeps the common case (one project per basename, which is
+what other tools such as the hard-blocking ``graph_enforcer.py`` hook
+hardcode) identical to the legacy layout — zero migration needed — while
+still resolving real collisions between two different project
+directories that happen to share a basename.
+
 All paths respect ``$XDG_DATA_HOME`` (via ``vise.core.paths.data_dir()``,
 which itself delegates to ``vise.hooks._xdg.data_dir()`` — the single
 stdlib-only source of truth also used directly by the hard-blocking hooks
@@ -17,35 +27,43 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vise.core import paths as _paths
+from vise.hooks import _xdg
 
 
 def project_slug(project_dir: str | Path) -> str:
-    """Return the canonical project identifier: the basename of *project_dir*.
+    """Return the current directory name used for *project_dir*'s state.
 
-    >>> project_slug("/home/user/projects/my-app")
-    'my-app'
+    ``<basename>`` in the common case, or the collision-proof
+    ``<basename>-<8 hex chars>`` (see ``vise.hooks._xdg.project_key``) if a
+    different project already claimed that basename.
     """
-    return Path(project_dir).name
+    return _xdg.project_state_dir(project_dir).name
 
 
 def state_dir(project_dir: str | Path) -> Path:
     """Persistent state directory for *project_dir*.
 
-    Creates the directory (parents included) on first call.
-    Canonical: ``$XDG_DATA_HOME/vise/states/<basename>/``
+    Creates the directory (parents included) on first call and claims it
+    (see ``vise.hooks._xdg.claim_project_state_dir``) so a later, different
+    project sharing the same basename is diverted to its own directory
+    instead of silently sharing this one.
+    Canonical: ``$XDG_DATA_HOME/vise/states/<basename>[-<hash>]/``
     """
-    d = _paths.data_dir() / "states" / project_slug(project_dir)
+    d = _xdg.project_state_dir(project_dir)
     d.mkdir(parents=True, exist_ok=True)
+    _xdg.claim_project_state_dir(project_dir, d)
     return d
 
 
 def probe_state_dir(project_dir: str | Path) -> Path | None:
     """Return the state directory if it already exists, else None.
 
-    Does NOT create the directory. Intended for read-only hooks.
+    Does NOT create the directory. Intended for read-only hooks. Note:
+    resolving a legacy directory here still performs the same one-time
+    migration rename as ``state_dir`` (it relocates existing state onto
+    the new key rather than creating anything new).
     """
-    d = _paths.data_dir() / "states" / project_slug(project_dir)
+    d = _xdg.project_state_dir(project_dir)
     return d if d.exists() else None
 
 

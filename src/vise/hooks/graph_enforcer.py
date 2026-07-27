@@ -91,7 +91,17 @@ def get_state_path(project_dir):
     ``.claude/workflow/graph_state.json`` for pre-XDG manual setups.
     """
     project_name = Path(project_dir).name
-    xdg_state = _xdg.data_dir() / "states" / project_name / "graph_state.json"
+    # Delegate to the shared resolver rather than rebuilding the path here:
+    # it owns the collision-proof key for two projects sharing a basename,
+    # and a gate that computes its own path is exactly how this hook and the
+    # MCP tools ended up reading two different state trees. The inline
+    # fallback class above mirrors only data_dir(), so degrade to the plain
+    # basename form when the real module could not be imported.
+    resolver = getattr(_xdg, "graph_state_path", None)
+    if resolver is not None:
+        xdg_state = resolver(project_dir)
+    else:
+        xdg_state = _xdg.data_dir() / "states" / project_name / "graph_state.json"
     if xdg_state.exists():
         return xdg_state
 
@@ -123,7 +133,7 @@ def get_state_path(project_dir):
 #
 # Matched by SUFFIX (see _tool_suffix), not full prefixed name: the MCP
 # namespace prefix depends on how the server is registered
-# ("mcp__vise__x" under a manual jig-proxy install, "mcp__plugin_vise_vise__x"
+# ("mcp__vise__x" under a manual MCP install, "mcp__plugin_vise_vise__x"
 # under the Claude Code plugin, and potentially something else after a
 # future rename). Matching only the trailing tool name after the last
 # "__" keeps this allowlist correct across all of those.
@@ -142,7 +152,7 @@ GRAPH_INNER_ALLOWLIST = frozenset({
 })
 
 # Safe regardless of how the tool call arrives: directly (current plugin
-# model) or wrapped in execute_mcp_tool (legacy jig-proxy model).
+# model) or wrapped in an execute_mcp_tool-style proxy call.
 ENFORCER_ALLOWLIST = GRAPH_INNER_ALLOWLIST | frozenset({
     "vise_guide",
     "vise_version",
@@ -183,7 +193,7 @@ def main():
         return
 
     if suffix == _EXECUTE_MCP_TOOL_SUFFIX:
-        # Legacy jig-proxy model: real tool name is nested in tool_input.
+        # Proxied call: the real tool name is nested in tool_input.
         inner = hook_input.get("tool_input", {}).get("tool_name", "")
         if _tool_suffix(inner) in GRAPH_INNER_ALLOWLIST:
             print(json.dumps({"decision": "approve"}))
@@ -241,8 +251,7 @@ def main():
                 "message": (
                     f"[Graph Enforcer] Tool '{effective}' is blocked at node "
                     f"'{current_node}' (workflow: {active_graph}). "
-                    f"Advance the workflow with execute_mcp_tool(\"graph\", "
-                    f"\"graph_traverse\", {{...}}) to use this tool. "
+                    f"Advance the workflow with graph_traverse to use this tool. "
                     f"If the MCP server is unreachable and you cannot call "
                     f"graph_reset, run `vise graph reset --project "
                     f"{project_dir}` from a terminal to clear the state."
