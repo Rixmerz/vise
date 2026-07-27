@@ -21,6 +21,9 @@ def register_snapshot(mcp: "FastMCP") -> None:
         """Capture the current working tree to refs/vise/snapshots/<id>.
 
         Does not pollute git tags or branches. Label/phase are stored for audit.
+        Always runs when called explicitly — independent of the opt-in
+        VISE_SNAPSHOT_ON_EDIT hook, which only gates the automatic per-edit
+        trigger, not this manual entry point.
         """
         project = _resolve(project_dir)
         snap = snapshots.create(project, label=label, phase=phase)
@@ -36,11 +39,18 @@ def register_snapshot(mcp: "FastMCP") -> None:
 
     @mcp.tool()
     def snapshot_list(project_dir: str | None = None) -> dict[str, Any]:
-        """List snapshots in reverse chronological order."""
+        """List snapshots in reverse chronological order.
+
+        Per-edit auto-capture is opt-in (VISE_SNAPSHOT_ON_EDIT) and off by
+        default; phase-transition snapshots (graph_traverse) fire regardless.
+        The response's `on_edit_capture_enabled` tells you which regime is
+        active, so a stale-looking list isn't mistaken for a live one.
+        """
         project = _resolve(project_dir)
         snaps = snapshots.list_all(project)
         snaps.sort(key=lambda s: s.created_at, reverse=True)
-        return {
+        on_edit = snapshots.on_edit_capture_enabled()
+        result: dict[str, Any] = {
             "snapshots": [
                 {
                     "id": s.id,
@@ -50,8 +60,17 @@ def register_snapshot(mcp: "FastMCP") -> None:
                     "created_at": s.created_at,
                 }
                 for s in snaps
-            ]
+            ],
+            "on_edit_capture_enabled": on_edit,
         }
+        if not on_edit:
+            result["note"] = (
+                "Per-edit auto-capture (VISE_SNAPSHOT_ON_EDIT) is off — this "
+                "list is historical, not live. Phase-transition snapshots "
+                "(graph_traverse) still fire; call snapshot_create explicitly "
+                "for a manual checkpoint."
+            )
+        return result
 
     @mcp.tool()
     def snapshot_diff(a: str, b: str, project_dir: str | None = None) -> dict[str, Any]:

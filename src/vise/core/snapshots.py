@@ -28,6 +28,20 @@ log = logging.getLogger(__name__)
 
 SNAPSHOT_REF_PREFIX = "refs/vise/snapshots/"
 
+# Shared with hooks/snapshot_trigger.py — read the env var in exactly one
+# place so the hook and the snapshot_list tool never disagree on its meaning.
+ON_EDIT_ENV_VAR = "VISE_SNAPSHOT_ON_EDIT"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def on_edit_capture_enabled() -> bool:
+    """Whether the opt-in per-edit snapshot hook is enabled.
+
+    Off by default; truthy values for ``VISE_SNAPSHOT_ON_EDIT`` turn it on.
+    Does not affect explicit ``snapshot_create`` calls, which always work.
+    """
+    return os.environ.get(ON_EDIT_ENV_VAR, "").strip().lower() in _TRUTHY
+
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
@@ -325,12 +339,14 @@ def create_for_phase_transition(
 
 
 __all__ = [
+    "ON_EDIT_ENV_VAR",
     "SNAPSHOT_REF_PREFIX",
     "Snapshot",
     "create",
     "create_for_phase_transition",
     "diff",
     "list_all",
+    "on_edit_capture_enabled",
     "prune",
     "restore",
 ]

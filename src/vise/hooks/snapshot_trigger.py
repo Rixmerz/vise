@@ -117,8 +117,9 @@ def main() -> int:
     # The legacy per-edit temporal snapshot below is redundant with git and
     # noisy across edit bursts, so it is OFF by default. Opt back in with
     # VISE_SNAPSHOT_ON_EDIT=1 for a per-edit black-box recorder.
-    _optin = os.environ.get("VISE_SNAPSHOT_ON_EDIT", "").strip().lower()
-    if _optin not in ("1", "true", "yes", "on"):
+    from vise.core.snapshots import on_edit_capture_enabled
+
+    if not on_edit_capture_enabled():
         return 0
 
     project = _project_dir()
