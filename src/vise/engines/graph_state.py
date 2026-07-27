@@ -6,12 +6,52 @@ Storage layout:
 """
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from vise.core import state_paths as _state_paths
 from .graph_engine import GraphState, PathEntry, Graph
+
+_SLUG_RE = re.compile(r'[^a-z0-9]+')
+
+
+def _slugify(name: str) -> str:
+    """Turn a display name into an id-safe slug (lowercase, hyphenated)."""
+    slug = _SLUG_RE.sub('-', name.strip().lower()).strip('-')
+    return slug or 'unnamed'
+
+
+def _looks_like_display_name(value: str) -> bool:
+    """Heuristic: a graph id is a filename stem (kebab-case, no spaces/caps).
+
+    Anything with a space or uppercase letter is a display name, not an id.
+    """
+    return bool(value) and (' ' in value or value != value.lower())
+
+
+def _resolve_display_name_to_id(project_dir: str, display_name: str) -> Optional[str]:
+    """Best-effort: find the workflow-library graph id whose metadata name
+    matches *display_name*. Read-only, tolerant — never raises, returns None
+    on no match.
+    """
+    try:
+        from vise.engines.workflow_scope import resolve_workflow_dirs
+        from vise.engines.graph_parser import load_graph_from_file, GraphParseError
+        for _scope, workflows_dir in resolve_workflow_dirs(project_dir):
+            if not workflows_dir.exists():
+                continue
+            for yaml_file in workflows_dir.glob("*.yaml"):
+                try:
+                    candidate = load_graph_from_file(yaml_file)
+                except GraphParseError:
+                    continue
+                if candidate.metadata.get('name') == display_name:
+                    return yaml_file.stem
+    except Exception:
+        pass
+    return None
 
 
 def _get_centralized_state_dir(project_dir: str) -> Path:
@@ -66,11 +106,29 @@ def load_graph_state(project_dir: str) -> GraphState:
             )
             execution_path.append(entry)
 
-        return GraphState(
+        active_graph = data.get('active_graph')
+        active_graph_name = data.get('active_graph_name')
+        needs_normalize = False
+
+        # Tolerant read: on-disk states from before active_graph was
+        # canonicalized to an id may hold a display name (e.g. "Universal
+        # Debug"). Resolve it to the real id so downstream lookups by id
+        # keep working, and normalize the file on next write. Never drop
+        # the active workflow just because the stored value is a name.
+        if active_graph and _looks_like_display_name(active_graph):
+            resolved_id = _resolve_display_name_to_id(project_dir, active_graph)
+            if resolved_id:
+                if not active_graph_name:
+                    active_graph_name = active_graph
+                active_graph = resolved_id
+                needs_normalize = True
+
+        state = GraphState(
             current_nodes=data.get('current_nodes', []),
             node_visits=data.get('node_visits', {}),
             execution_path=execution_path,
-            active_graph=data.get('active_graph'),
+            active_graph=active_graph,
+            active_graph_name=active_graph_name,
             max_visits_default=data.get('max_visits_default', 10),
             total_transitions=data.get('total_transitions', 0),
             last_activity=data.get('last_activity'),
@@ -78,6 +136,14 @@ def load_graph_state(project_dir: str) -> GraphState:
             baseline_smells=data.get('baseline_smells'),
             completed_tasks=data.get('completed_tasks', {}),
         )
+
+        if needs_normalize:
+            try:
+                save_graph_state(project_dir, state)
+            except Exception:
+                pass  # normalization is best-effort; don't fail the read
+
+        return state
     except Exception:
         return GraphState()
 
@@ -117,6 +183,7 @@ def save_graph_state(project_dir: str, state: GraphState):
         'node_visits': state.node_visits,
         'execution_path': execution_path_data,
         'active_graph': state.active_graph,
+        'active_graph_name': state.active_graph_name,
         'max_visits_default': state.max_visits_default,
         'total_transitions': state.total_transitions,
         'last_activity': state.last_activity,
@@ -134,7 +201,12 @@ def initialize_graph_state(project_dir: str, graph: Graph, graph_name: str) -> G
     Args:
         project_dir: Project directory path
         graph: The Graph to initialize state for
-        graph_name: Name of the graph file (without extension)
+        graph_name: Name of the graph file (without extension), OR — from
+            lazy-init call sites — the graph's display name. Either way,
+            ``active_graph`` is always persisted as an id-shaped slug;
+            the display name (from ``graph.metadata.name`` when available,
+            else *graph_name* itself) is persisted separately as
+            ``active_graph_name``.
 
     Returns:
         Newly initialized GraphState
@@ -142,6 +214,9 @@ def initialize_graph_state(project_dir: str, graph: Graph, graph_name: str) -> G
     start_node = graph.get_start_node()
     if not start_node:
         raise ValueError("Graph has no start node")
+
+    graph_id = _slugify(graph_name) if _looks_like_display_name(graph_name) else graph_name
+    display_name = graph.metadata.get('name') or graph_name
 
     state = GraphState(
         current_nodes=[start_node.id],
@@ -155,7 +230,8 @@ def initialize_graph_state(project_dir: str, graph: Graph, graph_name: str) -> G
                 reason="Graph initialized"
             )
         ],
-        active_graph=graph_name,
+        active_graph=graph_id,
+        active_graph_name=display_name,
         max_visits_default=10,
         total_transitions=0,
         last_activity=datetime.now().isoformat()
@@ -175,9 +251,12 @@ def reset_graph_state(project_dir: str, graph: Graph) -> GraphState:
     Returns:
         Reset GraphState
     """
-    # Load existing state to preserve active_graph name
+    # Load existing state to preserve active_graph id + display name.
+    # load_graph_state() already normalizes active_graph to an id via its
+    # tolerant read path, so no re-slugify is needed here.
     existing = load_graph_state(project_dir)
     graph_name = existing.active_graph
+    display_name = existing.active_graph_name or graph.metadata.get('name')
 
     start_node = graph.get_start_node()
     if not start_node:
@@ -196,6 +275,7 @@ def reset_graph_state(project_dir: str, graph: Graph) -> GraphState:
             )
         ],
         active_graph=graph_name,
+        active_graph_name=display_name,
         max_visits_default=existing.max_visits_default,
         total_transitions=0,
         last_activity=datetime.now().isoformat()

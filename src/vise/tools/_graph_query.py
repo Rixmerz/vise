@@ -154,7 +154,7 @@ def register_graph_query_tools(mcp):
 
         return {
             "session_id": sid,
-            "graph_name": state.active_graph or graph.metadata.get('name', 'unnamed'),
+            "graph_name": state.active_graph_name or graph.metadata.get('name') or state.active_graph or 'unnamed',
             "current_node": {
                 "id": current_node_id,
                 "name": current_node.name if current_node else None,

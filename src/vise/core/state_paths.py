@@ -8,11 +8,10 @@ Layout produced:
     ~/.local/share/vise/states/<project_slug>/                 ← state_dir()
     ~/.local/share/vise/states/<project_slug>/graph_state.json ← graph_state_path()
 
-All paths respect ``$XDG_DATA_HOME`` (via ``vise.core.paths.data_dir()``).
-
-Note: hard-blocking hooks deployed into ``.claude/hooks/`` keep their own
-stdlib-only copy of this path logic; keep the two in sync when the XDG
-layout changes.
+All paths respect ``$XDG_DATA_HOME`` (via ``vise.core.paths.data_dir()``,
+which itself delegates to ``vise.hooks._xdg.data_dir()`` — the single
+stdlib-only source of truth also used directly by the hard-blocking hooks
+deployed into ``.claude/hooks/``, which cannot import this package).
 """
 from __future__ import annotations
 

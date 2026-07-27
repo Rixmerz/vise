@@ -17,6 +17,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from vise.core import paths as _paths
+
 log = logging.getLogger(__name__)
 
 _VALID_KINDS = frozenset(
@@ -28,7 +30,7 @@ def _telemetry_dir() -> Path:
     base = os.environ.get("VISE_TELEMETRY_DIR")
     if base:
         return Path(base)
-    return Path.home() / ".local" / "share" / "vise" / "telemetry"
+    return _paths.data_dir() / "telemetry"
 
 
 def record_intervention(

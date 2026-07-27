@@ -75,7 +75,10 @@ class Goal:
 
 
 def _goal_dir() -> Path:
-    p = Path(os.environ.get("VISE_GOAL_DIR", Path.home() / ".local/share/vise/goal"))
+    # Single source of truth for the data root; a local copy of this join is
+    # exactly what split goal state off from graph state and experience memory.
+    from vise.hooks._xdg import goal_dir
+    p = goal_dir()
     p.mkdir(parents=True, exist_ok=True)
     return p
 

@@ -13,6 +13,19 @@ import sys
 import os
 from pathlib import Path
 
+try:
+    from vise.hooks import _xdg
+except Exception:
+    # PYTHONPATH misconfiguration or non-standard deployment: fall back to
+    # an inline stdlib-only mirror so this hard-blocking gate still fails
+    # open instead of crashing before it can print a decision.
+    class _xdg:  # type: ignore[no-redef]
+        @staticmethod
+        def data_dir() -> Path:
+            raw = os.environ.get("XDG_DATA_HOME")
+            base = Path(raw) if raw and Path(raw).is_absolute() else Path.home() / ".local" / "share"
+            return base / "vise"
+
 
 def parse_tools_blocked(content):
     """Extract node_id -> tools_blocked mapping from graph YAML.
@@ -64,32 +77,26 @@ def parse_tools_blocked(content):
 
 
 def get_state_path(project_dir):
-    """Resolve graph_state.json path (stdlib-only implementation).
+    """Resolve graph_state.json path.
 
-    This hook is a hard-blocking PreToolUse gatekeeper. Any import error
-    would cause silent approval, which would be a correctness regression.
-    It therefore uses only stdlib and keeps its own local copy of the
-    path-resolution logic.
+    This hook is a hard-blocking PreToolUse gatekeeper, so path resolution
+    goes through ``vise.hooks._xdg`` (stdlib-only, with an inline fallback
+    above if even that import fails) — never the heavier ``vise.core``
+    package. That module is the single source of truth for the XDG data
+    dir, shared with ``vise.core.state_paths.graph_state_path()``.
 
-    Canonical equivalent (for engines/tools that can import vise):
-        ``vise.core.state_paths.graph_state_path(project_dir)``
-
-    Must stay in sync with ``vise.core.state_paths`` when the XDG layout
-    changes. The only difference here: this implementation also checks
-    the legacy ``config.json`` hub-dir override for installs that moved
-    their hub before XDG was adopted, and falls back to the project-local
+    This implementation additionally checks the legacy ``config.json``
+    hub-dir override for installs that moved their hub before XDG was
+    adopted, and falls back to the project-local
     ``.claude/workflow/graph_state.json`` for pre-XDG manual setups.
     """
     project_name = Path(project_dir).name
-    xdg_state = (
-        Path.home() / ".local" / "share" / "vise" / "states"
-        / project_name / "graph_state.json"
-    )
+    xdg_state = _xdg.data_dir() / "states" / project_name / "graph_state.json"
     if xdg_state.exists():
         return xdg_state
 
     # Legacy hub override via explicit config.json (still honoured if present)
-    config_file = Path.home() / ".local" / "share" / "vise" / "config.json"
+    config_file = _xdg.data_dir() / "config.json"
     if config_file.exists():
         try:
             config = json.loads(config_file.read_text())
@@ -113,8 +120,13 @@ def get_state_path(project_dir):
 #
 # Keep this list short and explicit. Read-only inspection + the enforcer
 # toggle + graph reset. Nothing that mutates code or runs shell.
-# Graph tools accessible via execute_mcp_tool that must always be approved
-# (recovery + read-only inspection path). Bare names match tool_input.tool_name.
+#
+# Matched by SUFFIX (see _tool_suffix), not full prefixed name: the MCP
+# namespace prefix depends on how the server is registered
+# ("mcp__vise__x" under a manual jig-proxy install, "mcp__plugin_vise_vise__x"
+# under the Claude Code plugin, and potentially something else after a
+# future rename). Matching only the trailing tool name after the last
+# "__" keeps this allowlist correct across all of those.
 GRAPH_INNER_ALLOWLIST = frozenset({
     "graph_enforcer_toggle",
     "graph_status",
@@ -123,11 +135,26 @@ GRAPH_INNER_ALLOWLIST = frozenset({
     "graph_timeline",
 })
 
-ENFORCER_ALLOWLIST = frozenset({
-    "mcp__vise__execute_mcp_tool",  # inner tool checked separately below
-    "mcp__vise__vise_guide",
-    "mcp__vise__vise_version",
+# Safe regardless of how the tool call arrives: directly (current plugin
+# model) or wrapped in execute_mcp_tool (legacy jig-proxy model).
+ENFORCER_ALLOWLIST = GRAPH_INNER_ALLOWLIST | frozenset({
+    "vise_guide",
+    "vise_version",
 })
+
+_EXECUTE_MCP_TOOL_SUFFIX = "execute_mcp_tool"
+
+
+def _tool_suffix(tool_name):
+    """Return the trailing segment of a namespaced MCP tool name.
+
+    "mcp__plugin_vise_vise__graph_status" -> "graph_status"
+    "mcp__vise__graph_status"             -> "graph_status"
+    "graph_status"                        -> "graph_status" (already bare)
+    """
+    if "__" in tool_name:
+        return tool_name.rsplit("__", 1)[-1]
+    return tool_name
 
 
 def main():
@@ -138,21 +165,24 @@ def main():
         return
 
     tool_name = hook_input.get("tool_name", "")
+    suffix = _tool_suffix(tool_name)
 
     # Hardcoded escape hatch: control + read-only graph tools always pass.
     # This is the in-band recovery path — without it, a stuck workflow
     # has no way back without editing files from a separate terminal.
-    if tool_name in ENFORCER_ALLOWLIST:
-        # execute_mcp_tool: check if inner graph tool is in recovery allowlist
-        if tool_name == "mcp__vise__execute_mcp_tool":
-            inner = hook_input.get("tool_input", {}).get("tool_name", "")
-            if inner in GRAPH_INNER_ALLOWLIST:
-                print(json.dumps({"decision": "approve"}))
-                return
-            # Fall through — inner tool subject to normal blocking below
-        else:
+    # Matched by suffix so it works whether the MCP is registered as
+    # "mcp__vise__x" or "mcp__plugin_vise_vise__x" (see _tool_suffix).
+    if suffix in ENFORCER_ALLOWLIST:
+        print(json.dumps({"decision": "approve"}))
+        return
+
+    if suffix == _EXECUTE_MCP_TOOL_SUFFIX:
+        # Legacy jig-proxy model: real tool name is nested in tool_input.
+        inner = hook_input.get("tool_input", {}).get("tool_name", "")
+        if _tool_suffix(inner) in GRAPH_INNER_ALLOWLIST:
             print(json.dumps({"decision": "approve"}))
             return
+        # Fall through — inner tool subject to normal blocking below
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     if not project_dir:
@@ -195,7 +225,7 @@ def main():
 
         # For execute_mcp_tool, check the inner tool name against blocked list
         effective = tool_name
-        if tool_name == "mcp__vise__execute_mcp_tool":
+        if suffix == _EXECUTE_MCP_TOOL_SUFFIX:
             effective = hook_input.get("tool_input", {}).get("tool_name", tool_name)
 
         # 3. Check if tool is blocked ("*" = block everything)

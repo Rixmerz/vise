@@ -21,10 +21,11 @@ Protocol:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from vise.hooks import _xdg
 
 _APPROVE = json.dumps({"decision": "approve"})
 
@@ -33,10 +34,7 @@ TAIL_BYTES = 64 * 1024  # last 64 KB of telemetry log
 
 
 def _telemetry_path() -> Path:
-    base = os.environ.get("VISE_TELEMETRY_DIR")
-    if base:
-        return Path(base) / "orchestration.jsonl"
-    return Path.home() / ".local" / "share" / "vise" / "telemetry" / "orchestration.jsonl"
+    return _xdg.telemetry_path()
 
 
 def _tail_events(path: Path) -> list[dict]:

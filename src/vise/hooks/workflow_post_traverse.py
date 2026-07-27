@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vise.hooks import _xdg
+
 _APPROVE = json.dumps({"decision": "approve"})
 
 
@@ -49,7 +51,7 @@ def _record_experience(result: dict, project_path: str) -> None:
     smells_summary = ""
 
     # Try to import experience_memory from vise
-    wm_src = Path.home() / ".local" / "share" / "vise" / "src"
+    wm_src = _xdg.src_dir()
     # Also try project-local install
     proj_wm_src = Path(project_path) / ".vise" / "src"
     for src_path in [proj_wm_src, wm_src]:
@@ -119,10 +121,8 @@ def _record_experience_fallback(result: dict, project_path: str,
                                  reason: str, smells_summary: str) -> None:
     """Fallback when experience_memory module is unavailable."""
     project_name = Path(project_path).name
-    wm_dir = Path.home() / ".local" / "share" / "vise"
-    proj_mem_dir = wm_dir / "project_memories" / project_name
-    proj_mem_dir.mkdir(parents=True, exist_ok=True)
-    mem_file = proj_mem_dir / "experience_memory.json"
+    mem_file = _xdg.project_memory_path(project_name)
+    mem_file.parent.mkdir(parents=True, exist_ok=True)
 
     existing: dict = {"entries": []}
     if mem_file.exists():
@@ -248,10 +248,8 @@ def _emit_usage_block(project_dir: str) -> None:
 
 
 def _fallback_read_state() -> dict:
-    """Read usage_state.json without depending on the vise package."""
-    override = os.environ.get("VISE_USAGE_DIR")
-    base = Path(override) if override else Path.home() / ".local" / "share" / "vise" / "usage"
-    path = base / "state.json"
+    """Read usage_state.json without depending on the heavier vise.engines package."""
+    path = _xdg.usage_dir() / "state.json"
     if not path.exists():
         return {}
     try:

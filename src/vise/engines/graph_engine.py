@@ -276,7 +276,12 @@ class GraphState:
         current_nodes: List of currently active node IDs (array for future parallelism)
         node_visits: Count of visits per node ID
         execution_path: History of all transitions
-        active_graph: Name of the active graph file
+        active_graph: Canonical id (file stem) of the active graph — NEVER a
+            display name. Code that resolves a graph file from this field
+            depends on it being id-shaped.
+        active_graph_name: Human-readable display name from the graph's
+            ``metadata.name``, for output only. Optional — falls back to
+            ``active_graph`` when absent.
         max_visits_default: Default max visits for nodes without explicit limit
         total_transitions: Total number of transitions made
     """
@@ -284,6 +289,7 @@ class GraphState:
     node_visits: dict[str, int] = field(default_factory=dict)
     execution_path: list[PathEntry] = field(default_factory=list)
     active_graph: Optional[str] = None
+    active_graph_name: Optional[str] = None
     max_visits_default: int = 10
     total_transitions: int = 0
     last_activity: Optional[str] = None

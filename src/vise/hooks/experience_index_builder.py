@@ -39,6 +39,8 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+from vise.hooks import _xdg
+
 # Fields written to score files — the only data read at query time.
 _SCORE_FIELDS = frozenset({"file_pattern", "keywords", "domain", "confidence"})
 
@@ -49,11 +51,11 @@ LOCK_TTL = 30.0
 
 
 def _store_path() -> Path:
-    return Path.home() / ".local" / "share" / "vise" / "experience_memory.json"
+    return _xdg.experience_memory_path()
 
 
 def _index_dir() -> Path:
-    return Path.home() / ".local" / "share" / "vise" / "experience_index"
+    return _xdg.experience_index_dir()
 
 
 def parent_to_key(parent: str) -> str:

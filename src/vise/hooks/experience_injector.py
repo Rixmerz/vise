@@ -63,6 +63,8 @@ import re
 import sys
 from pathlib import Path
 
+from vise.hooks import _xdg
+
 # ---------------------------------------------------------------------------
 # Inlined from _common.py — avoids sys.path.insert + module-file read (~7 ms).
 # Keep in sync with src/vise/hooks/_common.py.
@@ -131,11 +133,11 @@ def _fast_glob_match(pattern: str, target: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _index_dir() -> Path:
-    return Path.home() / ".local" / "share" / "vise" / "experience_index"
+    return _xdg.experience_index_dir()
 
 
 def _store_path() -> Path:
-    return Path.home() / ".local" / "share" / "vise" / "experience_memory.json"
+    return _xdg.experience_memory_path()
 
 
 def _parent_key(parent: str) -> str:
@@ -319,10 +321,7 @@ def main() -> None:
     # they carry all fields so detail lookup is not needed for them).
     proj_extra: list[dict] = []
     if project_name:
-        proj_store = (
-            Path.home() / ".local" / "share" / "vise"
-            / "project_memories" / project_name / "experience_memory.json"
-        )
+        proj_store = _xdg.project_memory_path(project_name)
         if proj_store.exists():
             try:
                 proj_extra = json.loads(proj_store.read_bytes()).get("entries", [])

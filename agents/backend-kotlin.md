@@ -3,7 +3,7 @@ name: backend-kotlin
 description: Implements server-side Kotlin — services, controllers, data models, coroutine workers (Spring/Ktor). Use proactively when a task requires writing or modifying Kotlin backend code. Never touches frontend code.
 model: sonnet
 effort: medium
-color: magenta
+color: purple
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills:
   - kotlin-rules

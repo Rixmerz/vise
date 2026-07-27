@@ -205,23 +205,33 @@ def register_recipes(mcp: FastMCP) -> None:
 
         rows = []
         for r in recipes:
-            all_resolved = all(
-                resolve_capability(s.capability, assignments, user_pins) is not None
-                for s in r.steps
-            )
+            unresolved_caps = {
+                s.capability for s in r.steps
+                if resolve_capability(s.capability, assignments, user_pins) is None
+            }
+            runnable = not unresolved_caps
             rows.append({
                 "name": r.name,
+                # Prominent, top-level runnability — the same fact as
+                # all_capabilities_resolved below, surfaced first so a new
+                # user can tell at a glance which recipes will actually run.
+                "runnable": runnable,
+                "unresolved_capabilities": len(unresolved_caps),
                 "description": r.description,
                 "steps": len(r.steps),
                 "inputs": r.inputs,
-                "all_capabilities_resolved": all_resolved,
+                "all_capabilities_resolved": runnable,  # back-compat alias
                 "scope": r.scope,
                 "source_path": str(r.source_path),
             })
 
+        # Runnable-first, then alphabetical within each group.
+        rows.sort(key=lambda row: (not row["runnable"], row["name"]))
+
         return {
             "recipes": rows,
             "count": len(rows),
+            "runnable_count": sum(1 for row in rows if row["runnable"]),
             "project_dir": resolved_dir,
             "session_id": sid,
         }
@@ -303,6 +313,42 @@ def register_recipes(mcp: FastMCP) -> None:
             out = explain_recipe(name, resolved_dir, inputs)
             out["session_id"] = sid
             return out
+
+        # Preflight: if any capability is unresolved, return the exact
+        # capability_set(...) calls needed instead of a generic per-step
+        # halt (the runner only surfaces the FIRST unresolved step and
+        # stops). Reuses explain_recipe's resolution chain rather than a
+        # second resolution path.
+        preflight = explain_recipe(name, resolved_dir, inputs)
+        unresolved_steps = [
+            entry for entry in preflight.get("resolution_chain", [])
+            if entry.get("resolved_mcp") is None
+        ]
+        if unresolved_steps:
+            calls_needed: list[str] = []
+            seen_caps: set[str] = set()
+            for entry in unresolved_steps:
+                cap = entry["capability"]
+                if cap in seen_caps:
+                    continue
+                seen_caps.add(cap)
+                suggestions = entry.get("suggestions") or []
+                example_tool = suggestions[0]["tool"] if suggestions else "<mcp_name>.<tool_name>"
+                calls_needed.append(
+                    f'capability_set(tool="{example_tool}", capability="{cap}")'
+                )
+            return {
+                "success": False,
+                "error": (
+                    f"recipe '{name}' has {len(seen_caps)} unresolved "
+                    "capability(ies) — bind them before running"
+                ),
+                "unresolved_capabilities": sorted(seen_caps),
+                "capability_set_calls_needed": calls_needed,
+                "hint": "recipe_run(name=..., explain=true) shows the full per-step resolution chain and suggestions.",
+                "project_dir": resolved_dir,
+                "session_id": sid,
+            }
 
         result = await run_recipe(
             recipe, inputs or {}, resolved_dir,

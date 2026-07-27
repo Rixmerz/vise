@@ -316,7 +316,7 @@ def register_graph_management_tools(mcp):
         return {
             "success": True,
             "session_id": sid,
-            "graph_name": state.active_graph or graph.metadata.get('name', 'unnamed'),
+            "graph_name": state.active_graph_name or graph.metadata.get('name') or state.active_graph or 'unnamed',
             "mermaid": mermaid,
             "hint": "Render this in a markdown code block with ```mermaid",
             "project_dir": resolved_dir

@@ -23,6 +23,8 @@ import re
 import sys
 from pathlib import Path
 
+from vise.hooks import _xdg
+
 MIN_PROMPT_CHARS = 60
 
 
@@ -73,8 +75,7 @@ def _state_path() -> Path | None:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if not project_dir:
         return None
-    name = Path(project_dir).name
-    xdg = Path.home() / ".local" / "share" / "vise" / "states" / name / "graph_state.json"
+    xdg = _xdg.graph_state_path(project_dir)
     if xdg.exists():
         return xdg
     local = Path(project_dir) / ".claude" / "workflow" / "graph_state.json"

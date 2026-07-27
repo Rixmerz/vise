@@ -877,6 +877,101 @@ edges:
 
 
 # ---------------------------------------------------------------------------
+# Legacy display-name tolerant read — active_graph must resolve to an id
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyActiveGraphDisplayName:
+    """``active_graph`` is canonically the workflow id; the human-readable
+    name lives in ``active_graph_name``. A state file written before this
+    split (or hand-edited) may still hold the display name in
+    ``active_graph`` — the tolerant read path in ``load_graph_state`` must
+    resolve it to the real id without losing any other state, and
+    normalize the file on next write.
+    """
+
+    # Uses the real bundled workflow (src/vise/assets/workflows/debug-graph.yaml,
+    # metadata.name "Universal Debug") — the exact case from the bug report,
+    # rather than a synthetic one. resolve_workflow_dirs() checks bundled
+    # scope before project scope and returns on first name match, so a
+    # project-local workflow of the same display name would never be
+    # reached; testing against the real bundled file is the honest case.
+
+    def _write_legacy_state(self, project: Path, display_name: str) -> Path:
+        from vise.engines.graph_state import get_graph_state_file
+        state_file = get_graph_state_file(str(project))
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps({
+            "active_graph": display_name,
+            "current_nodes": ["reproduce"],
+            "node_visits": {"reproduce": 1},
+            "execution_path": [],
+            "total_transitions": 0,
+        }))
+        return state_file
+
+    def test_legacy_display_name_resolves_to_id(self, tmp_path: Path) -> None:
+        """A state file holding 'Universal Debug' in active_graph resolves
+        to the real bundled workflow id 'debug-graph', with the display
+        name carried over into active_graph_name."""
+        self._write_legacy_state(tmp_path, "Universal Debug")
+
+        loaded = load_graph_state(str(tmp_path))
+
+        assert loaded.active_graph == "debug-graph"
+        assert loaded.active_graph_name == "Universal Debug"
+
+    def test_legacy_display_name_preserves_current_nodes(self, tmp_path: Path) -> None:
+        """Resolving the legacy display name must not drop current_nodes —
+        the whole point is that the workflow keeps running from where it was."""
+        self._write_legacy_state(tmp_path, "Universal Debug")
+
+        loaded = load_graph_state(str(tmp_path))
+
+        assert loaded.current_nodes == ["reproduce"]
+
+    def test_legacy_display_name_normalizes_on_disk(self, tmp_path: Path) -> None:
+        """After a tolerant read, the state file on disk is rewritten so
+        active_graph holds the id, not the display name — the migration
+        is self-healing and only needs to happen once."""
+        state_file = self._write_legacy_state(tmp_path, "Universal Debug")
+
+        load_graph_state(str(tmp_path))
+
+        raw = json.loads(state_file.read_text())
+        assert raw["active_graph"] == "debug-graph"
+        assert raw["active_graph_name"] == "Universal Debug"
+        assert raw["current_nodes"] == ["reproduce"]
+
+    def test_unresolvable_display_name_kept_verbatim(self, tmp_path: Path) -> None:
+        """If no workflow file matches the display name, the tolerant read
+        must not silently drop the active workflow — keep the raw value
+        rather than losing it."""
+        # No matching workflow file written for "Ghost Workflow".
+        self._write_legacy_state(tmp_path, "Ghost Workflow")
+
+        loaded = load_graph_state(str(tmp_path))
+
+        assert loaded.active_graph == "Ghost Workflow"
+        assert loaded.current_nodes == ["reproduce"]
+
+    def test_id_shaped_active_graph_untouched(self, tmp_path: Path) -> None:
+        """An already-canonical id-shaped active_graph is not treated as a
+        display name and passes through unchanged."""
+        state = GraphState(
+            current_nodes=["reproduce"],
+            active_graph="universal-debug",
+            active_graph_name="Universal Debug",
+        )
+        save_graph_state(str(tmp_path), state)
+
+        loaded = load_graph_state(str(tmp_path))
+
+        assert loaded.active_graph == "universal-debug"
+        assert loaded.active_graph_name == "Universal Debug"
+
+
+# ---------------------------------------------------------------------------
 # Gap 2 — Inline flow-mapping edges give a clear error, not 'missing id'
 # ---------------------------------------------------------------------------
 

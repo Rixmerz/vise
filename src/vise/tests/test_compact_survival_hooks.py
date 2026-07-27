@@ -61,15 +61,22 @@ def test_session_restore_no_state_silent(isolated: Path) -> None:
 
 
 def test_precompact_active_workflow_emits_context(isolated: Path) -> None:
+    """PreCompact must emit systemMessage, NOT hookSpecificOutput.
+
+    hookSpecificOutput is only valid for PreToolUse, UserPromptSubmit,
+    PostToolUse, PostToolBatch, Stop, SubagentStop — Claude Code rejects
+    it on PreCompact ("Hook JSON output validation failed"), which meant
+    this hook failed on every single /compact before the fix.
+    """
     _write_graph_state(isolated)
     out, code = _run(precompact_state, isolated)
     assert code == 0
     data = json.loads(out)
-    hso = data["hookSpecificOutput"]
-    assert hso["hookEventName"] == "PreCompact"
-    assert "debug-flow" in hso["additionalContext"]
-    assert "reproduce" in hso["additionalContext"]
-    assert "PRESERVE".lower() in hso["additionalContext"].lower()
+    assert "hookSpecificOutput" not in data
+    msg = data["systemMessage"]
+    assert "debug-flow" in msg
+    assert "reproduce" in msg
+    assert "PRESERVE".lower() in msg.lower()
 
 
 def test_session_restore_active_workflow_emits_context(isolated: Path) -> None:

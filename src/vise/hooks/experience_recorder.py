@@ -23,6 +23,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import extract_keywords, guess_domain
 
+from vise.hooks import _xdg
+
 
 _APPROVE = json.dumps({"decision": "approve"})
 
@@ -248,10 +250,8 @@ def main():
     # -----------------------------------------------------------------------
     # Persist to project store and global store
     # -----------------------------------------------------------------------
-    wm_dir = Path.home() / ".local" / "share" / "vise"
-
-    project_store_path = wm_dir / "project_memories" / project_name / "experience_memory.json"
-    global_store_path = wm_dir / "experience_memory.json"
+    project_store_path = _xdg.project_memory_path(project_name)
+    global_store_path = _xdg.experience_memory_path()
 
     for store_path in (project_store_path, global_store_path):
         store = _load_store(store_path)
@@ -267,12 +267,12 @@ def main():
     # -----------------------------------------------------------------------
     try:
         # Find trends.json in state directory
-        _config_path = Path.home() / ".local" / "share" / "vise" / "vise-project.json"
+        _config_path = _xdg.vise_project_path()
         _trends_path = None
         if _config_path.exists():
             _ac_config = json.loads(_config_path.read_text(encoding="utf-8"))
             _states_dir = _ac_config.get("states_dir", "states")
-            _trend_candidate = Path.home() / ".local" / "share" / "vise" / _states_dir / project_name / "trends.json"
+            _trend_candidate = _xdg.data_dir() / _states_dir / project_name / "trends.json"
             if _trend_candidate.exists():
                 _trends_path = _trend_candidate
 

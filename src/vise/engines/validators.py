@@ -55,7 +55,8 @@ def _apply_consistency_guard(passed: bool, combined_output: str, evidence: str) 
 # --- evidence persistence (Edit 5) ----------------------------------------
 
 def _goal_state_dir() -> Path:
-    return Path(os.environ.get("VISE_GOAL_DIR", Path.home() / ".local/share/vise/goal"))
+    from vise.hooks._xdg import goal_dir
+    return goal_dir()
 
 
 def _sanitize(name: str) -> str:

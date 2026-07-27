@@ -98,6 +98,88 @@ Environment variables (all optional; legacy `JIG_*` names honored as fallbacks w
 | `VISE_TELEMETRY_DIR` / `VISE_USAGE_DIR` | Telemetry/usage output dirs |
 | `VISE_JUDGE_CMD` | External judge command for AI validators |
 
+## LSP servers
+
+`.claude-plugin/plugin.json` declares `lspServers` — Claude Code's own LSP
+client reads this map (extension → server) to give agents `hover` /
+`documentSymbol` / `findReferences` / `incomingCalls` on your source. vise
+does **not** install these toolchains; it only declares which binary to
+launch per file extension. Install what you need:
+
+| Server | Extensions | Install |
+|---|---|---|
+| `clangd` | `.c .h .cpp .cc .cxx .hpp .hxx` | `apt install clangd` / `brew install llvm` |
+| `csharp-ls` | `.cs` | `dotnet tool install -g csharp-ls` |
+| `gopls` | `.go` | `go install golang.org/x/tools/gopls@latest` |
+| `intelephense` | `.php` | `npm install -g intelephense` |
+| `jdtls` | `.java` | https://github.com/eclipse-jdtls/eclipse.jdt.ls |
+| `kotlin-lsp` | `.kt .kts` | https://github.com/Kotlin/kotlin-lsp |
+| `lua` | `.lua` | https://github.com/LuaLS/lua-language-server |
+| `pyright` | `.py .pyi` | `npm install -g pyright` (or `pip install pyright`) |
+| `ruby-lsp` | `.rb .rake .gemspec .ru .erb` | `gem install ruby-lsp` |
+| `rust-analyzer` | `.rs` | `rustup component add rust-analyzer` |
+| `sourcekit-lsp` | `.swift` | bundled with the Swift toolchain |
+| `typescript` | `.ts .tsx .js .jsx .mts .cts .mjs .cjs` | `npm install -g typescript-language-server typescript` |
+
+Run `vise doctor` to see which of these actually resolve on `PATH` on your
+machine, plus the status of vise's own `ruff`/`mypy` diagnostics shell-out
+and any pending XDG state migration.
+
+### Deno projects — opt-in, and why it isn't the default
+
+A Deno project (`deno.json`/`deno.jsonc` at the root, no `node_modules`)
+fails **every** LSP call under `typescript-language-server`. That server
+hard-requires a `typescript` package in the workspace's `node_modules`,
+which a Deno project never has — deps are `jsr:`/`npm:` specifiers in
+`deno.json`. The failure is total, not degraded: even `documentSymbol`,
+which resolves no imports, dies at `initialize`:
+
+```
+Could not find a valid TypeScript installation. Please ensure that the
+"typescript" dependency is installed in the workspace ... Exiting.
+```
+
+`deno lsp` is the correct server, and it works — verified end-to-end
+through this plugin (`documentSymbol`, `findReferences`, `incomingCalls`
+all returned correct results against clangd on the same wiring, so the
+plugin → tool → server → handshake path is sound).
+
+**It is not enabled by default, deliberately.** `deno` would have to claim
+`.ts .tsx .js .jsx .mts` — every one of which `typescript` already claims.
+The manifest schema (read out of Claude Code's own LSP Zod schema:
+`command`, `args`, `extensionToLanguage`, `transport`, `env`,
+`initializationOptions`, `settings`, `workspaceFolder`, `startupTimeout`,
+plus `lspServers` accepting a record, a `.lsp.json` path, or an array of
+either) has **no priority field, no workspace-root marker, and no
+project-level override** — `lspServers` is plugin-scoped only. So which
+server wins an extension both claim is **undetermined**, and shipping the
+collision would make `.ts` behavior a coin flip for every user, including
+Node users for whom it works today. A deterministic opt-in beats a
+nondeterministic default.
+
+To switch a machine over to Deno, add this to `lspServers` in
+`.claude-plugin/plugin.json` **and remove the same five extensions from the
+`typescript` entry** so exactly one server owns them:
+
+```jsonc
+"deno": {
+  "command": "deno",
+  "args": ["lsp"],
+  "extensionToLanguage": {
+    ".ts": "typescript", ".tsx": "typescriptreact",
+    ".js": "javascript", ".jsx": "javascriptreact", ".mts": "typescript"
+  }
+}
+```
+
+`vise doctor` detects this case and prints the block for you. **Restart
+Claude Code afterwards** — the LSP server map is read once at session
+start, so editing it mid-session has no effect (verified).
+
+This stops being a manual step if Claude Code ever ships per-project
+`lspServers` resolution; the tie-break signal is trivial (`deno.json` ⇒
+Deno, `package.json` ⇒ Node).
+
 ## Development
 
 ```sh

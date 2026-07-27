@@ -39,6 +39,16 @@ def parse_yaml_simple(content: str) -> dict:
            (val.startswith("'") and val.endswith("'")):
             return val[1:-1]
 
+        # Inline flow sequence: "[]" or "[a, b, \"c\"]". Handles the common
+        # `mcps_enabled: []` / `mcps_enabled: [serena, sequentialthinking]`
+        # forms that block-list syntax (key on its own line, items indented
+        # below) doesn't cover.
+        if val.startswith('[') and val.endswith(']'):
+            inner = val[1:-1].strip()
+            if not inner:
+                return []
+            return [parse_value(item) for item in inner.split(',')]
+
         # Strip trailing inline YAML comment from unquoted scalar.
         # Block literal content never passes through parse_value, so this is safe.
         # Only strip when '#' is preceded by whitespace: "val  # comment" → "val".
