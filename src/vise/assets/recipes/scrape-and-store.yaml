@@ -9,7 +9,7 @@ description: >
 # dispatch on capabilities that resolve UNBOUND out of the box; recipe_run
 # returns "capability '<name>' is unresolved — use capability_set to assign
 # a tool" at the first such step. That is the intended GAP-first behaviour:
-# a false binding would report a green instead of surfacing the missing tool.
+# a false binding would report a green instead of surfacing the missing tool. Once bound, recipe_run returns a step-by-step PLAN (resolved tool + rendered args), not an execution result — vise has no MCP dispatch layer.
 
 inputs:
   - url

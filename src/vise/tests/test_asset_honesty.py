@@ -108,3 +108,7 @@ async def test_unbound_capability_fails_recipe_loudly(tmp_path: Path) -> None:
     assert result["success"] is False
     assert "unresolved" in result["error"]
     assert "capability_set" in result["error"]
+    # "fails loudly" and "returns a plan" are adjacent shapes now that
+    # run_recipe emits a plan for resolved steps — an unbound step must
+    # never carry a plan entry alongside the failure.
+    assert not result.get("plan")

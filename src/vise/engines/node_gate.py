@@ -43,8 +43,11 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
                 evidence=f"validator build/run error: {e}"[:300], exit_code=None,
             ))
 
-    # 2. Recipe gate — vise ships no recipe engine; a declared recipe fails
-    #    the gate with explicit evidence rather than silently passing.
+    # 2. Recipe gate. ``run_recipe`` resolves a recipe into a PLAN — vise is an
+    #    MCP server and cannot dispatch another server's tools, so a fully-bound
+    #    recipe returns success=True having executed nothing. Treating that as a
+    #    pass is a false green, the exact failure this gate exists to prevent, so
+    #    a non-empty plan fails the gate and names the steps the caller must run.
     if getattr(node, "recipe", None):
         try:
             from vise.recipes.loader import load_recipes
@@ -59,12 +62,27 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
                 ))
             else:
                 rec_result = await run_recipe(recipe_obj, {}, project_dir)
-                rec_passed = bool(rec_result.get("success"))
-                results.append(SimpleNamespace(
-                    name=f"recipe:{node.recipe}", passed=rec_passed, weight=1.0,
-                    evidence=(rec_result.get("error") or "recipe ok")[:300],
-                    exit_code=0 if rec_passed else 1,
-                ))
+                plan = rec_result.get("plan") or []
+                if plan:
+                    steps = ", ".join(
+                        f"{s.get('step_id')}→{s.get('resolved_mcp')}.{s.get('resolved_tool')}"
+                        for s in plan
+                    )
+                    evidence = (
+                        f"planned, not executed — vise cannot dispatch these itself. "
+                        f"Run the {len(plan)} step(s) and re-traverse: {steps}"
+                    )
+                    results.append(SimpleNamespace(
+                        name=f"recipe:{node.recipe}", passed=False, weight=1.0,
+                        evidence=evidence[:300], exit_code=1,
+                    ))
+                else:
+                    rec_passed = bool(rec_result.get("success"))
+                    results.append(SimpleNamespace(
+                        name=f"recipe:{node.recipe}", passed=rec_passed, weight=1.0,
+                        evidence=(rec_result.get("error") or "recipe ok")[:300],
+                        exit_code=0 if rec_passed else 1,
+                    ))
         except Exception as e:
             results.append(SimpleNamespace(
                 name=f"recipe:{node.recipe}", passed=False, weight=1.0,

@@ -1,11 +1,19 @@
-"""Recipe runner — executes a Recipe step by step.
+"""Recipe runner — turns a Recipe into an executable PLAN, step by step.
+
+vise is an MCP *server*; it has no way to call another MCP server's tool
+(that dispatch layer was deliberately removed). So instead of executing
+steps, the runner resolves + renders each one and hands back an ordered
+plan for the calling agent (Claude Code) to execute itself — the same
+"vise advises, the agent executes" shape as `graph_traverse`'s
+`prompt_injection`.
 
 Responsibilities:
 - Render step args via the template renderer
-- Resolve each capability to (mcp_name, tool_name)
-- Dispatch via the _call_tool seam (built-in handlers, or a host-injected
-  dispatcher — vise itself ships no generic MCP dispatch tool)
-- Bind step outputs for downstream {{ steps.ID.output.K }} references
+- Resolve each capability to (mcp_name, tool_name); halt loudly if unresolved
+- Execute `meta.assert` locally (it needs no external MCP) when not dry_run
+- Emit a plan entry for every other step instead of dispatching it
+- Bind a placeholder for downstream {{ steps.ID.output.K }} references so
+  they survive verbatim into later steps' rendered args
 - Record telemetry via trend_tracker.record_snapshot
 - Redact env refs before storing telemetry
 - Write per-step JSONL telemetry and enforce token budget caps
@@ -49,6 +57,39 @@ def _record_telemetry(project_dir: str, recipe_name: str, key: str, value: Any) 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class _UnexecutedStepOutput(dict):
+    """Placeholder output for a step the runner only PLANNED (didn't execute).
+
+    Any key access echoes back the literal `{{ steps.ID.output.K }}` template
+    string instead of raising KeyError, so a later step referencing this
+    step's output gets the reference back verbatim in its rendered args —
+    the caller substitutes the real value after it executes this step.
+    """
+
+    def __init__(self, step_id: str) -> None:
+        super().__init__()
+        self._step_id = step_id
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+    def __getitem__(self, key: str) -> str:
+        suffix = f".{key}" if key else ""
+        return f"{{{{ steps.{self._step_id}.output{suffix} }}}}"
+
+
+def _has_unresolved_step_ref(value: Any) -> bool:
+    """True if *value* still contains a `{{ steps.` placeholder (i.e. it
+    depends on a step this runner only planned, not executed for real)."""
+    if isinstance(value, str):
+        return "{{ steps." in value or "{{steps." in value
+    if isinstance(value, dict):
+        return any(_has_unresolved_step_ref(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_unresolved_step_ref(v) for v in value)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +142,7 @@ async def run_recipe(
     budget = BudgetTracker(token_budget)
 
     step_outputs: dict[str, Any] = {}
+    plan: list[dict[str, Any]] = []
     start_ms = time.monotonic() * 1000
 
     for step in recipe.steps:
@@ -268,12 +310,52 @@ async def run_recipe(
                 "run_id": writer.run_id,
             }
 
-        if dry_run:
-            log.info(
-                "[recipes][dry_run] step=%s capability=%s -> %s.%s args=%r",
-                step.id, step.capability, mcp_name, tool_name, rendered_args,
-            )
-            step_outputs[step.id] = {"dry_run": True}
+        step_start = time.monotonic() * 1000
+
+        # meta.assert needs no external MCP — run it for real unless dry_run
+        # asked for a pure preview, or its args still reference a step this
+        # runner only planned (the real value doesn't exist yet, so asserting
+        # against the literal placeholder would be meaningless / spuriously
+        # fail). Every other capability has nowhere to dispatch to (vise
+        # ships no MCP proxy layer), so it becomes a plan entry instead.
+        if (
+            not dry_run
+            and step.capability == "meta.assert"
+            and not _has_unresolved_step_ref(rendered_args)
+        ):
+            try:
+                output = meta_assert(rendered_args)
+            except AssertionError as e:
+                error_msg = f"step '{step.id}' assertion failed: {e}"
+                log.error("[recipes] %s", error_msg)
+                duration_ms = int(time.monotonic() * 1000 - start_ms)
+                step_duration_ms = int(time.monotonic() * 1000 - step_start)
+                _record_telemetry(project_dir_str, recipe.name, "success", False)
+                _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
+                writer.write({
+                    "ts": _utc_now_iso(),
+                    "run_id": writer.run_id,
+                    "recipe": recipe.name,
+                    "step_id": step.id,
+                    "capability": step.capability,
+                    "resolved_mcp": mcp_name,
+                    "resolved_tool": tool_name,
+                    "rendered_args_redacted": rendered_args_redacted,
+                    "arg_tokens": arg_tokens,
+                    "duration_ms": step_duration_ms,
+                    "ok": False,
+                    "error": error_msg,
+                })
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "step": step.id,
+                    "telemetry_path": writer.path,
+                    "run_id": writer.run_id,
+                }
+
+            step_duration_ms = int(time.monotonic() * 1000 - step_start)
+            step_outputs[step.id] = output if isinstance(output, dict) else {"result": output}
             writer.write({
                 "ts": _utc_now_iso(),
                 "run_id": writer.run_id,
@@ -284,129 +366,25 @@ async def run_recipe(
                 "resolved_tool": tool_name,
                 "rendered_args_redacted": rendered_args_redacted,
                 "arg_tokens": arg_tokens,
-                "duration_ms": 0,
+                "duration_ms": step_duration_ms,
                 "ok": True,
             })
             continue
 
-        # Dispatch
+        # Plan step — nothing dispatched. The caller executes resolved_mcp.
+        # resolved_tool with `args`, then continues the recipe.
         log.info(
-            "[recipes] step=%s capability=%s -> %s.%s",
+            "[recipes][plan] step=%s capability=%s -> %s.%s",
             step.id, step.capability, mcp_name, tool_name,
         )
-
-        step_start = time.monotonic() * 1000
-        try:
-            if step.capability == "meta.assert":
-                output = meta_assert(rendered_args)
-            else:
-                output = await _call_tool(mcp_name, tool_name, rendered_args)
-        except AssertionError as e:
-            error_msg = f"step '{step.id}' assertion failed: {e}"
-            log.error("[recipes] %s", error_msg)
-            duration_ms = int(time.monotonic() * 1000 - start_ms)
-            step_duration_ms = int(time.monotonic() * 1000 - step_start)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
-            writer.write({
-                "ts": _utc_now_iso(),
-                "run_id": writer.run_id,
-                "recipe": recipe.name,
-                "step_id": step.id,
-                "capability": step.capability,
-                "resolved_mcp": mcp_name,
-                "resolved_tool": tool_name,
-                "rendered_args_redacted": rendered_args_redacted,
-                "arg_tokens": arg_tokens,
-                "duration_ms": step_duration_ms,
-                "ok": False,
-                "error": error_msg,
-            })
-            return {
-                "success": False,
-                "error": error_msg,
-                "step": step.id,
-                "telemetry_path": writer.path,
-                "run_id": writer.run_id,
-            }
-        except Exception as e:
-            error_msg = f"step '{step.id}': tool call failed: {e}"
-            log.error("[recipes] %s", error_msg)
-            duration_ms = int(time.monotonic() * 1000 - start_ms)
-            step_duration_ms = int(time.monotonic() * 1000 - step_start)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
-            writer.write({
-                "ts": _utc_now_iso(),
-                "run_id": writer.run_id,
-                "recipe": recipe.name,
-                "step_id": step.id,
-                "capability": step.capability,
-                "resolved_mcp": mcp_name,
-                "resolved_tool": tool_name,
-                "rendered_args_redacted": rendered_args_redacted,
-                "arg_tokens": arg_tokens,
-                "duration_ms": step_duration_ms,
-                "ok": False,
-                "error": error_msg,
-            })
-            return {
-                "success": False,
-                "error": error_msg,
-                "step": step.id,
-                "telemetry_path": writer.path,
-                "run_id": writer.run_id,
-            }
-
-        # Unwrap the MCP JSON-RPC envelope (subprocess proxies) before deciding
-        # success — otherwise a real ok:false / error sails through because the
-        # error/ok keys live under result.structuredContent, not at top level.
-        from vise.engines.validators import _unwrap_tool_output
-
-        unwrapped, is_error = _unwrap_tool_output(output)
-
-        # Check for tool-level failure in (unwrapped) response.
-        step_error: str | None = None
-        if is_error:
-            step_error = f"step '{step.id}': tool reported isError"
-        elif isinstance(unwrapped, dict) and "error" in unwrapped:
-            step_error = f"step '{step.id}': tool returned error: {unwrapped['error']}"
-        elif isinstance(unwrapped, dict) and "ok" in unwrapped and not unwrapped.get("ok"):
-            step_error = f"step '{step.id}': tool returned ok=false: {unwrapped!r}"[:300]
-        elif isinstance(unwrapped, dict) and unwrapped.get("status") == "unresolved":
-            step_error = (
-                f"step '{step.id}': dispatch unresolved: "
-                f"{unwrapped.get('reason', 'no MCP dispatch layer')}"
-            )
-
-        if step_error is not None:
-            log.error("[recipes] %s", step_error)
-            duration_ms = int(time.monotonic() * 1000 - start_ms)
-            step_duration_ms = int(time.monotonic() * 1000 - step_start)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
-            writer.write({
-                "ts": _utc_now_iso(),
-                "run_id": writer.run_id,
-                "recipe": recipe.name,
-                "step_id": step.id,
-                "capability": step.capability,
-                "resolved_mcp": mcp_name,
-                "resolved_tool": tool_name,
-                "rendered_args_redacted": rendered_args_redacted,
-                "arg_tokens": arg_tokens,
-                "duration_ms": step_duration_ms,
-                "ok": False,
-                "error": step_error,
-            })
-            return {
-                "success": False,
-                "error": step_error,
-                "step": step.id,
-                "telemetry_path": writer.path,
-                "run_id": writer.run_id,
-            }
-
+        plan.append({
+            "step_id": step.id,
+            "capability": step.capability,
+            "resolved_mcp": mcp_name,
+            "resolved_tool": tool_name,
+            "args": rendered_args,
+        })
+        step_outputs[step.id] = _UnexecutedStepOutput(step.id)
         step_duration_ms = int(time.monotonic() * 1000 - step_start)
         writer.write({
             "ts": _utc_now_iso(),
@@ -420,11 +398,8 @@ async def run_recipe(
             "arg_tokens": arg_tokens,
             "duration_ms": step_duration_ms,
             "ok": True,
+            "planned": True,
         })
-
-        # Bind the UNWRAPPED result for downstream {{ steps.ID.output.K }} refs
-        # so consumers see the actual tool output, not the JSON-RPC envelope.
-        step_outputs[step.id] = unwrapped if isinstance(unwrapped, dict) else {"result": unwrapped}
 
     duration_ms = int(time.monotonic() * 1000 - start_ms)
     _record_telemetry(project_dir_str, recipe.name, "success", True)
@@ -435,6 +410,13 @@ async def run_recipe(
         "recipe": recipe.name,
         "duration_ms": duration_ms,
         "outputs": step_outputs,
+        "plan": plan,
+        "message": (
+            "vise cannot dispatch these steps itself — execute each plan "
+            "entry's resolved_mcp.resolved_tool with its args, in order, "
+            "substituting any '{{ steps.ID.output.K }}' placeholder with "
+            "that step's real output before the next step."
+        ) if plan else "all steps executed locally (no external dispatch needed).",
         "dry_run": dry_run,
         "telemetry_path": writer.path,
         "run_id": writer.run_id,
@@ -449,6 +431,12 @@ async def _call_tool(mcp_name: str, tool_name: str, args: dict) -> Any:
     external MCP tool return a structured failure instead of crashing.
     Tests and in-host embedders monkeypatch this function to inject a real
     dispatcher.
+
+    NOT called by `run_recipe` — the recipe path never had a dispatch layer
+    to fall back on and now returns a `plan` for the caller to execute
+    instead of pretending to dispatch. This seam is kept solely because
+    `vise.engines.validators.CapabilityValidator` (node-gate validators)
+    imports and awaits it directly; removing it breaks that consumer.
     """
     return {
         "status": "unresolved",
