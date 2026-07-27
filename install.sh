@@ -4,7 +4,21 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${HOME}/.local/share/vise/venv"
+
+# Same data-dir rule as vise.hooks._xdg and bin/vise-run: honor XDG_DATA_HOME
+# only when set AND absolute. An existing venv at the legacy location wins, so
+# re-running this on a pre-XDG install upgrades it in place instead of building
+# a second venv and orphaning the first.
+if [ -n "${XDG_DATA_HOME:-}" ] && [ "${XDG_DATA_HOME#/}" != "${XDG_DATA_HOME}" ]; then
+  DATA_DIR="${XDG_DATA_HOME}/vise"
+else
+  DATA_DIR="${HOME}/.local/share/vise"
+fi
+if [ -x "${HOME}/.local/share/vise/venv/bin/python" ]; then
+  VENV_DIR="${HOME}/.local/share/vise/venv"
+else
+  VENV_DIR="${DATA_DIR}/venv"
+fi
 
 DEV=0
 for arg in "$@"; do

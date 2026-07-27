@@ -26,7 +26,7 @@ git clone https://github.com/Rixmerz/vise && cd vise
 ./install.sh
 ```
 
-`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv at `~/.local/share/vise/venv` if system `python3` lacks `fastmcp`/`fastembed`), registers the repo as a local plugin marketplace, and installs the plugin (`claude plugin marketplace add <repo>` + `claude plugin install vise@vise`). Idempotent — safe to re-run. Restart Claude Code afterwards.
+`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the repo as a local plugin marketplace, and installs the plugin (`claude plugin marketplace add <repo>` + `claude plugin install vise@vise`). Idempotent — safe to re-run. Restart Claude Code afterwards.
 
 The MCP server and all hooks run through `bin/vise-run`, a launcher that prefers the vise venv's python and falls back to `python3`. No installed wheel required for plugin usage.
 
@@ -74,14 +74,14 @@ src/vise/
 ├── tools/         # MCP tool surfaces (graph, experience, goal, snapshot,
 │                  # recipes, bootstrap)
 ├── hooks/         # Claude Code hook entry points (see table above)
-├── assets/        # bundled workflows (9), recipes (11), skills
+├── assets/        # bundled workflows (9), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
 └── cli/           # `vise` CLI (graph/experience management offline)
 ```
 
 ## Configuration
 
-Environment variables (all optional; legacy `JIG_*` names honored as fallbacks where they existed):
+Environment variables (all optional):
 
 | Variable | Purpose |
 |---|---|
@@ -188,11 +188,11 @@ python -m pytest src/vise/tests/ -q
 ruff check src/
 ```
 
-Or, to reuse the plugin venv (`~/.local/share/vise/venv`), run `./install.sh --dev` — it additionally installs the `[dev]` extras (pytest, pytest-asyncio, ruff) there.
+Or, to reuse the plugin venv (`$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv`), run `./install.sh --dev` — it additionally installs the `[dev]` extras (pytest, pytest-asyncio, ruff) there.
 
 ## Status
 
-**Alpha.** Extracted from [jig](https://github.com/Rixmerz/jig), keeping the differentiated core (workflows, experience memory, snapshots) and dropping the MCP proxy layer (Claude Code's native tool discovery covers it) and hard code-analysis dependencies (now a pluggable provider stub).
+**Alpha.** Extracted from an earlier in-house orchestrator, keeping the differentiated core (workflows, experience memory, snapshots) and deliberately dropping two things it carried: an MCP proxy layer (Claude Code's native tool discovery covers it) and hard code-analysis dependencies (structural analysis stays external).
 
 ## License
 
