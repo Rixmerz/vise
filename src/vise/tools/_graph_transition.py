@@ -24,10 +24,9 @@ from vise.engines.graph_engine import (
     _write_contract_files, _cleanup_contract_files,
     compute_ready_tasks,
 )
-from vise.engines.graph_parser import load_graph_from_file, GraphParseError
+from vise.engines.graph_parser import GraphParseError
 from vise.engines.graph_state import (
-    load_graph_state, save_graph_state, initialize_graph_state,
-    get_graph_file,
+    load_active_graph, save_graph_state,
 )
 from vise.engines.node_gate import _run_node_validators
 
@@ -39,25 +38,15 @@ from vise.engines.node_gate import _run_node_validators
 def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
     """Load active graph and state for a project.
 
-    Returns:
-        Tuple of (Graph, GraphState)
+    Delegates to engines.graph_state.load_active_graph — the four copies of
+    this that used to live one per module drifted apart and none of them
+    distinguished "never initialized" from "deliberately deactivated", so any
+    read tool resurrected a workflow the user had just ended.
 
     Raises:
-        ValueError: If no graph is configured
+        NoActiveWorkflowError: if no graph is configured or none is active.
     """
-    graph_file = get_graph_file(project_dir)
-    if not graph_file.exists():
-        raise ValueError(f"No graph.yaml found at {graph_file}")
-
-    graph = load_graph_from_file(graph_file)
-    state = load_graph_state(project_dir)
-
-    # Initialize state if empty
-    if not state.current_nodes:
-        graph_name = graph.metadata.get('name', 'unnamed')
-        state = initialize_graph_state(project_dir, graph, graph_name)
-
-    return graph, state
+    return load_active_graph(project_dir)
 
 
 # ---------------------------------------------------------------------------

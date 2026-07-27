@@ -11,26 +11,24 @@ from vise.engines.workflow_scope import resolve_workflow_dirs
 from vise.engines.graph_engine import Graph, GraphState, generate_mermaid
 from vise.engines.graph_parser import load_graph_from_file, GraphParseError
 from vise.engines.graph_state import (
-    load_graph_state, initialize_graph_state,
+    load_active_graph, initialize_graph_state,
     deactivate_graph_state,
     get_graph_file,
 )
 
 
 def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
-    """Load active graph and state for a project."""
-    graph_file = get_graph_file(project_dir)
-    if not graph_file.exists():
-        raise ValueError(f"No graph.yaml found at {graph_file}")
+    """Load active graph and state for a project.
 
-    graph = load_graph_from_file(graph_file)
-    state = load_graph_state(project_dir)
+    Delegates to engines.graph_state.load_active_graph — the four copies of
+    this that used to live one per module drifted apart and none of them
+    distinguished "never initialized" from "deliberately deactivated", so any
+    read tool resurrected a workflow the user had just ended.
 
-    if not state.current_nodes:
-        graph_name = graph.metadata.get('name', 'unnamed')
-        state = initialize_graph_state(project_dir, graph, graph_name)
-
-    return graph, state
+    Raises:
+        NoActiveWorkflowError: if no graph is configured or none is active.
+    """
+    return load_active_graph(project_dir)
 
 
 def register_graph_management_tools(mcp):

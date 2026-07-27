@@ -18,10 +18,9 @@ from vise.engines.graph_engine import (
     evaluate_transitions,
     compute_ready_tasks, is_dag_complete,
 )
-from vise.engines.graph_parser import load_graph_from_file, GraphParseError
+from vise.engines.graph_parser import GraphParseError
 from vise.engines.graph_state import (
-    load_graph_state, initialize_graph_state,
-    get_graph_file, get_node_visit_warning,
+    load_active_graph, get_node_visit_warning,
 )
 
 
@@ -32,25 +31,15 @@ from vise.engines.graph_state import (
 def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
     """Load active graph and state for a project.
 
-    Returns:
-        Tuple of (Graph, GraphState)
+    Delegates to engines.graph_state.load_active_graph — the four copies of
+    this that used to live one per module drifted apart and none of them
+    distinguished "never initialized" from "deliberately deactivated", so any
+    read tool resurrected a workflow the user had just ended.
 
     Raises:
-        ValueError: If no graph is configured
+        NoActiveWorkflowError: if no graph is configured or none is active.
     """
-    graph_file = get_graph_file(project_dir)
-    if not graph_file.exists():
-        raise ValueError(f"No graph.yaml found at {graph_file}")
-
-    graph = load_graph_from_file(graph_file)
-    state = load_graph_state(project_dir)
-
-    # Initialize state if empty
-    if not state.current_nodes:
-        graph_name = graph.metadata.get('name', 'unnamed')
-        state = initialize_graph_state(project_dir, graph, graph_name)
-
-    return graph, state
+    return load_active_graph(project_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +64,18 @@ def register_graph_query_tools(mcp):
 
         try:
             graph, state = _load_active_graph(resolved_dir)
+        except NoActiveWorkflowError as e:
+            # Not an error: "nothing is active" is a legitimate, common state.
+            # Reporting it as error=True made callers treat a clean slate as a
+            # failure, and previously this path re-initialized the workflow
+            # instead — silently undoing graph_deactivate.
+            return {
+                "session_id": sid,
+                "active": False,
+                "message": str(e),
+                "hint": "graph_activate(name=...) to start one; graph_list_available to see them",
+                "project_dir": resolved_dir
+            }
         except ValueError as e:
             return {
                 "error": True,

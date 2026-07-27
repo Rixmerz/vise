@@ -215,7 +215,15 @@ def initialize_graph_state(project_dir: str, graph: Graph, graph_name: str) -> G
     if not start_node:
         raise ValueError("Graph has no start node")
 
-    graph_id = _slugify(graph_name) if _looks_like_display_name(graph_name) else graph_name
+    # Lazy-init call sites pass the DISPLAY name (the local graph.yaml copy is
+    # always named "graph.yaml", so its stem carries no id). Slugifying that
+    # blindly invents an id that matches no library graph — "Universal Debug"
+    # became "universal-debug" while the real id is "debug-graph". Ask the
+    # library first; only fall back to a slug when nothing matches.
+    if _looks_like_display_name(graph_name):
+        graph_id = _resolve_display_name_to_id(project_dir, graph_name) or _slugify(graph_name)
+    else:
+        graph_id = graph_name
     display_name = graph.metadata.get('name') or graph_name
 
     state = GraphState(
@@ -283,6 +291,52 @@ def reset_graph_state(project_dir: str, graph: Graph) -> GraphState:
 
     save_graph_state(project_dir, state)
     return state
+
+
+class NoActiveWorkflowError(ValueError):
+    """Raised when a project has no active workflow.
+
+    Subclasses ValueError so existing ``except ValueError`` call sites keep
+    working; catch it specifically to render a friendlier answer.
+    """
+
+
+def load_active_graph(project_dir: str):
+    """Load the active graph + state, or raise if none is active.
+
+    Single source of truth for four modules that each carried their own copy
+    of this, "intentionally duplicated ... to keep each module independently
+    importable". Importing one function from `engines` costs nothing and keeps
+    them independent; four hand-synced copies is the same arrangement that
+    silently split the state tree in two (see hooks/_xdg.py).
+
+    Lazy-init is preserved for a project that has NEVER had state — that is a
+    convenience, and initializing on first touch is reasonable. It is NOT
+    applied when a state file exists and says nothing is active: that is a
+    deliberate `graph_deactivate`, and re-initializing it resurrected the very
+    workflow the user just ended. The first `graph_status` after deactivating
+    silently brought it back, gate and all.
+    """
+    from vise.engines.graph_parser import load_graph_from_file
+
+    graph_file = get_graph_file(project_dir)
+    if not graph_file.exists():
+        raise NoActiveWorkflowError(f"No graph.yaml found at {graph_file}")
+
+    graph = load_graph_from_file(graph_file)
+    state = load_graph_state(project_dir)
+
+    if not state.current_nodes:
+        if get_graph_state_file(project_dir).exists() and not state.active_graph:
+            raise NoActiveWorkflowError(
+                "No active workflow (deactivated). "
+                "Run graph_activate to start one."
+            )
+        state = initialize_graph_state(
+            project_dir, graph, graph.metadata.get('name', 'unnamed')
+        )
+
+    return graph, state
 
 
 def deactivate_graph_state(project_dir: str) -> dict:
