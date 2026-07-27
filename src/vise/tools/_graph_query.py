@@ -20,7 +20,7 @@ from vise.engines.graph_engine import (
 )
 from vise.engines.graph_parser import GraphParseError
 from vise.engines.graph_state import (
-    load_active_graph, get_node_visit_warning,
+    load_active_graph, get_node_visit_warning, NoActiveWorkflowError,
 )
 
 

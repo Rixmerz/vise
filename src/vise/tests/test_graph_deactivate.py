@@ -208,3 +208,33 @@ def test_all_graph_modules_share_one_loader():
         assert "load_active_graph(project_dir)" in src, f"{mod.__name__} kept its own copy"
         assert "initialize_graph_state" not in src, f"{mod.__name__} still lazy-inits locally"
     assert callable(load_active_graph)
+
+
+def test_graph_status_tool_reports_inactive_without_crashing(tmp_path):
+    """Covers the layer that hid a NameError: the tool's no-active-workflow
+    branch referenced an exception it had never imported, so the friendly
+    answer raised instead. Unit tests on the engine could not see it — only
+    driving the registered tool does.
+    """
+    registered = {}
+
+    class _FakeMCP:
+        def tool(self, *a, **kw):
+            def deco(fn):
+                registered[fn.__name__] = fn
+                return fn
+            return deco
+
+    from vise.tools._graph_query import register_graph_query_tools
+
+    register_graph_query_tools(_FakeMCP())
+
+    p = _project_with_local_graph(tmp_path)
+    _active_state(p)
+    deactivate_graph_state(p)
+
+    out = registered["graph_status"](project_dir=p)
+
+    assert out.get("active") is False
+    assert not out.get("error"), f"inactive is not an error: {out}"
+    assert "graph_activate" in out.get("hint", "")
