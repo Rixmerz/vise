@@ -4,9 +4,6 @@ Requirements verified:
 - create_for_phase_transition encodes workflow/phase metadata
 - throttle lock is NOT touched (bypassed)
 - snapshot failure does NOT block the caller (non-fatal guard)
-
-Note: the jig-side integration test that exercised graph_traverse was
-dropped — vise does not ship the graph subsystem.
 """
 from __future__ import annotations
 

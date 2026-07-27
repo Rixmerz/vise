@@ -1,7 +1,6 @@
 """lsp_diagnostics — stateless shell-out diagnostics (ruff + mypy).
 
-Ported from jig's engines/lsp_diagnostics.py (no multilspy dependency).
-Shells out to ruff / mypy when present on PATH (or in the venv), degrades
+No multilspy dependency: shells out to ruff / mypy when present on PATH (or in the venv), degrades
 gracefully when absent.
 
 Public API

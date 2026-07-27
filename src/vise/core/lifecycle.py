@@ -2,9 +2,6 @@
 
 ``install_parent_death_signal`` — on Linux, uses PR_SET_PDEATHSIG so the
 kernel SIGTERMs vise when its parent (claude) dies unexpectedly.
-
-(jig's ``install_proxy_cleanup`` was removed — vise has no proxied MCP
-subprocesses to reap.)
 """
 from __future__ import annotations
 

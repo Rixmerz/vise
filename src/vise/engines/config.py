@@ -1,7 +1,6 @@
 """Workflow/enforcer configuration for vise.
 
-Slimmed port of jig's ``hub_config``: only the pieces the graph
-subsystem needs. XDG-only. ``hub_dir`` points at ``~/.local/share/vise``,
+Only the pieces the graph subsystem needs. XDG-only. ``hub_dir`` points at ``~/.local/share/vise``,
 ``workflows_dir`` holds YAML graph definitions, per-project state lives
 under ``~/.local/share/vise/states/<project>/``. Everything resolves off
 ``vise.core.paths.data_dir()``. No MCP/proxy configuration lives here.

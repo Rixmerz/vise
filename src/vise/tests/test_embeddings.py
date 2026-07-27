@@ -2,7 +2,7 @@
 
 Covers:
 - resolve_model() uses DEFAULT_MODEL when env is unset
-- resolve_model() uses JIG_EMBED_MODEL override when set
+- resolve_model() uses VISE_EMBED_MODEL override when set
 - resolve_model() falls back to DEFAULT_MODEL when env is empty string
 - model_slug() returns a stable 12-char hex string
 - model_slug() differs for different model names
@@ -12,7 +12,7 @@ Covers:
 - FastembedClient.available is False after a load error is stored
 - resolve_idle_timeout() parses env correctly and clamps at 0
 - FastembedClient.unload() sets _model back to None
-- _default_embed_cache_dir() respects JIG_EMBED_CACHE_DIR override
+- _default_embed_cache_dir() respects VISE_EMBED_CACHE_DIR override
 - _default_embed_cache_dir() uses XDG_CACHE_HOME when set
 - get_embedder() is cached (returns the same instance)
 
@@ -42,27 +42,27 @@ from vise.core.embeddings import (
 # ---------------------------------------------------------------------------
 
 def test_resolve_model_returns_default_when_env_unset(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("JIG_EMBED_MODEL", raising=False)
+    monkeypatch.delenv("VISE_EMBED_MODEL", raising=False)
     assert resolve_model() == DEFAULT_MODEL
 
 
 def test_resolve_model_uses_env_override(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "BAAI/bge-large-en-v1.5")
+    monkeypatch.setenv("VISE_EMBED_MODEL", "BAAI/bge-large-en-v1.5")
     assert resolve_model() == "BAAI/bge-large-en-v1.5"
 
 
 def test_resolve_model_strips_whitespace(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "  BAAI/bge-base-en-v1.5  ")
+    monkeypatch.setenv("VISE_EMBED_MODEL", "  BAAI/bge-base-en-v1.5  ")
     assert resolve_model() == "BAAI/bge-base-en-v1.5"
 
 
 def test_resolve_model_falls_back_to_default_when_env_empty(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "")
+    monkeypatch.setenv("VISE_EMBED_MODEL", "")
     assert resolve_model() == DEFAULT_MODEL
 
 
 def test_resolve_model_falls_back_to_default_when_env_whitespace_only(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "   ")
+    monkeypatch.setenv("VISE_EMBED_MODEL", "   ")
     assert resolve_model() == DEFAULT_MODEL
 
 
@@ -89,7 +89,7 @@ def test_model_slug_differs_for_different_models():
 
 
 def test_model_slug_with_none_uses_resolved_model(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    monkeypatch.setenv("VISE_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
     s_none = model_slug(None)
     s_explicit = model_slug("BAAI/bge-small-en-v1.5")
     assert s_none == s_explicit
@@ -195,27 +195,27 @@ def test_unload_is_safe_when_model_already_none():
 # ---------------------------------------------------------------------------
 
 def test_resolve_idle_timeout_returns_default_when_unset(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("JIG_EMBED_IDLE_TIMEOUT", raising=False)
+    monkeypatch.delenv("VISE_EMBED_IDLE_TIMEOUT", raising=False)
     assert resolve_idle_timeout() == DEFAULT_IDLE_TIMEOUT
 
 
 def test_resolve_idle_timeout_parses_numeric_value(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_IDLE_TIMEOUT", "120")
+    monkeypatch.setenv("VISE_EMBED_IDLE_TIMEOUT", "120")
     assert resolve_idle_timeout() == 120.0
 
 
 def test_resolve_idle_timeout_clamps_negative_to_zero(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_IDLE_TIMEOUT", "-5")
+    monkeypatch.setenv("VISE_EMBED_IDLE_TIMEOUT", "-5")
     assert resolve_idle_timeout() == 0.0
 
 
 def test_resolve_idle_timeout_zero_disables_unload(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_IDLE_TIMEOUT", "0")
+    monkeypatch.setenv("VISE_EMBED_IDLE_TIMEOUT", "0")
     assert resolve_idle_timeout() == 0.0
 
 
 def test_resolve_idle_timeout_invalid_string_returns_default(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_IDLE_TIMEOUT", "notanumber")
+    monkeypatch.setenv("VISE_EMBED_IDLE_TIMEOUT", "notanumber")
     assert resolve_idle_timeout() == DEFAULT_IDLE_TIMEOUT
 
 
@@ -223,23 +223,23 @@ def test_resolve_idle_timeout_invalid_string_returns_default(monkeypatch: pytest
 # _default_embed_cache_dir
 # ---------------------------------------------------------------------------
 
-def test_default_embed_cache_dir_respects_jig_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_default_embed_cache_dir_respects_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     custom = str(tmp_path / "my_embed_cache")
-    monkeypatch.setenv("JIG_EMBED_CACHE_DIR", custom)
+    monkeypatch.setenv("VISE_EMBED_CACHE_DIR", custom)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     result = _default_embed_cache_dir()
     assert result == Path(custom)
 
 
 def test_default_embed_cache_dir_uses_xdg_cache_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.delenv("JIG_EMBED_CACHE_DIR", raising=False)
+    monkeypatch.delenv("VISE_EMBED_CACHE_DIR", raising=False)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg_cache"))
     result = _default_embed_cache_dir()
     assert result == tmp_path / "xdg_cache" / "vise" / "fastembed"
 
 
 def test_default_embed_cache_dir_falls_back_to_home_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.delenv("JIG_EMBED_CACHE_DIR", raising=False)
+    monkeypatch.delenv("VISE_EMBED_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     # Patch Path.home() to avoid touching real home
     with patch("vise.core.embeddings.Path") as mock_path_class:
@@ -313,19 +313,3 @@ def test_get_embedder_returns_same_instance_on_repeated_calls():
     a = get_embedder()
     b = get_embedder()
     assert a is b
-
-
-# ---------------------------------------------------------------------------
-# VISE_ env prefix takes precedence over legacy JIG_
-# ---------------------------------------------------------------------------
-
-def test_vise_embed_model_wins_over_jig(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JIG_EMBED_MODEL", "BAAI/bge-base-en-v1.5")
-    monkeypatch.setenv("VISE_EMBED_MODEL", "BAAI/bge-large-en-v1.5")
-    assert resolve_model() == "BAAI/bge-large-en-v1.5"
-
-
-def test_jig_embed_model_still_honored_as_fallback(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("VISE_EMBED_MODEL", raising=False)
-    monkeypatch.setenv("JIG_EMBED_MODEL", "BAAI/bge-base-en-v1.5")
-    assert resolve_model() == "BAAI/bge-base-en-v1.5"

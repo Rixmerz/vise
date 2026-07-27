@@ -116,7 +116,7 @@ def test_experience_entry_migration_sets_default_stability() -> None:
         "occurrences": 1,
         "first_seen": "2026-01-01T00:00:00",
         "last_seen": "2026-01-01T00:00:00",
-        "project_origin": "jig",
+        "project_origin": "some_other_project",
         "resolution": "",
         "related_files": [],
         "scope": "global",

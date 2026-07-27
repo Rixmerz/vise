@@ -1,4 +1,4 @@
-"""Tests for src/jig/engines/experience_gc.py.
+"""Tests for vise.engines.experience_gc.
 
 Coverage:
   - score_entry: age-decay monotonic; confirmation boost; superseded penalty
@@ -272,9 +272,9 @@ class TestProtectedIdsFor:
         assert result == set()
 
     def test_reads_experience_refs_list(self, tmp_path):
-        jig_dir = tmp_path / ".vise"
-        jig_dir.mkdir()
-        journal = jig_dir / "asset_journal.jsonl"
+        vise_dir = tmp_path / ".vise"
+        vise_dir.mkdir()
+        journal = vise_dir / "asset_journal.jsonl"
         lines = [
             json.dumps({"ts": "2026-01-01T00:00:00Z", "experience_refs": ["abc12345", "def67890"]}),
             json.dumps({"ts": "2026-01-02T00:00:00Z", "experience_refs": ["ghi11111"]}),
@@ -284,9 +284,9 @@ class TestProtectedIdsFor:
         assert result == {"abc12345", "def67890", "ghi11111"}
 
     def test_reads_experience_refs_single_string(self, tmp_path):
-        jig_dir = tmp_path / ".vise"
-        jig_dir.mkdir()
-        journal = jig_dir / "asset_journal.jsonl"
+        vise_dir = tmp_path / ".vise"
+        vise_dir.mkdir()
+        journal = vise_dir / "asset_journal.jsonl"
         journal.write_text(
             json.dumps({"ts": "2026-01-01T00:00:00Z", "experience_refs": "single_id"}) + "\n",
             encoding="utf-8",
@@ -295,9 +295,9 @@ class TestProtectedIdsFor:
         assert "single_id" in result
 
     def test_skips_malformed_lines(self, tmp_path):
-        jig_dir = tmp_path / ".vise"
-        jig_dir.mkdir()
-        journal = jig_dir / "asset_journal.jsonl"
+        vise_dir = tmp_path / ".vise"
+        vise_dir.mkdir()
+        journal = vise_dir / "asset_journal.jsonl"
         journal.write_text(
             "not-json\n"
             + json.dumps({"experience_refs": ["good_id"]}) + "\n",
@@ -307,9 +307,9 @@ class TestProtectedIdsFor:
         assert "good_id" in result
 
     def test_entries_without_refs_key_ignored(self, tmp_path):
-        jig_dir = tmp_path / ".vise"
-        jig_dir.mkdir()
-        journal = jig_dir / "asset_journal.jsonl"
+        vise_dir = tmp_path / ".vise"
+        vise_dir.mkdir()
+        journal = vise_dir / "asset_journal.jsonl"
         journal.write_text(
             json.dumps({"ts": "2026-01-01T00:00:00Z", "other_key": "value"}) + "\n",
             encoding="utf-8",

@@ -4,10 +4,10 @@ Singleton client with lazy model loading + idle unload. The model runs
 in-process via ONNX Runtime; no daemon, no container, no HTTP.
 
 Default model: BAAI/bge-small-en-v1.5 (384D, ~150 MB RAM). Override via
-`VISE_EMBED_MODEL` (preferred) or `JIG_EMBED_MODEL` (legacy fallback).
+`VISE_EMBED_MODEL`.
 
-Idle unload: after `VISE_EMBED_IDLE_TIMEOUT` (or `JIG_EMBED_IDLE_TIMEOUT`)
-seconds (default 600) without a call to `embed_one`/`embed_many`, the
+Idle unload: after `VISE_EMBED_IDLE_TIMEOUT` seconds
+(default 600) without a call to `embed_one`/`embed_many`, the
 loaded model is released so its memory is reclaimable. Set to `0` to
 disable unloading.
 
@@ -47,12 +47,9 @@ MODEL_DIMS: dict[str, int] = {
 
 
 def _env(suffix: str) -> str | None:
-    """Read VISE_<suffix>, falling back to legacy JIG_<suffix>."""
-    for prefix in ("VISE_", "JIG_"):
-        val = os.environ.get(prefix + suffix)
-        if val is not None and val.strip():
-            return val
-    return None
+    """Read VISE_<suffix>; None when unset, empty, or whitespace-only."""
+    val = os.environ.get("VISE_" + suffix)
+    return val if val and val.strip() else None
 
 
 def resolve_model() -> str:
