@@ -7,16 +7,30 @@
 #
 # Only list what this repo really has. Everything here is already installed and
 # already runs in CI (.github/workflows/ci.yml).
+#
+# Every command runs through .venv/bin/python. A bare `pytest` resolves against
+# the MCP SERVER's PATH, not this project's — which found the system pytest, ran
+# it against a python without vise's dependencies, and reported 5 failures and
+# 10 collection errors against a suite that is 745-green in the venv. A gate
+# that goes red for environment reasons is worse than no gate: it teaches you
+# to pass VISE_NODE_GATE_OVERRIDE=1.
 
 checks:
-  lint: ["ruff", "check", ".", "--exclude", ".claude"]
-  unit: ["pytest", "-q"]
-  coverage: ["coverage", "report", "--fail-under=62"]
+  lint: [".venv/bin/python", "-m", "ruff", "check", ".", "--exclude", ".claude"]
+
+  # One instrumented run, not two. `coverage run -m pytest` IS the unit run, so
+  # `coverage report` below reads data this gate just produced. A plain `pytest`
+  # here writes no coverage data at all, which left `report` grading whatever
+  # stale .coverage happened to be on disk — a green threshold measured against
+  # an unrelated run from hours earlier. Same fold as the CI step.
+  unit: [".venv/bin/python", "-m", "coverage", "run", "-m", "pytest", "-q"]
+  coverage: [".venv/bin/python", "-m", "coverage", "report", "--fail-under=62"]
 
   # dead_code is ruff's F401/F841, already inside the `lint` run above — listed
   # separately so a node gating on dead_code alone gets a real answer instead
   # of a skip.
-  dead_code: ["ruff", "check", ".", "--exclude", ".claude", "--select", "F401,F841"]
+  dead_code: [".venv/bin/python", "-m", "ruff", "check", ".", "--exclude", ".claude",
+              "--select", "F401,F841"]
 
   # Deliberately absent, and each absence is a real gap, not an oversight:
   #   types       — no mypy/pyright config here yet

@@ -20,6 +20,14 @@
 # it, so `&&`, pipes, globs, and `$VARS` are literal arguments, not syntax.
 # Need two commands in one check? Point it at a script or a task-runner target.
 #
+# Commands run with cwd set to the project root, so a project-relative binary
+# is not just allowed, it is usually the right answer: `node_modules/.bin/eslint`,
+# `.venv/bin/python`, `./scripts/check.sh`. A BARE name is resolved on the PATH of
+# the MCP server process — which is Claude Code's environment, not your project's
+# — so a bare `pytest` in a repo with a virtualenv finds the wrong interpreter and
+# reports failures that do not exist. Prefer the relative path whenever the repo
+# pins its own toolchain. (vise's own .vise/quality.yaml learned this the hard way.)
+#
 # Two things that silently disarm the whole gate, both worth knowing before you
 # edit this file:
 #   - A YAML syntax error here reads as "no profile at all", so every check

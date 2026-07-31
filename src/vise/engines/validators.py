@@ -27,6 +27,34 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_path_like(exe: str) -> bool:
+    return os.sep in exe or bool(os.altsep and os.altsep in exe)
+
+
+def _runnable(exe: str, project_dir: str) -> bool:
+    """Can ``exe`` actually be executed the way the validator will run it?
+
+    The check and the run must agree on a working directory. ``shutil.which``
+    resolves a path-like command against the CURRENT process's cwd — the MCP
+    server's, which is wherever Claude Code was launched — while the command
+    itself runs with ``cwd=project_dir``. So every relative command failed the
+    pre-check and skip-passed forever while being perfectly runnable:
+    ``node_modules/.bin/eslint`` (the standard JS invocation), ``.venv/bin/pytest``,
+    ``./scripts/check.sh``. Green gate, evidence reading "not on PATH", nothing run.
+
+    Bare names still go through PATH. ``Path(project_dir) / exe`` leaves an
+    absolute ``exe`` untouched, so those keep working too.
+    """
+    if _is_path_like(exe):
+        candidate = Path(project_dir) / exe
+        return candidate.is_file() and os.access(candidate, os.X_OK)
+    return shutil.which(exe) is not None
+
+
+def _not_found_reason(exe: str) -> str:
+    return "not found in the project" if _is_path_like(exe) else "not on PATH"
+
+
 # --- consistency guard (Edit 6) -------------------------------------------
 # Markers that indicate a concealed failure even when the process exits 0.
 _FAILED_RE = re.compile(r"\b[1-9]\d* failed\b")
@@ -617,6 +645,12 @@ class QualityCheckValidator:
                 at=_now(), source="mechanical", exit_code=None,
             )
 
+        # Every record this validator emits is named for the CHECK, not the type.
+        # A node here declares four of these (security: sast/sca/secrets/contracts),
+        # so a bare "quality_check" in the failed[] list told you a gate went red
+        # and nothing about which defect class did it.
+        label = f"{self.name}:{self.check}"
+
         from vise.engines.quality_profile import UnboundCheck, UnboundReason, resolve_check
 
         resolved = resolve_check(goal.project_dir, self.check)
@@ -632,17 +666,20 @@ class QualityCheckValidator:
                     f"`{self.check}:` to checks: in .vise/quality.yaml"
                 )
             return ValidatorRecord(
-                name=self.name, passed=True, confidence_contribution=self.weight,
+                name=label, passed=True, confidence_contribution=self.weight,
                 weight=self.weight, evidence=evidence,
                 at=_now(), source="asserted", exit_code=None,
             )
 
         cmd = resolved
-        if not shutil.which(cmd[0]):
+        if not _runnable(cmd[0], goal.project_dir):
             return ValidatorRecord(
-                name=self.name, passed=True, confidence_contribution=self.weight,
+                name=label, passed=True, confidence_contribution=self.weight,
                 weight=self.weight,
-                evidence=f"quality check '{self.check}' skipped — {cmd[0]} not on PATH",
+                evidence=(
+                    f"quality check '{self.check}' skipped — {cmd[0]} "
+                    f"{_not_found_reason(cmd[0])}"
+                ),
                 at=_now(), source="asserted", exit_code=None,
             )
 
@@ -653,14 +690,14 @@ class QualityCheckValidator:
             )
         except (subprocess.TimeoutExpired, OSError) as e:
             return ValidatorRecord(
-                name=self.name, passed=False, confidence_contribution=0.0,
+                name=label, passed=False, confidence_contribution=0.0,
                 weight=self.weight, evidence=str(e)[:300], at=_now(),
                 source="mechanical", exit_code=None,
             )
         passed = r.returncode == 0
         ev = (r.stdout[-300:] or r.stderr[-300:])
         return ValidatorRecord(
-            name=self.name, passed=passed,
+            name=label, passed=passed,
             confidence_contribution=self.weight if passed else 0.0,
             weight=self.weight, evidence=ev, at=_now(),
             source="mechanical", exit_code=r.returncode,

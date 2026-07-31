@@ -206,3 +206,124 @@ def test_build_validators_no_profile_does_not_block_traversal(tmp_path, monkeypa
     rec = validators[0].run(_goal(str(tmp_path)))
     assert rec.passed is True
     assert rec.source == "asserted"
+
+
+# ---------------------------------------------------------------------------
+# project-relative commands
+#
+# The pre-flight existence check and the subprocess must agree on a working
+# directory. They did not: shutil.which() resolved a path-like command against
+# the MCP SERVER's cwd while the command ran with cwd=project_dir. So every
+# relative command skip-passed forever with evidence reading "not on PATH" —
+# including node_modules/.bin/eslint, which is how essentially every JS repo
+# invokes its linter. A green gate that never ran anything is the exact failure
+# this validator's source="asserted" tagging exists to make visible, and this
+# bug produced it while claiming the tool was missing.
+# ---------------------------------------------------------------------------
+
+
+def _write_script(path: Path, exit_code: int = 0) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\nexit {exit_code}\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def test_project_relative_command_runs_from_a_foreign_cwd(tmp_path, monkeypatch):
+    """The regression itself: chdir somewhere else, the check must still run."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_script(tmp_path / "scripts" / "check.sh", exit_code=0)
+    _write_profile(tmp_path, 'checks:\n  sast: ["scripts/check.sh"]\n')
+
+    # The MCP server's cwd is wherever Claude Code launched, never guaranteed
+    # to be the project. tmp_path is the one directory it is certainly not.
+    monkeypatch.chdir(tmp_path.parent)
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.source == "mechanical", f"skip-passed instead of running: {rec.evidence}"
+    assert rec.passed is True
+    assert rec.exit_code == 0
+
+
+def test_project_relative_command_that_fails_blocks_the_gate(tmp_path, monkeypatch):
+    """And it must be able to go RED — skip-passing hid failures, not just runs."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_script(tmp_path / "scripts" / "check.sh", exit_code=1)
+    _write_profile(tmp_path, 'checks:\n  sast: ["scripts/check.sh"]\n')
+    monkeypatch.chdir(tmp_path.parent)
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.passed is False
+    assert rec.source == "mechanical"
+    assert rec.exit_code == 1
+
+
+def test_missing_relative_command_skips_and_says_where_it_looked(tmp_path, monkeypatch):
+    """Still fail-open when the path really is absent — with accurate evidence.
+
+    "not on PATH" was a lie for a relative command: PATH was never consulted.
+    """
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_profile(tmp_path, 'checks:\n  sast: ["scripts/absent.sh"]\n')
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.passed is True
+    assert rec.source == "asserted"
+    assert "not found in the project" in rec.evidence
+
+
+def test_a_non_executable_relative_file_is_not_treated_as_runnable(tmp_path, monkeypatch):
+    """Existence is not enough — subprocess would raise OSError on chmod 644."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    script = tmp_path / "scripts" / "check.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    script.chmod(0o644)
+    _write_profile(tmp_path, 'checks:\n  sast: ["scripts/check.sh"]\n')
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.passed is True
+    assert rec.source == "asserted"
+
+
+def test_bare_command_names_still_resolve_through_path(tmp_path, monkeypatch):
+    """The fix must not break the common case: a bare name is a PATH lookup."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_profile(tmp_path, 'checks:\n  sast: ["sh", "-c", "exit 0"]\n')
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.source == "mechanical"
+    assert rec.passed is True
+
+
+def test_absolute_command_paths_still_resolve(tmp_path, monkeypatch):
+    """Path(project_dir) / "/abs" collapses to "/abs" — assert it, don't assume."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_profile(tmp_path, f'checks:\n  sast: ["{sys.executable}", "-c", "pass"]\n')
+
+    rec = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+
+    assert rec.source == "mechanical"
+    assert rec.passed is True
+
+
+# ---------------------------------------------------------------------------
+# record naming — which check went red, not just that one did
+# ---------------------------------------------------------------------------
+
+
+def test_records_are_named_for_the_check_not_the_validator_type(tmp_path, monkeypatch):
+    """`security` declares sast+sca+secrets+contracts. A failed[] entry reading
+    "quality_check" told you a gate blocked and nothing about which one."""
+    monkeypatch.delenv(QUALITY_PROFILE_ENV, raising=False)
+    _write_profile(tmp_path, 'checks:\n  sast: ["sh", "-c", "exit 1"]\n')
+
+    ran = QualityCheckValidator(check="sast").run(_goal(str(tmp_path)))
+    skipped = QualityCheckValidator(check="secrets").run(_goal(str(tmp_path)))
+
+    assert ran.name == "quality_check:sast"
+    assert skipped.name == "quality_check:secrets"
