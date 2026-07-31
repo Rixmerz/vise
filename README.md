@@ -11,7 +11,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 - **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own.
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
-- **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal.
+- **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal. Like per-edit snapshots, the gate is **opt-in** — off by default, enable with `VISE_GOAL_GATE=1`. The `goal_*` tools work regardless; only the blocking behaviour is gated.
 - **Recipes & capabilities** — declarative multi-step recipes with capability bindings that survive MCP renames. `recipe_run` resolves a recipe into an ordered **plan** and hands it back for *you* to execute: vise is an MCP server and cannot call another server's tools, so it advises and Claude Code acts — the same division as `graph_traverse`'s prompt injection. A step whose capability is unbound halts the plan and names `capability_set`.
 - **Declarative quality gates** — a workflow node gates on a check *name* (`lint`, `unit`, `sast`, `coverage`, …); `.vise/quality.yaml` says what that name runs in *this* repo, so one workflow ships to a Python repo and a Go repo unchanged. An unbound check **skip-passes** with evidence naming the next step and a record marked `source="asserted"` — nothing ran, so `goal_complete` will not grade it as verified. The bundled `quality-gate` workflow tiers them static → tests → security → integration; mutation testing and fuzzing stay deliberately out of band, since a full mutation run as a gate stalls every traversal and fuzzing has no completion condition to wait on.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
@@ -191,7 +191,7 @@ python -m pytest src/vise/tests/ -q
 ruff check src/
 ```
 
-Or, to reuse the plugin venv (`$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv`), run `./install.sh --dev` — it additionally installs the `[dev]` extras (pytest, pytest-asyncio, ruff) there.
+Or, to reuse the plugin venv (`$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv`), run `./install.sh --dev` — it additionally installs the `[dev]` extras there. The list lives in `pyproject.toml` and is deliberately not restated here; it drifted once already.
 
 ## Status
 

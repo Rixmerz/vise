@@ -52,7 +52,7 @@ else
   echo "ok: venv ready at ${VENV_DIR}."
 fi
 
-# 2b. Dev extras (--dev): pytest, pytest-asyncio, ruff into the venv.
+# 2b. Dev extras (--dev): whatever [dev] lists in pyproject.toml, into the venv.
 if [ "$DEV" = "1" ]; then
   if [ ! -x "${VENV_DIR}/bin/python" ]; then
     mkdir -p "$(dirname "$VENV_DIR")"
