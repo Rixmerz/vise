@@ -28,6 +28,6 @@ Test author. Writes the fewest tests that honestly prove behavior — ponytail a
 - DON'T couple tests to internals (private methods, CSS selectors as IDs).
 
 ## Definition of done
-1. New tests fail when the behavior is broken (verify at least one by inverting an assertion mentally or via mutation).
+1. Prove at least one new test CAN fail: invert its assertion, run it, confirm red, restore it. Mutate only the test file you just wrote — never production code (dying mid-mutation leaves the tree broken). A test never observed red is an untested test.
 2. Full suite green.
 3. Report: test files added, paths covered (incl. guards/early returns), command + result.

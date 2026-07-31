@@ -257,3 +257,38 @@ def test_hook_re_enables_when_flag_set_back_to_true(
 
     config_path.write_text(json.dumps({"enforcer_enabled": True}))
     assert _run_hook("Bash", fake_project, isolated_xdg)["decision"] == "block"
+
+
+def test_internal_error_approves_on_stdout_and_explains_on_stderr(tmp_path, monkeypatch):
+    """A crashing enforcer must fail OPEN but stop failing SILENTLY.
+
+    Approving is correct — a hook that errors and blocks bricks the session. But
+    a silent approve means enforcement can die (corrupt state, parser bug) while
+    the user keeps believing a workflow gates their tools. stdout stays pure JSON
+    because Claude Code parses it as the decision; the reason goes to stderr.
+    """
+    import io
+
+    from vise.hooks import graph_enforcer
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(json.dumps({"tool_name": "Write", "tool_input": {}}))
+    )
+    # `get_state_path` is the first call inside main()'s gating try-block, so
+    # raising here is the closest stand-in for a corrupt hub or a bad path.
+    def _boom(*_a, **_kw):
+        raise RuntimeError("state hub is unreadable")
+
+    monkeypatch.setattr(graph_enforcer, "get_state_path", _boom)
+
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    graph_enforcer.main()
+
+    assert json.loads(out.getvalue())["decision"] == "approve", "stdout must stay pure JSON"
+    assert "approving without gating" in err.getvalue(), (
+        "an enforcer that crashes must say so on stderr, not approve in silence"
+    )
+    assert "state hub is unreadable" in err.getvalue(), "the actual cause must be named"

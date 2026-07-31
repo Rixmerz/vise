@@ -33,6 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "coverage>=7.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
@@ -54,6 +55,12 @@ include = [
     "README.md",
     "pyproject.toml",
 ]
+
+[tool.coverage.run]
+# Here rather than on the CI command line, so the coverage step stays a plain
+# `coverage run -m pytest -q` and local runs measure the same thing CI does.
+source = ["src/vise"]
+omit = ["*/tests/*"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

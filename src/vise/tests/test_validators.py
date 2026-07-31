@@ -193,6 +193,29 @@ def test_tests_pass_validator_forces_fail_on_failure_marker_despite_exit_zero(
     assert "forced-fail" in result.evidence
 
 
+def test_tests_pass_skips_open_when_runner_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A runner vise cannot find must not deadlock the node gate.
+
+    This failed CLOSED and release-graph declares `tests_pass` on its START
+    node, so activating that workflow on any repo without pytest on PATH
+    blocked every outgoing traverse from the first node — recoverable only via
+    VISE_NODE_GATE_OVERRIDE=1.
+    """
+    monkeypatch.delenv("VISE_TEST_CMD", raising=False)
+    v = TestsPassValidator(weight=1.0)
+    goal = _make_goal(str(tmp_path))
+    with patch("shutil.which", return_value=None):
+        result = v.run(goal)
+    assert result.passed is True, "missing runner must not block the gate"
+    assert "VISE_TEST_CMD" in result.evidence, "evidence must name the escape hatch"
+    assert result.source == "asserted", (
+        "nothing ran, so this must NOT count as a mechanical pass — goal_complete "
+        "grades on source == 'mechanical' and would otherwise accept a skipped suite"
+    )
+
+
 def test_lint_pass_skips_open_when_linter_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

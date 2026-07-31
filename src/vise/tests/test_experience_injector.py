@@ -729,3 +729,21 @@ class TestMainContract:
         assert "cross-ext match" in stderr, (
             "Parent-dir fallback must surface .py pattern for .ts target in same dir"
         )
+
+
+def test_index_schema_version_matches_the_builder() -> None:
+    """The injector and the builder each hold their own copy of SCHEMA_VERSION.
+
+    Both files carry a "bump both together" comment, which is the hand-synced
+    mirror shape that drifts. When it does, nothing raises: the builder writes
+    ``meta.json`` with its version, the injector's
+    ``meta.get("schema_version") != SCHEMA_VERSION`` check rejects the index it
+    just built, and experience injection silently returns nothing — a feature
+    that stops working with no error anywhere.
+    """
+    from vise.hooks import experience_index_builder, experience_injector
+
+    assert experience_injector.SCHEMA_VERSION == experience_index_builder.SCHEMA_VERSION, (
+        f"index schema drift: injector={experience_injector.SCHEMA_VERSION}, "
+        f"builder={experience_index_builder.SCHEMA_VERSION} — bump both together"
+    )
