@@ -50,12 +50,26 @@ checks:
   # it still fires on a real finding.
   sca: [".venv/bin/python", "-m", "pip_audit"]
 
+  # detect-secrets, not gitleaks: same job, and being pure Python it can come
+  # from [dev] instead of needing a Go binary the whole team installs by hand.
+  #
+  # NO --all-files. That flag walks everything on disk including .venv, which
+  # here means 99 site-packages: bandit's own hardcoded-password test fixtures,
+  # PIL matching the AWS key regex, every SBOM hash. 127KB of findings, none of
+  # them this repo's. Bare `scan` reads git's file list, which is the only set
+  # that can actually leak.
+  #
+  # This scans the WORKING TREE. It does not read history, and history is where
+  # committed credentials survive after the "oops" commit removes them. Checked
+  # separately, once: 120 commits, no AWS/GitHub/Slack/Anthropic/private-key
+  # pattern, and no .env/.pem/.key/credential file ever added. Re-check with:
+  #   git log -p --all | grep -Ei 'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|BEGIN [A-Z ]*PRIVATE KEY'
+  secrets: [".venv/bin/python", "-m", "detect_secrets", "scan"]
+
   # Deliberately absent, and each absence is a real gap, not an oversight:
   #   types       — no mypy/pyright config here yet
   #   complexity  — ruff C901 is not enabled; see [tool.ruff.lint] select
   #   deps        — no import-linter contract defined
-  #   secrets     — gitleaks is a Go binary, not installable from [dev]. This
-  #                 repo has never been scanned for committed credentials.
   #   contracts   — vise exposes MCP tools, not an HTTP schema
   #   integration / e2e — vise's suite is unit + subprocess; no separate tier
   # Each one skip-passes and says so. Bind it or accept the risk knowingly.

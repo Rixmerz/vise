@@ -117,3 +117,65 @@ def test_save_survives_a_failed_write_mid_replace(monkeypatch: pytest.MonkeyPatc
     # No leaked temp file in the store's directory.
     leftovers = [p for p in store._file_path.parent.iterdir() if p.suffix == ".tmp"]
     assert not leftovers, f"failed write left temp file(s) behind: {leftovers}"
+
+
+# ---------------------------------------------------------------------------
+# _extract_notes_from_entries — these strings reach an agent's context
+# ---------------------------------------------------------------------------
+
+
+def test_notes_do_not_break_on_a_period_inside_a_path_or_version():
+    """A bare .split(".") truncated at the first period of any kind.
+
+    Real output from vise's own memory: "Why: the hooks hardcoded ~/" — cut
+    inside `~/.local/share/vise`. The note is rendered under the heading
+    "Conventions observed" and injected into an agent's context, so a fragment
+    like that is a fabricated convention, not a display glitch.
+    """
+    from vise.engines.experience_memory import ExperienceEntry, _extract_notes_from_entries
+
+    entry = ExperienceEntry(
+        type="bug_fix",
+        file_pattern="src/*.py",
+        description="d",
+        resolution="The hooks hardcoded ~/.local/share/vise while the tools honored XDG",
+        confidence=0.9,
+    )
+
+    notes = _extract_notes_from_entries([entry])
+
+    assert notes == ["The hooks hardcoded ~/.local/share/vise while the tools honored XDG"]
+
+
+def test_notes_truncate_at_a_word_boundary():
+    """`[:120]` alone produced "...on pre-existing lint debt (u"."""
+    from vise.engines.experience_memory import ExperienceEntry, _extract_notes_from_entries
+
+    entry = ExperienceEntry(
+        type="bug_fix",
+        file_pattern="src/*.py",
+        description="d",
+        resolution="word " * 60,  # 300 chars, no sentence break
+        confidence=0.9,
+    )
+
+    note = _extract_notes_from_entries([entry])[0]
+
+    assert note.endswith("…")
+    assert len(note) <= 121
+    # Every fragment before the ellipsis is a whole word.
+    assert all(w == "word" for w in note[:-1].split())
+
+
+def test_notes_still_stop_at_a_real_sentence_end():
+    from vise.engines.experience_memory import ExperienceEntry, _extract_notes_from_entries
+
+    entry = ExperienceEntry(
+        type="bug_fix",
+        file_pattern="src/*.py",
+        description="d",
+        resolution="Bind the check first. Then argue about the threshold.",
+        confidence=0.9,
+    )
+
+    assert _extract_notes_from_entries([entry]) == ["Bind the check first"]

@@ -13,6 +13,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal.
 - **Recipes & capabilities** — declarative multi-step recipes with capability bindings that survive MCP renames. `recipe_run` resolves a recipe into an ordered **plan** and hands it back for *you* to execute: vise is an MCP server and cannot call another server's tools, so it advises and Claude Code acts — the same division as `graph_traverse`'s prompt injection. A step whose capability is unbound halts the plan and names `capability_set`.
+- **Declarative quality gates** — a workflow node gates on a check *name* (`lint`, `unit`, `sast`, `coverage`, …); `.vise/quality.yaml` says what that name runs in *this* repo, so one workflow ships to a Python repo and a Go repo unchanged. An unbound check **skip-passes** with evidence naming the next step and a record marked `source="asserted"` — nothing ran, so `goal_complete` will not grade it as verified. The bundled `quality-gate` workflow tiers them static → tests → security → integration; mutation testing and fuzzing stay deliberately out of band, since a full mutation run as a gate stalls every traversal and fuzzing has no completion condition to wait on.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
 
 The MCP surface exposes **49 tools**: `graph_*` (27), `goal_*` (7), `experience_*` (5), `snapshot_*` (4), `recipe_*` (3), `capability_*` (2), `vise_version`. Counted from the registry, not by hand — `test_asset_honesty.py` holds the authoritative list.
@@ -195,6 +196,8 @@ Or, to reuse the plugin venv (`$XDG_DATA_HOME/vise/venv`, falling back to `~/.lo
 ## Status
 
 **Alpha.** Extracted from an earlier in-house orchestrator, keeping the differentiated core (workflows, experience memory, snapshots) and deliberately dropping two things it carried: an MCP proxy layer (Claude Code's native tool discovery covers it) and hard code-analysis dependencies (structural analysis stays external).
+
+Release notes live in [CHANGELOG.md](CHANGELOG.md), including a **Known gaps** list that is kept honest rather than aspirational. The three that matter most right now: there is no telemetry proving any gate fires in real use, `phrase` edges are advisory so vise cannot gate on a human signal, and all 11 bundled recipes ship unbound.
 
 ## License
 

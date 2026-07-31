@@ -639,9 +639,22 @@ def _extract_notes_from_entries(entries: list[ExperienceEntry]) -> list[str]:
         resolution = (entry.resolution or "").strip()
         if not resolution or len(resolution) < 10:
             continue
-        # Collapse newlines, then take first sentence up to 120 chars
+        # Collapse newlines, then take the first sentence, up to 120 chars.
+        #
+        # Split on ". " (period + space), NOT a bare ".": these resolutions are
+        # commit-message bodies, and a bare split breaks on the period inside
+        # `~/.local/share/vise`, `0.65`, `v1.2`, and `.venv` — which is how a
+        # note ended up reading "Why: the hooks hardcoded ~/". Truncation is at
+        # a word boundary for the same reason: `[:120]` alone cut mid-word and
+        # produced "...on pre-existing lint debt (u".
+        #
+        # These strings are injected into an agent's context under the heading
+        # "Conventions observed", so a mangled fragment is not a cosmetic bug —
+        # it is a made-up convention presented as learned experience.
         single_line = " ".join(resolution.splitlines()).strip()
-        first_sentence = single_line.split(".")[0][:120].strip()
+        first_sentence = single_line.split(". ")[0].rstrip(".").strip()
+        if len(first_sentence) > 120:
+            first_sentence = first_sentence[:120].rsplit(" ", 1)[0] + "…"
         if first_sentence and first_sentence not in seen:
             seen.add(first_sentence)
             notes.append(first_sentence)
