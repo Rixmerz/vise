@@ -259,8 +259,17 @@ def main():
             }))
             return
 
-    except Exception:
-        pass  # Fail-safe: approve on any error
+    except Exception as exc:
+        # Fail-safe: approve on any error — a crashing enforcer must never brick
+        # a session. But approve SILENTLY and enforcement can die (corrupt state
+        # file, parser bug) while the user keeps believing a workflow is gating
+        # their tools. Same contract as lint_pass / lsp_clean: fail open, say why.
+        # stderr only — stdout is the decision channel and must stay pure JSON.
+        print(
+            f"[vise.enforcer] approving without gating — enforcer error: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
 
     print(json.dumps({"decision": "approve"}))
 

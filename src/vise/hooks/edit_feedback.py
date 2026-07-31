@@ -90,4 +90,5 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception:
-        raise SystemExit(0)
+        # Advisory hook: never break a tool call. Cause deliberately dropped.
+        raise SystemExit(0) from None

@@ -73,7 +73,7 @@ def register_graph_query_tools(mcp):
                 "session_id": sid,
                 "active": False,
                 "message": str(e),
-                "hint": "graph_activate(name=...) to start one; graph_list_available to see them",
+                "hint": "graph_activate(graph_name=\"<id>\") to start one; graph_list_available to see them",
                 "project_dir": resolved_dir
             }
         except ValueError as e:

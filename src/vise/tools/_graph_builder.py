@@ -176,7 +176,7 @@ def register_graph_builder_tools(mcp):
         Returns a builder_id to use in subsequent calls.
 
         Args:
-            name: Name of the graph (e.g., "CFA Remember Workflow")
+            name: Name of the graph (e.g., "API Endpoint Workflow")
             description: Description of what the graph does
             version: Version string (default "1.0.0")
             builder_id: Optional custom ID (auto-generated if not provided)
@@ -322,10 +322,17 @@ def register_graph_builder_tools(mcp):
             edge_id: Unique identifier for this edge (e.g., "start-to-analysis")
             from_node: Source node ID
             to_node: Destination node ID
-            condition_type: "always", "tool", or "phrase"
-            condition_tool: For type="tool", the tool that triggers (e.g., "mcp__cfa4__cfa.remember")
+            condition_type: "always", "tool", "phrase", or "validators_green"
+            condition_tool: For type="tool", the tool that triggers (e.g., "mcp__github__create_pull_request")
             condition_phrases: For type="phrase", list of phrases that trigger (e.g., ["done", "complete"])
             priority: Higher priority edges are evaluated first (default 1)
+
+        ``validators_green`` is the only condition_type actually enforced by
+        graph traversal: the edge becomes traversable only when ALL
+        validators declared on the SOURCE node pass. It is fail-closed — if
+        the source node declares no validators, the edge can never be
+        traversed. ("always", "tool", and "phrase" are not gated on any
+        check that runs.)
 
         Examples:
             # Tool-triggered transition
@@ -335,7 +342,7 @@ def register_graph_builder_tools(mcp):
                 from_node="capture",
                 to_node="complete",
                 condition_type="tool",
-                condition_tool="mcp__cfa4__cfa.remember"
+                condition_tool="mcp__github__create_pull_request"
             )
 
             # Phrase-triggered transition
@@ -346,6 +353,21 @@ def register_graph_builder_tools(mcp):
                 to_node="development",
                 condition_type="phrase",
                 condition_phrases=["ready to implement", "proceed with development"]
+            )
+
+            # Validators-gated transition — pair with a node that declares validators
+            graph_builder_add_node(
+                builder_id="abc123",
+                node_id="implementation",
+                name="Implementation",
+                validators=[{"type": "tests_pass", "weight": 1.0}]
+            )
+            graph_builder_add_edge(
+                builder_id="abc123",
+                edge_id="implementation-to-review",
+                from_node="implementation",
+                to_node="review",
+                condition_type="validators_green"
             )
         """
         if builder_id not in _graph_builders:
@@ -597,7 +619,7 @@ def register_graph_builder_tools(mcp):
 
         Args:
             builder_id: ID from graph_builder_create()
-            filename: Name for the file (without extension, e.g., "cfa-remember")
+            filename: Name for the file (without extension, e.g., "api-endpoint")
             project_dir: Project directory (optional after set_session)
             session_id: Session ID for parallel isolation
 

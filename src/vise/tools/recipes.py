@@ -3,7 +3,7 @@
 Registered tools:
     recipe_list        — list recipes + per-recipe all_capabilities_resolved flag
     recipe_describe    — show steps with resolved (mcp, tool) per capability
-    recipe_run         — execute a recipe; halt on first error
+    recipe_run         — resolve a recipe into an ordered plan for the caller to execute
     capability_set     — assign a capability to a tool (mcp_name.tool_name)
     capability_audit   — list capabilities with no registered tool
 """
@@ -289,14 +289,21 @@ def register_recipes(mcp: FastMCP) -> None:
         project_dir: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a recipe. Halts on first error.
+        """Resolve a recipe into an ordered plan and return it — vise cannot call
+        another MCP server's tools, so the CALLER must execute each plan entry's
+        resolved_mcp.resolved_tool with its args, in order, substituting any
+        '{{ steps.ID.output.K }}' placeholder with that step's real output before
+        the next step. A step whose capability is unbound halts the plan and the
+        result names the exact capability_set(tool=..., capability=...) call needed.
 
         Args:
             name: Recipe name to run.
             inputs: Dict of input values referenced as {{ inputs.X }} in step args.
-            dry_run: If True, resolves and renders but does not call any tool.
+            dry_run: If True, no step is executed locally either (not even
+                built-in `meta.assert` steps) — every step becomes a plan entry,
+                so the caller gets a full preview with zero side effects.
             explain: If True, return resolution chain (recipe origin, per-step
-                source/suggestions) without executing. Implies dry_run.
+                source/suggestions) without resolving into a plan. Implies dry_run.
             token_budget: Optional max combined arg-tokens; runner halts before
                 exceeding.
             project_dir: Project directory (auto-detected if omitted).
@@ -428,7 +435,7 @@ def register_recipes(mcp: FastMCP) -> None:
     def capability_audit(
         project_dir: str | None = None,
         session_id: str | None = None,
-        include_low_confidence: bool = True,
+        include_low_confidence: bool = False,
         include_conflicts: bool = True,
     ) -> dict[str, Any]:
         """Audit capability resolution across recipes.
@@ -436,13 +443,16 @@ def register_recipes(mcp: FastMCP) -> None:
         Returns:
             unresolved: capabilities used in recipes with no resolution.
             low_confidence: tools whose autotag suggestion is non-confident
-                (close-call between two capabilities).
+                (close-call between two capabilities). Empty unless requested.
             conflicts: capabilities where a user pin disagrees with an existing
                 assignment for the same capability.
 
         Args:
-            include_low_confidence: scan registered proxy tools for ambiguous
-                autotag suggestions. Costs an embedding pass per unassigned tool.
+            include_low_confidence: also scan registered proxy tools for
+                ambiguous autotag suggestions — catches tools that autotag
+                nearly misassigned. Off by default: costs an embedding pass
+                per unassigned tool, which the plain unresolved/conflicts scan
+                doesn't need.
             include_conflicts: include user-pin / assignment conflicts.
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)

@@ -305,7 +305,7 @@ def parse_graph_yaml(content: str) -> Graph:
     try:
         data = parse_yaml_simple(content)
     except Exception as e:
-        raise GraphParseError(f"Failed to parse YAML: {e}")
+        raise GraphParseError(f"Failed to parse YAML: {e}") from e
 
     # Extract metadata
     metadata = data.get('metadata', {})
@@ -526,6 +526,6 @@ def load_graph_from_file(file_path: Path) -> Graph:
     try:
         content = file_path.read_text()
     except Exception as e:
-        raise GraphParseError(f"Failed to read file {file_path}: {e}")
+        raise GraphParseError(f"Failed to read file {file_path}: {e}") from e
 
     return parse_graph_yaml(content)
