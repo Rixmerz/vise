@@ -41,7 +41,15 @@ def project_key(project_dir: str | Path) -> str:
     ``project_state_dir`` detects an actual basename collision.
     """
     resolved = Path(project_dir).resolve()
-    digest = hashlib.sha1(str(resolved).encode("utf-8")).hexdigest()[:8]
+    # usedforsecurity=False is not lint appeasement: under an OpenSSL FIPS
+    # provider, plain hashlib.sha1() RAISES, and this call sits on the path
+    # that resolves every state directory — so vise would fail to start on a
+    # FIPS host rather than degrade. The flag says "namespacing, not crypto"
+    # and leaves the digest byte-identical, which matters because changing it
+    # would orphan every state dir already on disk.
+    digest = hashlib.sha1(
+        str(resolved).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:8]
     return f"{resolved.name}-{digest}"
 
 

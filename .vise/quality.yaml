@@ -32,12 +32,30 @@ checks:
   dead_code: [".venv/bin/python", "-m", "ruff", "check", ".", "--exclude", ".claude",
               "--select", "F401,F841"]
 
+  # Medium and up. bandit reports 89 Low against this tree and all 89 are
+  # B110/B112 (try/except/pass) on the deliberate fail-open handlers that every
+  # vise hook is contractually required to have — the same ~95%-noise shape as
+  # ruff's BLE001, which is why [tool.ruff.lint] does not select it either.
+  # Gating on Low would mean either 89 permanent findings or 89 #nosec comments;
+  # neither is a security control. Medium+ was one real finding (a SHA1 without
+  # usedforsecurity=False, which raises outright under a FIPS provider).
+  sast: [".venv/bin/python", "-m", "bandit", "-q", "-r", "src/vise",
+         "-x", "src/vise/tests", "--severity-level", "medium"]
+
+  # NOT --strict, which is what quality.example.yaml used to recommend. --strict
+  # fails when ANY distribution cannot be audited, and a project pip-installed
+  # into its own venv is never on PyPI — so `pip-audit --strict` exits 1 forever
+  # on essentially every Python repo during development. Verified: plain
+  # pip-audit exits 0 here and exits 1 with 10 CVEs against urllib3==1.26.0, so
+  # it still fires on a real finding.
+  sca: [".venv/bin/python", "-m", "pip_audit"]
+
   # Deliberately absent, and each absence is a real gap, not an oversight:
   #   types       — no mypy/pyright config here yet
   #   complexity  — ruff C901 is not enabled; see [tool.ruff.lint] select
   #   deps        — no import-linter contract defined
-  #   sast/sca    — bandit / pip-audit not in [dev]
-  #   secrets     — gitleaks not installed
+  #   secrets     — gitleaks is a Go binary, not installable from [dev]. This
+  #                 repo has never been scanned for committed credentials.
   #   contracts   — vise exposes MCP tools, not an HTTP schema
   #   integration / e2e — vise's suite is unit + subprocess; no separate tier
   # Each one skip-passes and says so. Bind it or accept the risk knowingly.

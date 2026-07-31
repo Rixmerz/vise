@@ -119,7 +119,11 @@ checks:
   #  Go:     ["gosec", "./..."]
 
   # Software composition analysis — known-vulnerable dependencies.
-  sca: ["pip-audit", "--strict"]
+  # No --strict: it fails when ANY distribution cannot be audited, and a project
+  # pip-installed into its own venv is not on PyPI — so it exits 1 forever on
+  # essentially every Python repo mid-development. Plain pip-audit still exits
+  # nonzero on a real CVE, which is the part you actually want gating.
+  sca: ["pip-audit"]
   #  Any language: ["osv-scanner", "scan", "source", "-r", "."]
   #  JS/TS:  ["npm", "audit", "--audit-level=high"]
   #  Rust:   ["cargo", "audit"]

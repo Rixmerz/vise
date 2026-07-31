@@ -97,3 +97,39 @@ def test_second_different_project_diverted_after_first_claims_plain_dir(tmp_path
     dir_b_probe = state_paths.probe_state_dir(proj_b)  # read-only, no claim
 
     assert dir_b_probe is None or dir_b_probe != dir_a
+
+
+# ---------------------------------------------------------------------------
+# project_key's digest is on-disk state, not an implementation detail
+# ---------------------------------------------------------------------------
+
+
+def test_project_key_digest_is_stable_for_a_known_path() -> None:
+    """Locks the exact suffix, because it names directories already on disk.
+
+    `project_key` is the collision escape hatch: change how the digest is
+    computed and every project that has been diverted to a hashed sibling
+    silently starts resolving to a NEW empty directory, orphaning its graph
+    state, goal, and snapshots. Nothing else in the suite would notice.
+
+    It exists as a regression guard for exactly one kind of edit — this hash
+    gained `usedforsecurity=False` (SHA1 raises under an OpenSSL FIPS provider
+    without it, and this call sits on the startup path), and the flag must not
+    alter a single byte of the result.
+    """
+    from vise.hooks._xdg import project_key
+
+    key = project_key("/home/rixmerz/Projects/vise")
+
+    assert key == "vise-7c1b4f1e"
+
+
+def test_project_key_hashes_the_resolved_path_not_the_spelling(tmp_path: Path) -> None:
+    """Two spellings of one directory must produce one key."""
+    from vise.hooks._xdg import project_key
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    assert project_key(str(proj)) == project_key(f"{proj}/")
+    assert project_key(str(proj)) == project_key(str(proj / "." ))

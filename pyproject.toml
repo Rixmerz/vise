@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vise-mcp"
-version = "0.1.0a12"
+version = "0.1.0a13"
 description = "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,7 +33,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "bandit>=1.7.0",
     "coverage>=7.0.0",
+    "pip-audit>=2.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
