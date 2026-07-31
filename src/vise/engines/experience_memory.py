@@ -9,7 +9,9 @@ Storage (XDG):
 """
 
 import json
+import os
 import re
+import tempfile
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -370,7 +372,23 @@ class ExperienceMemoryStore:
             "project": self._project_name,
             "count": len(self.entries),
         }
-        self._file_path.write_text(json.dumps(data, indent=2))
+        payload = json.dumps(data, indent=2).encode("utf-8")
+
+        # Atomic write: same-directory temp file + rename, so a crash or an
+        # interleaved write from another vise process never truncates the
+        # store in place (see experience_gc.gc for the same pattern).
+        fd, tmp_name = tempfile.mkstemp(dir=self._file_path.parent, suffix=".tmp")
+        tmp_path = Path(tmp_name)
+        try:
+            try:
+                os.write(fd, payload)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        tmp_path.replace(self._file_path)
 
         # Nudge the user when the store grows large (no silent auto-deletion in v1)
         try:
@@ -411,6 +429,20 @@ class ExperienceMemoryStore:
                 for f in entry.related_files:
                     if f not in existing.related_files:
                         existing.related_files.append(f)
+                # Persist here too: the store owns its own persistence, so
+                # both branches of record() save and no caller has to
+                # remember to. Before this, only the new-entry branch below
+                # saved; `_record_node_gate_failure` (engines/node_gate.py)
+                # never calls save() itself, so every repeat recorded through
+                # it left `occurrences` pinned at 1 on disk, freezing
+                # `confidence` at its first-occurrence value. (The other
+                # automatic recorder, `workflow_post_traverse._record_experience`,
+                # always saved unconditionally — but it's unreachable: it
+                # imports `workflow_manager.experience_memory`, a module that
+                # doesn't exist in this repo, so it always falls through to
+                # `_record_experience_fallback`, which never touches this
+                # store at all.)
+                self.save()
                 return existing
 
         # New entry
