@@ -120,6 +120,10 @@ def register_graph_transition_tools(mcp):
 
         current_node = graph.nodes.get(current_node_id)
 
+        # Holds the node-gate run so the validators_green check below can reuse
+        # it instead of executing every validator a second time.
+        node_gate: dict | None = None
+
         # Node validation gate: block exit if declared validators / recipe fail
         if current_node and (
             getattr(current_node, "validators", None) or getattr(current_node, "recipe", None)
@@ -163,7 +167,16 @@ def register_graph_transition_tools(mcp):
                     ),
                     "project_dir": resolved_dir,
                 }
-            vg_result = await _run_node_validators(current_node, resolved_dir, state)
+            # Reuse the node-gate run above. Both checks call
+            # _run_node_validators on the SAME node with the same state, so the
+            # second call only duplicated cost: on feature-dev's `test` node,
+            # whose only outgoing edge is validators_green, that meant running
+            # the entire test suite twice on every attempt to leave the phase.
+            # The `await` fallback is defensive — the two guard conditions are
+            # identical, so reaching here means the gate above already ran.
+            vg_result = node_gate if node_gate is not None else (
+                await _run_node_validators(current_node, resolved_dir, state)
+            )
             if vg_result is None or not vg_result["passed"]:
                 failed_count = vg_result["failed_count"] if vg_result else 0
                 return {
@@ -330,5 +343,26 @@ def register_graph_transition_tools(mcp):
             "reason": reason,
             "project_dir": resolved_dir
         }
+
+        # What the gate we just cleared actually proved. `gate_details` used to
+        # appear only on the two BLOCKED returns, so a successful traversal said
+        # nothing about how it succeeded — a node whose validators all skipped
+        # (unconfigured tool, binary not on PATH: passed=True, source="asserted")
+        # was indistinguishable from one that mechanically verified everything.
+        # A skipped check is a gap to close, not a pass, and the agent can only
+        # treat it that way if it is told.
+        if node_gate is not None:
+            result["gate_summary"] = {
+                "verified": node_gate.get("verified_count", 0),
+                "skipped": node_gate.get("skipped_count", 0),
+                "checks": node_gate.get("checks", []),
+            }
+            if node_gate.get("skipped_count"):
+                result["gate_summary"]["hint"] = (
+                    f"{node_gate['skipped_count']} check(s) did not run — they are "
+                    f"unconfigured or their tool is missing, and reported "
+                    f"source='asserted', not 'mechanical'. Each one is an unchecked "
+                    f"defect class, not a pass. Bind it or say which risk you accept."
+                )
 
         return result

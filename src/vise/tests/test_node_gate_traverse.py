@@ -216,6 +216,36 @@ async def test_validators_green_edge_opens_once_the_source_gate_is_green(travers
     assert _at(project) == "end"
 
 
+async def test_a_validators_green_traversal_runs_the_validators_only_once(
+    traverse, project, monkeypatch
+):
+    """The node gate and the validators_green check must share one run.
+
+    Both call ``_run_node_validators`` on the SAME node with the same state, so
+    a second call bought nothing and doubled the cost. On feature-dev's `test`
+    node — whose only outgoing edge is validators_green — that meant running the
+    entire test suite twice on every attempt to leave the phase, which is also
+    why the quality-gate workflow avoided validators_green edges entirely.
+    """
+    from vise.tools import _graph_transition as gt
+
+    real = gt._run_node_validators
+    calls = 0
+
+    async def counting(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(gt, "_run_node_validators", counting)
+    (Path(project) / "done.txt").write_text("")
+
+    result = await traverse(edge_id="gated-green", project_dir=project)
+
+    assert not result.get("error"), result
+    assert calls == 1, f"validators ran {calls} times for one traversal"
+
+
 # ---------------------------------------------------------------------------
 # edge-selection guards — cheap, and they protect the gate from being skipped
 # ---------------------------------------------------------------------------

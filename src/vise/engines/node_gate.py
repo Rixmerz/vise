@@ -98,6 +98,22 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
         except Exception as e:
             print(f"[vise] Warning: failed to record node-gate failure lesson: {e}", file=sys.stderr)
 
+    # A validator that SKIPPED — its tool is unconfigured or not on PATH —
+    # reports passed=True with source="asserted", never "mechanical". Returning
+    # only `failed` threw that distinction away: a node declaring 13 quality
+    # checks on a repo that binds none of them returned a dict byte-identical to
+    # a node that verified all 13. The agent had no channel through which a skip
+    # could reach it, so a prompt saying "read the evidence of every check,
+    # including the ones that passed" was impossible to obey. Carry them all.
+    verified = [
+        r for r in results
+        if getattr(r, "passed", False) and getattr(r, "source", "") == "mechanical"
+    ]
+    skipped = [
+        r for r in results
+        if getattr(r, "passed", False) and getattr(r, "source", "") != "mechanical"
+    ]
+
     return {
         "passed": passed,
         "failed_count": len(failed),
@@ -108,6 +124,17 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
                 "exit_code": getattr(r, "exit_code", None),
             }
             for r in failed
+        ],
+        "verified_count": len(verified),
+        "skipped_count": len(skipped),
+        "checks": [
+            {
+                "name": getattr(r, "name", "?"),
+                "passed": bool(getattr(r, "passed", False)),
+                "source": getattr(r, "source", "unknown"),
+                "evidence": getattr(r, "evidence", "")[:300],
+            }
+            for r in results
         ],
         "confidence": aggregate_confidence(results) if results else 1.0,
     }
