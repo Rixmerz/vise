@@ -4,7 +4,6 @@ graph_timeline, graph_validate, graph_override_max_visits.
 
 import subprocess
 import sys
-from pathlib import Path
 
 from vise.core.session import resolve_project_dir
 from vise.engines.workflow_scope import resolve_workflow_dirs
@@ -65,10 +64,11 @@ def register_graph_management_tools(mcp):
                     version = ""
                     raw_lines = content.split('\n')
                     # Build a parser that understands the two YAML shapes vise
-                    # emits — builder ``metadata:`` block and demo-style flat
-                    # top-level keys — and the block-scalar (``|`` / ``>``)
-                    # form, since ``demo-feature.yaml`` uses
-                    # ``description: |`` with indented continuation lines.
+                    # accepts — builder ``metadata:`` block and flat top-level
+                    # keys — and the block-scalar (``|`` / ``>``) form, since a
+                    # hand-written graph may use ``description: |`` with indented
+                    # continuation lines. Every bundled graph now uses the
+                    # ``metadata:`` shape; the flat branch serves user graphs.
                     in_metadata = False
                     i = 0
                     while i < len(raw_lines):
@@ -248,28 +248,10 @@ def register_graph_management_tools(mcp):
         initialize_graph_state(resolved_dir, graph, graph_name)
         start_node = graph.get_start_node()
 
-        # Auto-refresh project metadata and pattern catalog on activation
-        try:
-            from vise.engines.graph_state import _get_centralized_state_dir
-            state_dir = str(_get_centralized_state_dir(resolved_dir))
-        except Exception:
-            state_dir = str(Path(resolved_dir) / ".claude" / "workflow")
-
-        try:
-            from vise.engines.project_metadata import ProjectMetadata
-            pm = ProjectMetadata(resolved_dir)
-            pm.discover_all()
-            pm.save(state_dir)
-        except Exception as e:
-            print(f"[vise] Metadata refresh failed (non-fatal): {e}", file=sys.stderr)
-
-        try:
-            from vise.engines.pattern_catalog import PatternCatalog
-            pc = PatternCatalog(resolved_dir)
-            pc.discover_all()
-            pc.save(state_dir)
-        except Exception as e:
-            print(f"[vise] Pattern catalog refresh failed (non-fatal): {e}", file=sys.stderr)
+        # A "refresh project metadata + pattern catalog" step used to run here.
+        # Both engines never shipped in this package, so activation printed two
+        # `refresh failed (non-fatal)` warnings blaming subsystems that do not
+        # exist — on every graph_activate. Removed; see test_no_phantom_imports.py.
 
         return {
             "success": True,

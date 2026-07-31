@@ -146,8 +146,6 @@ class TestDeployAgentsInlineRemoved:
             goal="test goal",
             project_dir=str(tmp_path),
             synthesize_workflow=False,
-            enable_autonomy=False,
-            deploy_subagents=True,
         )
 
         assert result["agents_deployed"] == []

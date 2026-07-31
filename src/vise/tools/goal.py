@@ -70,9 +70,9 @@ def register_goal(mcp) -> None:
                 a "type" key (tests_pass, lint_pass, command_exit, files_exist)
                 and optional overrides (weight, cmd, paths, etc.).
             preferred_model: Optional Claude Code model spec for this sprint,
-                e.g. "opus" or "sonnet-low". Stored on the goal for the
-                supervisor's resume prompt — switching the model is the
-                agent's call inside Claude Code, not vise's.
+                e.g. "opus" or "sonnet-low". Stored on the goal; nothing
+                reads it automatically — switching the model is the agent's
+                call inside Claude Code, not vise's.
             session_id: Optional session id.
         """
         resolved_dir, _ = resolve_project_dir(project_dir, session_id)
@@ -244,19 +244,12 @@ def register_goal(mcp) -> None:
         acceptance_criteria: list[str] | None = None,
         validator_configs: list[dict] | None = None,
         preferred_model: str = "",
-        enable_autonomy: bool = True,
         synthesize_workflow: bool = True,
-        deploy_subagents: bool = True,
-        tech_stack: list[str] | None = None,
         project_dir: str | None = None,
         session_id: str | None = None,
     ) -> dict:
-        """Atomic bootstrap: set goal, synthesize+activate workflow, enable
-        autonomy, and (optionally) queue a restart_claude sequence so a fresh
-        Claude session resumes work.
-
-        All side effects happen in this single MCP call so the model cannot
-        half-execute the bootstrap.
+        """Atomic bootstrap: set the goal and (optionally) synthesize+activate
+        a workflow, in a single MCP call so the model cannot half-execute it.
 
         Args:
             goal: High-level objective text. Required.
@@ -265,14 +258,8 @@ def register_goal(mcp) -> None:
             acceptance_criteria: List of human-readable criteria for success.
             validator_configs: List of validator config dicts.
             preferred_model: Optional Claude Code model spec, e.g. "opus".
-            enable_autonomy: Set VISE_AUTONOMY=1 in .claude/settings.json.
+                Stored on the goal; nothing reads it automatically.
             synthesize_workflow: Synthesize and activate a workflow from the goal.
-            deploy_subagents: Gate the restart_claude enqueue (Step 6) — vise
-                does not ship an agent-deployment hub, so this never deploys
-                agents itself. Kept for callers that pass ``False`` post-restart
-                to avoid re-queuing.
-            tech_stack: Accepted for API compatibility; unused (no deployment
-                step consumes it).
             project_dir: Project directory. Optional after set_session.
             session_id: Optional session id.
         """
@@ -306,7 +293,9 @@ def register_goal(mcp) -> None:
                 "already_bootstrapped": True,
                 "goal_id": existing.id,
                 "workflow_name": None,
-                "autonomy_enabled": True,
+                # False, like every other return path. Autonomy was removed; a
+                # `True` here claimed the one thing this function no longer does.
+                "autonomy_enabled": False,
                 "agents_deployed": [],
                 "scheduled_items": [],
                 "pane_target": None,
@@ -356,98 +345,36 @@ def register_goal(mcp) -> None:
                     "scheduled_items": [],
                 }
 
-        # --- Step 4: Enable autonomy ---
+        # Step 4 (enable autonomy) was removed. It wrote VISE_AUTONOMY=1 into the
+        # user's real .claude/settings.json, and NOTHING reads that variable —
+        # the daemon that did never shipped here. The flag that actually keeps
+        # a session working toward the goal is VISE_GOAL_GATE, read by
+        # hooks/goal_gate.py. `enable_autonomy` was removed from the signature.
         autonomy_enabled = False
-        if enable_autonomy:
-            try:
-                data = _read_settings(settings_path)
-                env = data.setdefault("env", {})
-                env["VISE_AUTONOMY"] = "1"
-                _write_settings_atomic(settings_path, data)
-                autonomy_enabled = True
-            except Exception as exc:
-                return {
-                    "ok": False,
-                    "step": "autonomy",
-                    "error": str(exc),
-                    "goal_id": goal_id,
-                    "workflow_name": workflow_name,
-                    "autonomy_enabled": False,
-                    "agents_deployed": [],
-                    "scheduled_items": [],
-                }
 
         # Step 5 (agent deployment) was removed: vise ships no agent-deployment
         # hub, so this never wrote anything — see git history for the deleted
-        # `_deploy_agents_inline`. `agents_deployed` stays empty; `deploy_subagents`
-        # still gates the restart_claude enqueue below (Step 6).
+        # `_deploy_agents_inline`. `agents_deployed` stays empty. `deploy_subagents`
+        # and `tech_stack` were removed from the signature (no consumer).
         agents_deployed: list[str] = []
 
-        # --- Step 6: Record next_task + enqueue schedule items ---
-        scheduled_items: list[str] = []
-        pane_target: str | None = None
-
-        try:
-            from vise.engines import schedule as sched_engine
-            from vise.engines import usage_state
-        except ImportError:
-            # vise ships no schedule/usage engines — skip restart enqueue.
-            sched_engine = None
-            usage_state = None
-
-        pane_target = usage_state.default_target() if usage_state is not None else None
-
-        # The restart_and_prompt enqueue is gated on ``deploy_subagents``
-        # because that's the user signal "I'm bootstrapping a fresh
-        # session". The post-restart ``/vise-goal`` call passes
-        # ``deploy_subagents=False`` so it does NOT queue another restart
-        # (which would loop). ``/setup-agents`` handles its own
-        # restart enqueue via the low-level ``schedule_add`` tool.
-        if deploy_subagents and pane_target:
-            try:
-                from vise.engines import next_task as nt_engine
-                nt_engine.record(
-                    project_dir=resolved_dir,
-                    summary=(
-                        f"Goal bootstrap complete. Goal `{goal_id}` set: {goal[:100]}. "
-                        f"Workflow: {workflow_name or 'none'}."
-                    ),
-                    task_description=f"Resume goal {goal_id}: {goal[:80]}",
-                )
-
-                resume_directive = (
-                    f"Resume goal `{goal_id}`: {goal[:100]}. "
-                    f"Workflow `{workflow_name or 'active workflow'}` is active. "
-                    f"Target confidence: {g.target_confidence}. "
-                    "Call `graph_status` to see the current phase and continue."
-                )
-
-                sched_engine.add(
-                    resolved_dir, "prompt",
-                    value=resume_directive, target=pane_target,
-                    clear_first=True,
-                )
-                scheduled_items.append("prompt")
-
-            except Exception as exc:
-                # Non-fatal: goal is set, autonomy enabled
-                scheduled_items = [f"schedule_error: {exc}"]
-
-        next_msg = (
-            "daemon will execute prompt (clear_first=True)"
-            if pane_target and scheduled_items and not any("error" in s for s in scheduled_items)
-            else "no pane target — restart Claude manually to resume"
-        )
-
+        # Step 6 (auto-resume enqueue) was removed for the same reason as Step 5:
+        # it depended on `vise.engines.schedule` / `usage_state` / `next_task`,
+        # none of which ship here. `pane_target` was therefore always None, so
+        # the enqueue body was unreachable and `scheduled_items` always empty.
+        # The keys stay for response-shape stability, saying honestly that
+        # nothing was scheduled. Nothing in this repo reads them — grep for
+        # scheduled_items / pane_target / agents_deployed and the only hits
+        # outside this file are one test assertion. See test_no_phantom_imports.py.
         return {
             "ok": True,
             "goal_id": goal_id,
             "workflow_name": workflow_name,
             "autonomy_enabled": autonomy_enabled,
             "agents_deployed": agents_deployed,
-            "scheduled_items": scheduled_items,
-            "pane_target": pane_target,
-            "next": next_msg,
+            "scheduled_items": [],
+            "pane_target": None,
+            "next": "restart Claude manually to resume — vise schedules nothing itself",
         }
 
 

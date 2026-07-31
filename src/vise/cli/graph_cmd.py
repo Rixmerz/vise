@@ -53,9 +53,9 @@ Your task: drive the workflow '{workflow_name}' to completion. Work autonomously
 
 Steps:
 1. Call graph_activate(graph_name='{workflow_name}', project_dir='{project_dir}') to activate the workflow.
-2. Read the returned prompt_injection and briefing carefully.
+2. Read the returned prompt_injection carefully.
 3. Do the work the current phase requires (implement, review, test, etc.).
-4. Call graph_traverse(direction='next', project_dir='{project_dir}') to advance to the next phase.
+4. Call graph_status(project_dir='{project_dir}') to read the available edge ids, then call graph_traverse(edge_id='<id>', project_dir='{project_dir}') to advance to the next phase.
 5. Repeat steps 2–4 until the workflow reaches a terminal node or the goal_gate Stop hook fires.
 
 Cycle control is provided by the graph's back-edges, max_visits settings, and node_gate validators — you do not need to implement any loop logic yourself. goal_gate is your safety net: if it blocks the session, the run ends cleanly.
@@ -105,8 +105,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     spawning a real session. This is also the safe path for tests.
 
     Without those flags: spawns ``claude -p <prompt>`` as a subprocess with
-    ``VISE_AUTONOMY=1`` and ``VISE_GOAL_GATE=1`` armed so the graph's enforcer
-    and the goal_gate Stop hook are both active. Node work is performed by the
+    ``VISE_GOAL_GATE=1`` armed so the goal_gate Stop hook is active (the graph
+    enforcer needs no flag — it runs on every PreToolUse). Node work is performed by the
     spawned agent session — this driver does NOT execute it.
 
     Manual-verification GAP: whether a headless ``claude -p`` session reliably
@@ -172,7 +172,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # Arm autonomy rails and recursion guard, then spawn.
     env = os.environ.copy()
     env[_ENV_INNER] = "1"
-    env["VISE_AUTONOMY"] = "1"
+    # VISE_AUTONOMY is not set here: no code reads it. VISE_GOAL_GATE is the
+    # real rail — hooks/goal_gate.py and engines/goal_gate.py both read it.
     env["VISE_GOAL_GATE"] = "1"
 
     try:
@@ -180,8 +181,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return result.returncode
     except FileNotFoundError:
         print(
+            # Was: "or override via VISE_JUDGE_CMD" — nothing reads that var and
+            # no judge exists anywhere in vise, so the advice could not work.
             "[vise graph run] 'claude' CLI not found in PATH. "
-            "Install the Claude Code CLI or override via VISE_JUDGE_CMD.",
+            "Install the Claude Code CLI and ensure `claude` is on PATH.",
             file=sys.stderr,
         )
         return 1

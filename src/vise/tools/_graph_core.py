@@ -7,24 +7,16 @@ The original 1421-line module has been split into three focused modules:
 - _graph_mutation.py   (~290L): graph_reset, graph_set_node,
                                 graph_record_output, graph_task_complete
 - _graph_transition.py (~700L): graph_traverse (the 547-line orchestrator)
-                                + _build_clean_context_briefing
-                                + _target_session_matches_current
 
 This module is kept as a facade so that:
   - tools/graph.py can continue calling register_graph_core_tools(mcp)
     without any change.
-  - test_clean_context_traverse.py can continue importing
-    _build_clean_context_briefing and register_graph_core_tools directly
-    from vise.tools._graph_core.
 """
 from __future__ import annotations
 
 from vise.tools._graph_query import register_graph_query_tools
 from vise.tools._graph_mutation import register_graph_mutation_tools
-from vise.tools._graph_transition import (
-    register_graph_transition_tools,
-    _build_clean_context_briefing,  # re-exported for test_clean_context_traverse.py
-)
+from vise.tools._graph_transition import register_graph_transition_tools
 
 
 def register_graph_core_tools(mcp) -> None:
@@ -36,5 +28,4 @@ def register_graph_core_tools(mcp) -> None:
 
 __all__ = [
     "register_graph_core_tools",
-    "_build_clean_context_briefing",
 ]

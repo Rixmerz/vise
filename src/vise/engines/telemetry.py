@@ -4,10 +4,11 @@ Writes to ~/.local/share/vise/telemetry/orchestration.jsonl (or
 $VISE_TELEMETRY_DIR/orchestration.jsonl when the env var is set).
 
 Supported event kinds:
-  auto_activate_hit   — workflow auto-activated from intent classifier
-  auto_activate_miss  — intent matched but activation skipped / suggestion only
-  pre_plan_emit       — auto_pre_plan injection fired
-  user_override       — user reset/switched off an auto-activated workflow within 30m
+  workflow_prompt     — the suggester told the agent to pick a workflow
+
+Keep this list equal to ``_VALID_KINDS`` below. It previously named four kinds
+that the same change had already made illegal, so ``record_intervention``
+warned and dropped every one of them while the docs still advertised them.
 """
 from __future__ import annotations
 
@@ -21,9 +22,12 @@ from vise.core import paths as _paths
 
 log = logging.getLogger(__name__)
 
-_VALID_KINDS = frozenset(
-    {"auto_activate_hit", "auto_activate_miss", "pre_plan_emit", "user_override"}
-)
+# One real event. The previous four all belonged to the auto-activate classifier
+# and the override detector that measured its false-positive rate — none of which
+# ship anymore: a regex deciding the workflow was replaced by the model reading
+# the request. An allowlist naming kinds nothing emits is not an allowlist, it is
+# a wish list, so it shrinks with its producers.
+_VALID_KINDS = frozenset({"workflow_prompt"})
 
 
 def _telemetry_dir() -> Path:

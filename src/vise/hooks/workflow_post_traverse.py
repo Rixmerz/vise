@@ -195,13 +195,6 @@ def main():
     if from_node and to_node:
         print(f"⚡ {from_node} → {to_node} (experience recorded)", file=sys.stderr)
 
-    # Refresh telemetry at phase boundary by scanning the local Claude
-    # Code JSONL transcripts (pure file reads).
-    try:
-        _refresh_usage_state(project_dir)
-    except Exception:
-        pass
-
     try:
         _emit_usage_block(project_dir)
     except Exception:
@@ -210,45 +203,28 @@ def main():
     print(_APPROVE)
 
 
-def _refresh_usage_state(project_dir: str) -> None:
-    """Read token usage from ~/.claude/projects/<encoded-cwd>/*.jsonl
-    and merge into usage_state.json. Free, idempotent, no pane writes.
-    """
-    try:
-        from vise.engines import usage_local, usage_state
-    except ImportError:
-        return
-    scanned = usage_local.scan(project_dir)
-    if scanned:
-        usage_state.update(**scanned)
-
-
 def _emit_usage_block(project_dir: str) -> None:
-    """Print the formatted usage block to stderr if state is available.
+    """Print the usage block to stderr when a usage state file is present.
 
-    Reads ``usage_state.json`` populated by ``_refresh_usage_state``
-    above. Never injects slash commands into the live pane.
+    vise does NOT write this file. It reads ``$VISE_USAGE_DIR/state.json``
+    (documented path) so an external producer — a statusline script, another
+    tool — can surface token/session usage at each phase transition. Absent
+    file means no block, which is the normal case.
+
+    Two dead paths were removed here: a ``_refresh_usage_state`` writer and a
+    "try the installed package first" reader, both importing
+    ``vise.engines.usage_state`` / ``usage_local``, which never shipped. The
+    writer's ``except ImportError: return`` meant nothing ever populated the
+    file from inside vise, and the reader always fell through to the inline
+    formatter below. See test_no_phantom_imports.py.
     """
-    # Try the installed vise package first (normal MCP runtime). When the
-    # hook runs as a standalone script inside .claude/hooks/, the
-    # package may not be importable; fall back to reading the JSON
-    # directly from the same well-known path the engine uses.
-    state: dict | None = None
-    try:
-        from vise.engines.usage_state import format_traverse_block, read
-        state = read()
-        if not state:
-            return
-        block = format_traverse_block(state)
-    except ImportError:
-        block = _fallback_format_block(_fallback_read_state())
-
+    block = _format_block(_read_state())
     if block:
         print(f"📊 {block}", file=sys.stderr)
 
 
-def _fallback_read_state() -> dict:
-    """Read usage_state.json without depending on the heavier vise.engines package."""
+def _read_state() -> dict:
+    """Read the usage state JSON an external producer may have written."""
     path = _xdg.usage_dir() / "state.json"
     if not path.exists():
         return {}
@@ -258,8 +234,8 @@ def _fallback_read_state() -> dict:
         return {}
 
 
-def _fallback_format_block(state: dict) -> str:
-    """Inline mirror of usage_state.format_traverse_block for hook stand-alone mode."""
+def _format_block(state: dict) -> str:
+    """Render `<used>/<total> | <pct>% usage reset at <t>` from usage state."""
     def _fmt_k(n: int) -> str:
         if n >= 1_000_000:
             v = n / 1_000_000

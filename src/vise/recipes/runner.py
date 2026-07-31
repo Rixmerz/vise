@@ -14,7 +14,6 @@ Responsibilities:
 - Emit a plan entry for every other step instead of dispatching it
 - Bind a placeholder for downstream {{ steps.ID.output.K }} references so
   they survive verbatim into later steps' rendered args
-- Record telemetry via trend_tracker.record_snapshot
 - Redact env refs before storing telemetry
 - Write per-step JSONL telemetry and enforce token budget caps
 """
@@ -40,19 +39,9 @@ from vise.recipes.telemetry import (
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Telemetry helper
-# ---------------------------------------------------------------------------
-
-def _record_telemetry(project_dir: str, recipe_name: str, key: str, value: Any) -> None:
-    """Best-effort telemetry — never raises."""
-    try:
-        from vise.engines.graph_state import _get_centralized_state_dir
-        from vise.engines.trend_tracker import record_snapshot
-        state_dir = str(_get_centralized_state_dir(project_dir))
-        record_snapshot(project_dir, state_dir, {f"recipes.{recipe_name}.{key}": value})
-    except Exception as e:
-        log.debug("[recipes] telemetry error: %s", e)
+# A `_record_telemetry` helper fanned aggregate success/duration into
+# `vise.engines.trend_tracker` — a module that never shipped, so its 14 call
+# sites recorded into nothing. Per-step JSONL telemetry below is the real one.
 
 
 def _utc_now_iso() -> str:
@@ -155,8 +144,6 @@ async def run_recipe(
             )
             log.error("[recipes] %s", error_msg)
             duration_ms = int(time.monotonic() * 1000 - start_ms)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
             writer.write({
                 "ts": _utc_now_iso(),
                 "run_id": writer.run_id,
@@ -193,8 +180,6 @@ async def run_recipe(
                         "[recipes][tier:L2] halting at step=%s capability=%s — paused for approval",
                         step.id, step.capability,
                     )
-                    _record_telemetry(project_dir_str, recipe.name, "success", False)
-                    _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
                     writer.write({
                         "ts": _utc_now_iso(),
                         "run_id": writer.run_id,
@@ -223,8 +208,6 @@ async def run_recipe(
                         f"permitted at tier {recipe.tier}"
                     )
                     log.error("[recipes] %s", error_msg)
-                    _record_telemetry(project_dir_str, recipe.name, "success", False)
-                    _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
                     writer.write({
                         "ts": _utc_now_iso(),
                         "run_id": writer.run_id,
@@ -254,8 +237,6 @@ async def run_recipe(
             error_msg = f"step '{step.id}': template render error: {e}"
             log.error("[recipes] %s", error_msg)
             duration_ms = int(time.monotonic() * 1000 - start_ms)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
             writer.write({
                 "ts": _utc_now_iso(),
                 "run_id": writer.run_id,
@@ -286,8 +267,6 @@ async def run_recipe(
         if budget_error:
             log.error("[recipes] %s", budget_error)
             duration_ms = int(time.monotonic() * 1000 - start_ms)
-            _record_telemetry(project_dir_str, recipe.name, "success", False)
-            _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
             writer.write({
                 "ts": _utc_now_iso(),
                 "run_id": writer.run_id,
@@ -330,8 +309,6 @@ async def run_recipe(
                 log.error("[recipes] %s", error_msg)
                 duration_ms = int(time.monotonic() * 1000 - start_ms)
                 step_duration_ms = int(time.monotonic() * 1000 - step_start)
-                _record_telemetry(project_dir_str, recipe.name, "success", False)
-                _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
                 writer.write({
                     "ts": _utc_now_iso(),
                     "run_id": writer.run_id,
@@ -402,8 +379,6 @@ async def run_recipe(
         })
 
     duration_ms = int(time.monotonic() * 1000 - start_ms)
-    _record_telemetry(project_dir_str, recipe.name, "success", True)
-    _record_telemetry(project_dir_str, recipe.name, "duration_ms", duration_ms)
 
     return {
         "success": True,

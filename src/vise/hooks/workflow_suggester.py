@@ -149,43 +149,28 @@ def _looks_multi_step(prompt: str) -> bool:
     return bool(INTENT_PATTERNS.search(prompt))
 
 
-_AUTO_ACTIVATE_THRESHOLD = 0.85
-_SUGGEST_THRESHOLD = 0.65
+def _available_workflows(project_dir: str) -> list[str]:
+    """Workflow ids across all three scopes, project shadowing user shadowing bundled.
 
-
-def _try_auto_activate(workflow_name: str, project_dir: str) -> str | None:
-    """Best-effort sync activation. Returns activated graph name or None."""
+    Ids only — no descriptions. The stems are already legible (`debug-graph`,
+    `migration-graph`), and parsing eight YAML headers inside a hook with a 3 s
+    timeout buys wording the agent can get from ``graph_list_available`` when the
+    choice is not obvious. Fails to an empty list: a suggester that raises would
+    cost the user their prompt.
+    """
     try:
         from vise.engines.workflow_scope import resolve_workflow_dirs
-        from vise.engines.graph_parser import load_graph_from_file
-        from vise.engines.graph_state import (
-            get_graph_file,
-            initialize_graph_state,
-        )
-    except Exception:
-        return None
 
-    graph_file = None
-    for _scope, workflows_dir in reversed(resolve_workflow_dirs(project_dir)):
-        for stem in (f"{workflow_name}-graph.yaml", f"{workflow_name}.yaml"):
-            cand = workflows_dir / stem
-            if cand.exists():
-                graph_file = cand
-                break
-        if graph_file is not None:
-            break
-    if graph_file is None:
-        return None
-
-    try:
-        graph = load_graph_from_file(graph_file)
-        target = get_graph_file(project_dir)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(graph_file.read_text(encoding="utf-8"), encoding="utf-8")
-        initialize_graph_state(project_dir, graph, workflow_name)
-        return graph.metadata.get("name", workflow_name)
+        seen: list[str] = []
+        for _scope, workflows_dir in reversed(resolve_workflow_dirs(project_dir)):
+            if not workflows_dir.exists():
+                continue
+            for path in sorted(workflows_dir.glob("*.yaml")):
+                if path.stem not in seen:
+                    seen.append(path.stem)
+        return sorted(seen)
     except Exception:
-        return None
+        return []
 
 
 def main() -> None:
@@ -207,54 +192,32 @@ def main() -> None:
     if _has_active_workflow():
         sys.exit(0)
 
-    # Try richer intent classification (regex tier for auto-activate).
-    match = None
-    try:
-        from vise.orchestration import classify_intent
-
-        match = classify_intent(prompt)
-    except Exception:
-        match = None
-
-    auto_on = os.environ.get("VISE_AUTO_ACTIVATE", "0") == "1"
+    # Picking the workflow is the AGENT's job, not this hook's. An intent tier
+    # used to sit here — a regex classifier behind VISE_AUTO_ACTIVATE that would
+    # activate a workflow on its own guess. It never worked (the classifier
+    # module never shipped), and a regex silently gating the user's tools on a
+    # keyword match is worse than the model reading the request. So the hook
+    # stops nudging and starts equipping: hand over the real inventory and let
+    # the model choose. No env flag, no threshold, no guess.
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    workflows = _available_workflows(project_dir) if project_dir else []
+    inventory = (
+        f"Available: {', '.join(workflows)}\n" if workflows
+        else "Run `graph_list_available` to see what is installed.\n"
+    )
 
-    if (
-        match is not None
-        and match.confidence >= _AUTO_ACTIVATE_THRESHOLD
-        and auto_on
-        and project_dir
-    ):
-        activated = _try_auto_activate(match.workflow_name, project_dir)
-        if activated:
-            _emit("auto_activate_hit", prompt, workflow=activated, confidence=match.confidence)
-            print(
-                f"## Workflow auto-activated\n"
-                f"Activated `{activated}` "
-                f"(confidence {match.confidence:.2f}, reason `{match.reason}`).\n"
-                f"Use `graph_status` to see the current phase."
-            )
-            sys.exit(0)
-
-    if match is not None and match.confidence >= _SUGGEST_THRESHOLD:
-        _emit("auto_activate_miss", prompt, workflow=match.workflow_name, confidence=match.confidence)
-        print(
-            f"## Workflow suggestion\n"
-            f"Detected intent: `{match.workflow_name}` "
-            f"(confidence {match.confidence:.2f}, reason `{match.reason}`).\n"
-            f"  1. `graph_activate(name=\"{match.workflow_name}\")` to start.\n"
-            f"  2. Or `graph_list_available` to pick another.\n"
-            f"Set `VISE_AUTO_ACTIVATE=1` to skip this prompt next time."
-        )
-        sys.exit(0)
-
+    _emit("workflow_prompt", prompt, available=len(workflows))
     print(
-        "## Workflow suggestion\n"
-        "Multi-step task detected. Before implementing, consider:\n"
-        "  1. `graph_list_available` — discover existing workflows (debug, feature-dev, etc.)\n"
-        "  2. `graph_activate(name=...)` — pick one if it fits, or build a new one with `graph_builder_create`.\n"
-        "Workflows enforce phase discipline, persist context, and inject experience feedback at the right moments.\n"
-        "Skip only if the task truly is single-shot."
+        "## Pick a workflow before implementing\n"
+        "Multi-step task detected and no workflow is active. Read the request, "
+        "decide which workflow fits, and activate it before writing code — "
+        "workflows enforce phase discipline, survive compaction, and gate "
+        "transitions on checks that actually run.\n"
+        f"{inventory}"
+        '  1. `graph_activate(graph_name="<id>")` — start the one that matches.\n'
+        "  2. `graph_list_available` — full descriptions if the choice is not obvious.\n"
+        "  3. `graph_builder_create` — none fits and this shape of task will recur.\n"
+        "If none fits, say so in one line and proceed without one."
     )
     sys.exit(0)
 

@@ -1,4 +1,12 @@
-"""Tests for workflow_suggester.py — auto-activate + suggestion tiers."""
+"""Tests for workflow_suggester.py — the pre-implementation workflow prompt.
+
+The hook no longer decides anything. It used to carry a regex intent tier that,
+behind VISE_AUTO_ACTIVATE, would activate a workflow on its own guess — a
+keyword match silently gating the user's tools. That tier never ran (its
+classifier module never shipped) and has been removed along with the flag.
+What the hook does now is hand the model the real inventory and let it choose,
+which is the job the model is actually good at.
+"""
 from __future__ import annotations
 
 import io
@@ -55,35 +63,92 @@ def test_disabled_env_silent(tmp_project: Path) -> None:
     assert out == ""
 
 
-def test_suggest_tier_emits_intent(tmp_project: Path) -> None:
+def test_multi_step_prompt_directs_the_model_to_activate(tmp_project: Path) -> None:
     prompt = "I need to fix bug in the authentication middleware that triggers redirect loop now"
-    out, _ = _run_main(prompt, {"VISE_AUTO_ACTIVATE": "0"}, tmp_project)
-    assert "Workflow" in out
-    # Regex tier returns 0.9 confidence → falls into >=0.85 tier but env is off,
-    # so suggestion path is taken (>= 0.65 threshold).
-    assert "debug" in out.lower()
+    out, _ = _run_main(prompt, {}, tmp_project)
+
+    assert "Pick a workflow before implementing" in out
+    assert "graph_activate" in out
 
 
-def test_auto_activate_off_emits_suggestion(tmp_project: Path) -> None:
-    prompt = "fix bug in the broken login flow; redirect loop happens after refresh token expiry"
-    out, _ = _run_main(prompt, {"VISE_AUTO_ACTIVATE": "0"}, tmp_project)
-    assert "auto-activated" not in out.lower()
-    assert "suggestion" in out.lower()
+def test_emitted_call_uses_the_real_parameter_name(tmp_project: Path) -> None:
+    """`graph_name` is the actual parameter of graph_activate.
+
+    This hook shipped telling the model to call `graph_activate(name=...)` while
+    the README said `graph_id=...`; both raise TypeError. An instruction block is
+    only as good as its signature, so pin the one the tool really takes.
+    """
+    prompt = "implement the new billing endpoint, then wire it to the invoice service"
+    out, _ = _run_main(prompt, {}, tmp_project)
+
+    assert 'graph_activate(graph_name="' in out
+    assert "graph_activate(name=" not in out
+    assert "graph_id" not in out
 
 
-def test_auto_activate_on_writes_state(tmp_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Redirect XDG state dir to tmp so initialize_graph_state writes there.
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_project / "xdg"))
-    prompt = "fix bug in the broken login flow; redirect loop happens after refresh token expiry"
-    out, _ = _run_main(prompt, {"VISE_AUTO_ACTIVATE": "1"}, tmp_project)
-    # Either auto-activated (bundled debug-graph.yaml exists) or fell back to
-    # suggestion (graph file wasn't found). Both are acceptable; here we assert
-    # the path actually attempts activation when the env is on.
-    if "auto-activated" in out.lower():
-        target = tmp_project / ".claude" / "workflow" / "graph.yaml"
-        assert target.exists()
-    else:
-        assert "suggestion" in out.lower()
+def test_available_workflows_are_listed_by_id(tmp_project: Path) -> None:
+    """The model cannot pick from an inventory it was never shown."""
+    library = tmp_project / ".claude" / "workflows"
+    library.mkdir(parents=True)
+    for stem in ("payments-graph", "onboarding-graph"):
+        (library / f"{stem}.yaml").write_text("metadata:\n  name: x\nnodes: []\nedges: []\n")
+
+    prompt = "implement the new billing endpoint, then wire it to the invoice service"
+    out, _ = _run_main(prompt, {}, tmp_project)
+
+    assert "onboarding-graph" in out
+    assert "payments-graph" in out
+    assert out.index("onboarding-graph") < out.index("payments-graph"), "listed unsorted"
+
+
+def test_no_discoverable_workflows_degrades_to_a_usable_instruction(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty inventory must not print a bare `Available: ` and strand the model."""
+    monkeypatch.setattr(ws, "_available_workflows", lambda _dir: [])
+
+    prompt = "implement the new billing endpoint, then wire it to the invoice service"
+    out, _ = _run_main(prompt, {}, tmp_project)
+
+    assert "Available:" not in out
+    assert "graph_list_available" in out
+
+
+def test_inventory_failure_does_not_cost_the_user_their_prompt(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A UserPromptSubmit hook that raises is worse than one that says less."""
+    def _boom(_dir):
+        raise RuntimeError("workflows dir is unreadable")
+
+    # Patch the SOURCE module, not the hook: `_available_workflows` imports the
+    # symbol at call time, so a `ws.resolve_workflow_dirs` attribute would never
+    # be consulted and the test would pass without exercising anything.
+    from vise.engines import workflow_scope
+
+    monkeypatch.setattr(workflow_scope, "resolve_workflow_dirs", _boom)
+
+    prompt = "implement the new billing endpoint, then wire it to the invoice service"
+    out, code = _run_main(prompt, {}, tmp_project)
+
+    assert code == 0
+    assert "graph_activate" in out
+
+
+def test_behavior_does_not_depend_on_the_removed_auto_activate_flag(
+    tmp_project: Path,
+) -> None:
+    """VISE_AUTO_ACTIVATE is gone; setting it must change nothing at all."""
+    prompt = "implement the new billing endpoint, then wire it to the invoice service"
+
+    off, _ = _run_main(prompt, {"VISE_AUTO_ACTIVATE": "0"}, tmp_project)
+    on, _ = _run_main(prompt, {"VISE_AUTO_ACTIVATE": "1"}, tmp_project)
+
+    assert off == on
+    assert "auto-activated" not in on.lower()
+    assert not (tmp_project / ".claude" / "workflow" / "graph.yaml").exists(), (
+        "the hook must never activate a workflow by itself"
+    )
 
 
 def test_already_active_workflow_silent(tmp_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:

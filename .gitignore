@@ -9,3 +9,7 @@ build/
 .mypy_cache/
 .coverage
 .vise/
+
+# Local session state — active workflow pointer and per-machine permissions.
+.claude/workflow/
+.claude/settings.local.json
