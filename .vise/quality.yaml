@@ -1,0 +1,29 @@
+# vise's own quality profile — the one it asks every other repo to write.
+#
+# Consumed by the `quality_check` validator: a workflow node gates on a check
+# NAME and this file says what that name runs here. A check absent from this
+# map skip-passes with source="asserted", so the gate stays honest about what
+# it did not look at rather than blocking a repo for lacking a tool.
+#
+# Only list what this repo really has. Everything here is already installed and
+# already runs in CI (.github/workflows/ci.yml).
+
+checks:
+  lint: ["ruff", "check", ".", "--exclude", ".claude"]
+  unit: ["pytest", "-q"]
+  coverage: ["coverage", "report", "--fail-under=62"]
+
+  # dead_code is ruff's F401/F841, already inside the `lint` run above — listed
+  # separately so a node gating on dead_code alone gets a real answer instead
+  # of a skip.
+  dead_code: ["ruff", "check", ".", "--exclude", ".claude", "--select", "F401,F841"]
+
+  # Deliberately absent, and each absence is a real gap, not an oversight:
+  #   types       — no mypy/pyright config here yet
+  #   complexity  — ruff C901 is not enabled; see [tool.ruff.lint] select
+  #   deps        — no import-linter contract defined
+  #   sast/sca    — bandit / pip-audit not in [dev]
+  #   secrets     — gitleaks not installed
+  #   contracts   — vise exposes MCP tools, not an HTTP schema
+  #   integration / e2e — vise's suite is unit + subprocess; no separate tier
+  # Each one skip-passes and says so. Bind it or accept the risk knowingly.
