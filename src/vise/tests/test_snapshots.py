@@ -332,6 +332,42 @@ def test_create_respects_existing_vise_variants(git_repo: Path):
     assert text == ".vise\n"  # untouched — already covered
 
 
+def test_create_does_not_void_a_negation_that_tracks_a_file_inside_vise(git_repo: Path):
+    """The `.vise/*` + `!` pair is how a repo tracks one file in an ignored dir.
+
+    Appending `.vise/` under it excludes the directory outright, and git never
+    descends into an excluded directory — so the re-include below it becomes
+    dead and the tracked file drops out on the next `git add`. vise's own
+    .gitignore is written this way to keep .vise/quality.yaml tracked, which
+    means snapshotting vise used to break vise.
+    """
+    (git_repo / ".gitignore").write_text(
+        ".vise/*\n!.vise/quality.yaml\n", encoding="utf-8"
+    )
+    create(git_repo, label="x")
+
+    lines = (git_repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert lines == [".vise/*", "!.vise/quality.yaml"], "appended a line that voids the negation"
+
+    # And the negation still does its job, per git itself.
+    (git_repo / ".vise").mkdir(exist_ok=True)
+    (git_repo / ".vise" / "quality.yaml").write_text("checks: {}\n", encoding="utf-8")
+    rc = subprocess.run(
+        ["git", "-C", str(git_repo), "check-ignore", ".vise/quality.yaml"],
+        capture_output=True,
+    ).returncode
+    assert rc != 0, "quality.yaml is ignored — the re-include was voided"
+
+
+def test_create_recognizes_slash_prefixed_and_starred_vise_lines(git_repo: Path):
+    """`/.vise/` and `.vise/*` are the same directory as `.vise/`."""
+    for variant in ("/.vise/", ".vise/*", "/.vise"):
+        (git_repo / ".gitignore").write_text(f"{variant}\n", encoding="utf-8")
+        create(git_repo)
+        text = (git_repo / ".gitignore").read_text(encoding="utf-8")
+        assert text == f"{variant}\n", f"appended a duplicate for {variant!r}"
+
+
 def test_gitignore_untouched_outside_git_repo(tmp_path: Path):
     from vise.core.snapshots import _journal_path
     _journal_path(tmp_path)

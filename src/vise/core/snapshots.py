@@ -93,6 +93,30 @@ def _journal_path(project: Path) -> Path:
     return state_dir / "snapshots.jsonl"
 
 
+def _targets_vise_dir(line: str) -> bool:
+    """Does this .gitignore line already put the whole `.vise` dir out of scope?
+
+    Accepts every spelling of the directory — `.vise`, `.vise/`, `/.vise/`,
+    `.vise/*` — because appending a redundant one is not harmless. A repo that
+    tracks a file inside `.vise` writes the two-line form:
+
+        .vise/*
+        !.vise/quality.yaml
+
+    and a `.vise/` appended underneath silently voids the negation: git never
+    descends into an excluded directory, so the re-include can never match.
+    vise ships exactly that pair in its own .gitignore, and the old check —
+    equality against `.vise` after an rstrip("/") — did not recognize `.vise/*`,
+    so taking a snapshot of vise re-broke vise's own tracked quality profile.
+
+    A negation (`!...`) is never coverage, and normalizes to itself.
+    """
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return False
+    return s.removeprefix("/").removesuffix("/*").rstrip("/") == ".vise"
+
+
 def _ensure_state_dir_gitignored(project: Path) -> None:
     """Ensure `.vise/` is ignored in the target project's .gitignore.
 
@@ -104,11 +128,10 @@ def _ensure_state_dir_gitignored(project: Path) -> None:
             return
         gitignore = project / ".gitignore"
         if gitignore.exists():
-            lines = {
-                line.strip().rstrip("/")
+            if any(
+                _targets_vise_dir(line)
                 for line in gitignore.read_text(encoding="utf-8").splitlines()
-            }
-            if ".vise" in lines or "/.vise" in lines:
+            ):
                 return
             existing = gitignore.read_text(encoding="utf-8")
             prefix = "" if (not existing or existing.endswith("\n")) else "\n"
