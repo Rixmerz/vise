@@ -69,3 +69,18 @@ asyncio_mode = "auto"
 line-length = 100
 target-version = "py311"
 src = ["src"]
+
+[tool.ruff.lint]
+# Pinned, not defaulted. With no `select`, the rule set is whatever the
+# installed ruff calls default — and that moves between versions. CI resolved
+# `ruff>=0.6.0` to 0.16.1, whose expanded default reported 318 findings against
+# a tree that was clean under 0.15.x. A gate whose rules depend on the day you
+# ran it is not a gate.
+#
+# These four are ruff's long-standing default: pyflakes plus the pycodestyle
+# errors that catch real breakage. The wider families (BLE001, DTZ, S, PLW, …)
+# were evaluated and are ~95% noise on this codebase — 104 of the 318 were
+# BLE001 against deliberate fail-open `except Exception` handlers, which is the
+# documented contract for every vise hook. Widen this list on purpose, one
+# family at a time, never by upgrading the linter.
+select = ["E4", "E7", "E9", "F"]
