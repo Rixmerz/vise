@@ -582,6 +582,92 @@ class LspCleanValidator:
 
 
 @dataclass
+class QualityCheckValidator:
+    """Gate on a repo-declared quality check (SAST/SCA/complexity/...) from
+    ``.vise/quality.yaml`` — see ``vise.engines.quality_profile``.
+
+    Resolution cascade. Every unbound case is a SKIP: ``passed=True``,
+    ``source="asserted"`` (never "mechanical" — nothing ran, so
+    ``goal_complete`` must not grade this as verified), evidence naming the
+    exact next step. Only a real run (case 4) is ``source="mechanical"``.
+
+    1. no profile file            -> not configured, create the profile
+    2. profile exists, key absent -> not configured, add the key
+    3. configured, binary missing -> skipped, binary not on PATH
+    4. otherwise                  -> run it, passed = (exit == 0)
+
+    ``check`` has no required value: an empty ``check`` (misconfiguration —
+    nobody said which check to run) FAILS closed, matching how
+    ``UnknownValidator`` fails closed on a bad ``type``. A missing ``check``
+    key must never crash ``build_validators`` (no try/except there), so this
+    field carries a default rather than being required.
+    """
+
+    check: str = ""
+    weight: float = 0.2
+    name: str = "quality_check"
+    timeout: int = 120
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        if not self.check:
+            return ValidatorRecord(
+                name=self.name, passed=False, confidence_contribution=0.0,
+                weight=self.weight,
+                evidence="quality_check misconfigured: no `check:` name given in the graph node",
+                at=_now(), source="mechanical", exit_code=None,
+            )
+
+        from vise.engines.quality_profile import UnboundCheck, UnboundReason, resolve_check
+
+        resolved = resolve_check(goal.project_dir, self.check)
+        if isinstance(resolved, UnboundCheck):
+            if resolved.reason is UnboundReason.NO_PROFILE:
+                evidence = (
+                    f"quality check '{self.check}' not configured — create "
+                    ".vise/quality.yaml with a `checks:` map"
+                )
+            else:
+                evidence = (
+                    f"quality check '{self.check}' not configured — add "
+                    f"`{self.check}:` to checks: in .vise/quality.yaml"
+                )
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight, evidence=evidence,
+                at=_now(), source="asserted", exit_code=None,
+            )
+
+        cmd = resolved
+        if not shutil.which(cmd[0]):
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence=f"quality check '{self.check}' skipped — {cmd[0]} not on PATH",
+                at=_now(), source="asserted", exit_code=None,
+            )
+
+        try:
+            r = subprocess.run(
+                list(cmd), cwd=goal.project_dir,
+                capture_output=True, text=True, check=False, timeout=self.timeout,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return ValidatorRecord(
+                name=self.name, passed=False, confidence_contribution=0.0,
+                weight=self.weight, evidence=str(e)[:300], at=_now(),
+                source="mechanical", exit_code=None,
+            )
+        passed = r.returncode == 0
+        ev = (r.stdout[-300:] or r.stderr[-300:])
+        return ValidatorRecord(
+            name=self.name, passed=passed,
+            confidence_contribution=self.weight if passed else 0.0,
+            weight=self.weight, evidence=ev, at=_now(),
+            source="mechanical", exit_code=r.returncode,
+        )
+
+
+@dataclass
 class UnknownValidator:
     """Fail-closed stand-in for a validator config with an unrecognized type.
 
@@ -622,6 +708,7 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "files_exist": FileExistsValidator,
     "capability": CapabilityValidator,
     "lsp_clean": LspCleanValidator,
+    "quality_check": QualityCheckValidator,
 }
 
 

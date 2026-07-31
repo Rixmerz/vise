@@ -11,6 +11,7 @@ Two failure modes this locks down:
      false green instead of surfacing the GAP.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,42 @@ async def test_unbound_capability_fails_recipe_loudly(tmp_path: Path) -> None:
     # run_recipe emits a plan for resolved steps — an unbound step must
     # never carry a plan entry alongside the failure.
     assert not result.get("plan")
+
+
+def test_readme_bundled_asset_counts_match_what_ships() -> None:
+    """A README that miscounts its own assets is a claim nothing checks.
+
+    Adding `quality-gate-graph.yaml` took the library from 8 workflows to 9 and
+    left three README sentences saying 8, with a fully green suite — the same
+    drift class as test_doc_call_sync and test_env_var_docs_sync, in the one
+    dimension neither of them looks at.
+    """
+    readme = (ASSETS.parents[2] / "README.md").read_text(encoding="utf-8")
+    workflows = len(WORKFLOW_FILES)
+    recipes = len(sorted((ASSETS / "recipes").glob("*.yaml")))
+
+    # Assert on the literal phrases the README actually uses. A regex that
+    # merely looks for "some digit near the word" passes on
+    # "all 8 bundled workflows and 9 hooks" — the 9 belongs to hooks — and
+    # cannot see a wrong recipe count at all. A count gate that misses drift is
+    # worse than none, because it implies coverage it does not have.
+    required = [
+        f"{workflows} bundled workflows",
+        f"workflows ({workflows}), recipes ({recipes})",
+    ]
+    for phrase in required:
+        assert phrase in readme, (
+            f"README must say {phrase!r} — {workflows} workflows and {recipes} "
+            f"recipes are what actually ship"
+        )
+
+    # And no OTHER number may be attached to those same phrases.
+    for wrong in re.findall(r"(\d+) bundled workflows", readme):
+        assert int(wrong) == workflows, (
+            f"README says '{wrong} bundled workflows'; {workflows} ship"
+        )
+    for w, r in re.findall(r"workflows \((\d+)\), recipes \((\d+)\)", readme):
+        assert (int(w), int(r)) == (workflows, recipes), (
+            f"README's architecture block says workflows ({w}), recipes ({r}); "
+            f"the real counts are ({workflows}), ({recipes})"
+        )

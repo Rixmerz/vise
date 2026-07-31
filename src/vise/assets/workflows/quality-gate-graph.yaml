@@ -1,0 +1,262 @@
+metadata:
+  name: "Quality Gate"
+  description: "Tiered quality gate: static analysis, tests, security, then integration — mutation and fuzzing stay out of band."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+# Every gate below names a CHECK, never a command. The commands are declared
+# once per repo in .vise/quality.yaml, so one workflow can ship to every
+# language without guessing a toolchain. The file is four lines to start:
+#
+#   checks:
+#     lint: ["ruff", "check", "."]
+#     unit: ["pytest", "-q"]
+#
+# A fuller example with per-ecosystem alternatives ships at
+# <vise-bundled>/assets/quality.example.yaml, but do not go looking for it —
+# writing the two lines above is faster than locating an installed package.
+#
+# An unbound check SKIP-PASSES with evidence naming the next step — no profile /
+# key absent / binary missing — and its record carries source="asserted", not
+# "mechanical". That is why these ship LIVE instead of commented out the way the
+# command_exit coverage entries in feature-dev-graph.yaml had to: command_exit
+# fails CLOSED on a missing binary, so a live entry hard-blocks every machine
+# that lacks the tool. A named check cannot. A node here can therefore declare
+# four checks and still traverse on a machine configured for none of them —
+# with four skip records saying so.
+#
+# Edges are `phrase`, deliberately, not `validators_green`:
+#   1. The node gate already blocks EVERY outgoing traversal — _graph_transition
+#      runs it before the edge condition is examined — so validators_green adds
+#      no blocking that is not already there.
+#   2. It subtracts one thing: a validators_green edge carries no phrases (the
+#      parser strips them), so on a machine where every check skip-passes the
+#      gate goes green and the edge opens with nothing verified AND nothing
+#      affirmed. The phrase keeps the agent's explicit signal on top of a gate
+#      that may have run nothing.
+#   3. It re-runs the whole gate a second time for the same traversal
+#      (_run_node_validators once for the node, again for the edge). On the
+#      tier-B node below that is two full e2e runs per attempt.
+
+nodes:
+  - id: "static"
+    name: "Static Analysis"
+    is_start: true
+    # TIER A — seconds. These block. Split across three nodes rather than
+    # stacked on one, so a red gate names the CLASS that failed instead of
+    # handing back "1 of 12 validators failed" and making you go find it.
+    validators:
+      - type: quality_check
+        check: lint
+        weight: 1.0
+      - type: quality_check
+        check: types
+        weight: 1.0
+      - type: quality_check
+        check: complexity
+        weight: 0.5
+      - type: quality_check
+        check: dead_code
+        weight: 0.5
+      - type: quality_check
+        check: deps
+        weight: 0.5
+    prompt_injection: |
+      PHASE: STATIC ANALYSIS
+      The cheapest tier — seconds. Nothing slower runs until this is green.
+      Checks: lint, types, complexity, dead_code, deps.
+      1. Run the checks and read the evidence line of every one, including
+         the ones that passed.
+      2. Fix findings at the source. A suppression comment moves a finding,
+         it does not close one — if you suppress, name the rule and the
+         reason in the same line.
+      3. A check with no command bound in .vise/quality.yaml SKIP-PASSES and
+         says why (no profile / key absent / binary missing). Its record is
+         source="asserted": nothing ran, so nothing was verified. Every skip
+         is a gap to close, not a pass — either bind it by adding one line to
+         .vise/quality.yaml (`checks:` mapping a name to an argv list, e.g.
+         `lint: ["ruff", "check", "."]`) or state which defect class this repo
+         is choosing not to look for. Write the file; do not hunt for a
+         template.
+      4. deps failures are import cycles and layering breaks. Fix by moving
+         the import, not by hiding it inside a function body.
+      Signal: say "static clean" when the checks are green and every skip is
+      bound or named.
+
+  - id: "tests"
+    name: "Tests"
+    # TIER A — seconds to a minute.
+    validators:
+      - type: quality_check
+        check: unit
+        weight: 1.0
+      - type: quality_check
+        check: coverage
+        weight: 0.5
+    prompt_injection: |
+      PHASE: TESTS
+      Tier A — still cheap. Checks: unit, coverage.
+      1. Run the unit check. Every failure is fixed here, not deferred to a
+         later node; nothing downstream re-runs it.
+      2. Read the coverage evidence. The coverage tool enforces its own
+         threshold and exits nonzero by itself — this check reports what the
+         tool decided, it does not invent a number.
+      3. Cover the branches the change added, including guard-returns and
+         error paths. A suite that never enters the new branch is the false
+         green this tier exists to catch.
+      4. A skip here means no suite is bound at all. source="asserted" — the
+         gate is green because nothing ran, which is not the same thing as a
+         passing suite. Bind `unit` before you call this node passed.
+      Signal: say "tests green" when the checks are green and every skip is
+      bound or named.
+
+  - id: "security"
+    name: "Security"
+    # TIER A — seconds. Four cheap checks; none of them is the whole of
+    # security, which is what security-audit-graph.yaml is for.
+    validators:
+      - type: quality_check
+        check: sast
+        weight: 1.0
+      - type: quality_check
+        check: sca
+        weight: 1.0
+      - type: quality_check
+        check: secrets
+        weight: 1.0
+      - type: quality_check
+        check: contracts
+        weight: 0.5
+    prompt_injection: |
+      PHASE: SECURITY
+      Tier A — seconds. Checks: sast, sca, secrets, contracts.
+      1. sast — code-level findings (injection, unsafe deserialization, weak
+         crypto). Fix the pattern across the project, not the one line the
+         tool pointed at.
+      2. sca — known-vulnerable dependencies. Bump or pin. If neither is
+         possible, record the accepted risk with a review date.
+      3. secrets — treat every hit as live until proven otherwise. Rotate the
+         credential first, then remove it from the working tree AND the
+         history.
+      4. contracts — a breaking API or schema change caught here is cheap;
+         caught by a consumer it is an incident.
+      5. Skips are gaps with names. A repo with no secrets scanner bound is
+         not a repo without secrets — it is a repo that did not look, and
+         source="asserted" says exactly that. Do not report it as clean.
+      Signal: say "security clean" when the checks are green and every skip is
+      bound or named.
+
+  - id: "integration"
+    name: "Integration & E2E"
+    # TIER B — minutes. Its own node, late on purpose: it blocks exactly once,
+    # after all three second-cost tiers are green, so a lint typo never costs
+    # an e2e run.
+    validators:
+      - type: quality_check
+        check: integration
+        weight: 1.0
+      - type: quality_check
+        check: e2e
+        weight: 1.0
+    prompt_injection: |
+      PHASE: INTEGRATION & E2E
+      Tier B — minutes, and it blocks once. Checks: integration, e2e.
+      1. Run them against real boundaries: a real database, a real HTTP
+         entrypoint, a real browser. A mock at the boundary makes this tier
+         cost minutes and prove nothing.
+      2. A feature crossing a system boundary (form→CRM, webhook→DB, payment,
+         OAuth) is not done until a live request produced the side-effect
+         record in the target system. Green unit tests are necessary, not
+         sufficient.
+      3. A flaky failure is a failure. Re-running until green is how a real
+         boundary bug ships as a "known flake".
+      4. A skip here is the most expensive one to mistake for a pass — this
+         tier exists precisely for what unit tests cannot see, so
+         source="asserted" means no integration evidence exists at all. Bind
+         it or say plainly that the boundaries went unchecked.
+      Signal: say "integration green" when the checks are green and every skip
+      is bound or named.
+
+  - id: "deep-passes"
+    name: "Deep Passes"
+    is_end: true
+    # TIER C — mutation testing and fuzzing — is NEVER a gate, and this node
+    # declares no validators on purpose. A full mutation run takes minutes to
+    # hours: as a gate it would stall every traversal attempt of this node,
+    # and re-stall it on every retry. Fuzzing is worse — it is unbounded by
+    # construction, it has no completion condition, so there is no exit code
+    # for a gate to wait on. Both belong in CI or a nightly job, with their
+    # findings recorded as memory and fixed as follow-up work, never as a
+    # transition blocker.
+    #
+    # Read-only: every mechanical gate is behind us and the workflow ENDS
+    # here, so an edit made at this node is an edit nothing re-checks — no
+    # tier re-runs lint, tests, or e2e over it. Findings become recorded
+    # memory and a next goal, not unverified patches. Bash stays open; this
+    # node runs the longest commands in the workflow.
+    tools_blocked:
+      - "Edit"
+      - "Write"
+      - "MultiEdit"
+      - "NotebookEdit"
+    prompt_injection: |
+      PHASE: DEEP PASSES
+      Tier C — out of band. Nothing here gates a transition, and nothing here
+      is edited: record findings, then leave with them written down.
+      1. Mutation testing (mutmut, cosmic-ray, stryker, cargo-mutants,
+         go-mutesting) — run it in CI or nightly, off this session's critical
+         path. A surviving mutant is a test that asserts nothing.
+      2. Fuzzing (atheris, jazzer, cargo-fuzz, `go test -fuzz`) — give it a
+         time budget and a corpus that outlives the run; it will not stop on
+         its own.
+      3. Record each finding, one entry apiece:
+         experience_record(type="smell_introduced", file_path="<file>",
+         description="<surviving mutant or fuzz crash>", severity="high",
+         resolution="<the assertion or guard that would close it>")
+      4. List the checks that SKIPPED in the earlier tiers. The gate passed
+         with those unverified, and saying so is the honest report — a skip
+         recorded as source="asserted" is a claim nobody checked.
+      5. Turn every finding into a follow-up goal, not an edit here.
+      Signal: quality gate complete — findings recorded.
+
+edges:
+  - id: "static-to-tests"
+    from: "static"
+    to: "tests"
+    condition:
+      type: "phrase"
+      phrases:
+        - "static clean"
+        - "next phase"
+        - "advance"
+
+  - id: "tests-to-security"
+    from: "tests"
+    to: "security"
+    condition:
+      type: "phrase"
+      phrases:
+        - "tests green"
+        - "next phase"
+        - "advance"
+
+  - id: "security-to-integration"
+    from: "security"
+    to: "integration"
+    condition:
+      type: "phrase"
+      phrases:
+        - "security clean"
+        - "next phase"
+        - "advance"
+
+  - id: "integration-to-deep"
+    from: "integration"
+    to: "deep-passes"
+    condition:
+      type: "phrase"
+      phrases:
+        - "integration green"
+        - "next phase"
+        - "advance"

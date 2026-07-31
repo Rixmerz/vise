@@ -8,7 +8,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 
 ## Features
 
-- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 8 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, …) plus a `graph_builder_*` API to author your own.
+- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own.
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal.
@@ -40,7 +40,7 @@ uv venv && uv pip install -e .
 
 Inside a Claude Code session with vise loaded:
 
-1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 8 bundled workflows.
+1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 9 bundled workflows.
 2. **Work the phases** — `graph_traverse` advances between nodes. The enforcer blocks tools the current phase forbids; validator gates (tests, lint, capabilities) must pass before a gated transition.
 3. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
 4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
@@ -76,7 +76,7 @@ src/vise/
 ├── tools/         # MCP tool surfaces (graph, experience, goal, snapshot,
 │                  # recipes, bootstrap)
 ├── hooks/         # Claude Code hook entry points (see table above)
-├── assets/        # bundled workflows (8), recipes (11)
+├── assets/        # bundled workflows (9), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
 └── cli/           # `vise` CLI (graph/experience management offline)
 ```
@@ -98,6 +98,7 @@ Environment variables (all optional):
 | `VISE_EMBED_MODEL` / `VISE_EMBED_IDLE_TIMEOUT` / `VISE_EMBED_CACHE_DIR` / `VISE_EMBED_THREADS` | fastembed model, idle unload, model cache location, and worker threads (default 2) |
 | `VISE_TELEMETRY_DIR` / `VISE_USAGE_DIR` | Telemetry/usage output dirs |
 | `VISE_TEST_CMD` / `VISE_LINT_CMD` | Command the `tests_pass` / `lint_pass` node-gate validators run. Set these when auto-detection picks the wrong runner, or when the repo's linter isn't on PATH — `lint_pass` then reports `lint skipped … set VISE_LINT_CMD to lint this repo` instead of passing unchecked |
+| `VISE_QUALITY_PROFILE` | Override path to the `.vise/quality.yaml` file the `quality_check` node-gate validator reads (`checks: {name: [cmd, ...]}`). Defaults to `<project_dir>/.vise/quality.yaml` |
 
 ## LSP servers
 

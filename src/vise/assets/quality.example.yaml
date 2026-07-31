@@ -1,0 +1,152 @@
+# EXAMPLE — this file is not read by anything.
+#
+# Copy it to .vise/quality.yaml and DELETE every check this repo does not
+# actually have. Nothing in here can hard-block a machine that lacks the tool:
+# an absent key AND a listed key whose binary is not on PATH both SKIP-PASS,
+# with evidence naming which case it was (no profile / key absent / binary
+# missing) and a record marked source="asserted" — nothing ran, so nothing was
+# verified. Only a command that really executes and exits nonzero blocks.
+#
+# Delete the unused keys anyway. A key kept "for later" reads like a check this
+# repo performs, and the only thing telling it apart from a real one is an
+# evidence line nobody reads twice.
+#
+# One file, one declaration per repo. Workflow nodes gate on the check NAME
+# (see src/vise/assets/workflows/quality-gate-graph.yaml), never on the
+# command, so the same workflow ships to a Python repo and a Go repo unchanged.
+#
+# Shape: a mapping of check name → command. A list is used as argv verbatim; a
+# plain string ("pytest -q") is shlex-split into one. Either way NO SHELL runs
+# it, so `&&`, pipes, globs, and `$VARS` are literal arguments, not syntax.
+# Need two commands in one check? Point it at a script or a task-runner target.
+#
+# Two things that silently disarm the whole gate, both worth knowing before you
+# edit this file:
+#   - A YAML syntax error here reads as "no profile at all", so every check
+#     skip-passes with `not configured`. If a whole tier suddenly goes green,
+#     validate this file before you believe it.
+#   - VISE_QUALITY_PROFILE, when set, overrides the path entirely — the
+#     .vise/quality.yaml you are looking at is then not the file being read.
+#
+# The 13 names below are exactly the ones quality-gate-graph.yaml gates on.
+# Each live entry is Python (this repo's own stack); the alternatives for other
+# ecosystems sit in comments underneath. Uncomment the one you use and delete
+# the rest — every live key must map to a command that exists here.
+
+checks:
+
+  # --- static analysis: node `static`, tier A, seconds, blocks ------------
+
+  lint:  ["ruff", "check", "."]
+  #  JS/TS:  ["npx", "eslint", "."]          or ["npx", "biome", "check", "."]
+  #  Rust:   ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
+  #  Go:     ["golangci-lint", "run"]
+
+  types: ["mypy", "src"]
+  #  Python alt: ["pyright"]
+  #  JS/TS:  ["npx", "tsc", "--noEmit"]
+  #  Rust:   ["cargo", "check", "--all-targets"]   # the compiler IS the type check
+  #  Go:     ["go", "build", "./..."]
+
+  # ruff already implements this — C901 is mccabe cyclomatic complexity, and
+  # the max lives in pyproject.toml under [tool.ruff.lint.mccabe]. A Python
+  # repo needs NO extra dependency for the complexity check.
+  complexity: ["ruff", "check", "--select", "C901", "."]
+  #  JS/TS:  set the `complexity` rule in the eslint config, then ["npx", "eslint", "."]
+  #  Rust:   ["cargo", "clippy", "--", "-D", "clippy::cognitive_complexity"]
+  #  Go:     ["gocyclo", "-over", "15", "."]   # or enable gocyclo/cyclop in golangci-lint
+
+  # Same story: F401 is unused imports, F841 unused local variables, both
+  # already in ruff. Reach for vulture only when you need unreachable
+  # functions and classes too, not just unused names.
+  dead_code: ["ruff", "check", "--select", "F401,F841", "."]
+  #  Python deeper: ["vulture", "src", "--min-confidence", "80"]
+  #  JS/TS:  ["npx", "knip"]                   # ts-prune is archived; knip replaced it
+  #  Rust:   ["cargo", "clippy", "--", "-D", "dead_code"]
+  #  Go:     ["staticcheck", "./..."]          # U1000 = unused; or golang.org/x/tools/cmd/deadcode
+
+  # Import cycles and layering violations. import-linter reads its contracts
+  # (layers, forbidden, independence) from pyproject.toml or .importlinter.
+  deps: ["lint-imports"]
+  #  Python alt: ["tach", "check"]
+  #  Whatever you pick must EXIT NONZERO on a violation — a visualizer that
+  #  draws the cycle and exits 0 (pydeps, madge without --circular) gates
+  #  nothing.
+  #  JS/TS:  ["npx", "madge", "--circular", "src"]
+  #          or ["npx", "depcruise", "--validate", ".dependency-cruiser.js", "src"]
+  #  Rust:   crate-level cycles are impossible — cargo rejects them. Enforce
+  #          layering with workspace crate boundaries, or inspect module
+  #          structure with ["cargo", "modules", "structure"].
+  #  Go:     import cycles are a compile error, so `go build ./...` already
+  #          covers them. For LAYERING use ["go-arch-lint", "check"] or the
+  #          depguard linter inside golangci-lint.
+
+  # --- tests: node `tests`, tier A, seconds to a minute, blocks -----------
+
+  unit: ["pytest", "-q"]
+  #  JS/TS:  ["npx", "vitest", "run"]         or ["npx", "jest"]
+  #  Rust:   ["cargo", "test", "--lib"]
+  #  Go:     ["go", "test", "./..."]
+
+  # Every coverage tool enforces its own threshold and exits nonzero on its
+  # own — put the number here (or in the tool's config) and set it to what
+  # this repo holds TODAY, then ratchet up. A threshold nobody meets gets
+  # overridden, and an override habit is worse than no gate.
+  #
+  # Note the one way an entry here HARD-BLOCKS instead of skipping: the skip
+  # for a missing tool keys off the BINARY. `pytest` is on PATH, so this runs
+  # even without the pytest-cov plugin installed — and fails on "unrecognized
+  # arguments: --cov". Any plugin-shaped check (pytest-cov, an eslint plugin,
+  # a cargo subcommand) has the same edge. Install it or delete the key.
+  coverage: ["pytest", "--cov", "--cov-fail-under=80", "-q"]   # needs pytest-cov
+  #  JS/TS:  ["npx", "vitest", "run", "--coverage"]   # thresholds in vitest.config
+  #  Rust:   ["cargo", "llvm-cov", "--fail-under-lines", "80"]
+  #  Go:     ["go", "test", "-cover", "-coverprofile=coverage.out", "./..."]
+
+  # --- security: node `security`, tier A, seconds, blocks -----------------
+
+  sast: ["bandit", "-q", "-r", "src"]
+  #  Any language: ["semgrep", "--error", "--quiet", "--config", "auto"]
+  #  JS/TS:  ["npx", "eslint", "--plugin", "security", "."]
+  #  Go:     ["gosec", "./..."]
+
+  # Software composition analysis — known-vulnerable dependencies.
+  sca: ["pip-audit", "--strict"]
+  #  Any language: ["osv-scanner", "scan", "source", "-r", "."]
+  #  JS/TS:  ["npm", "audit", "--audit-level=high"]
+  #  Rust:   ["cargo", "audit"]
+  #  Go:     ["govulncheck", "./..."]
+
+  # Ecosystem-agnostic — secrets do not care what you write in.
+  secrets: ["gitleaks", "detect", "--no-banner", "--redact"]
+  #  alt: ["trufflehog", "filesystem", ".", "--fail", "--no-update"]
+
+  # API / schema compatibility. Pick the one matching your interface contract;
+  # a repo with no published interface should DELETE this key rather than
+  # leave it skipping forever.
+  contracts: ["oasdiff", "breaking", "openapi.base.yaml", "openapi.yaml", "--fail-on", "ERR"]
+  #  OpenAPI validity only: ["openapi-spec-validator", "openapi.yaml"]
+  #  OpenAPI behavior:      ["schemathesis", "run", "openapi.yaml"]
+  #  Protobuf:              ["buf", "breaking", "--against", ".git#branch=main"]
+  #  Consumer-driven pacts: ["pact-broker", "can-i-deploy", "--pacticipant", "<name>", "--latest"]
+
+  # --- integration & e2e: node `integration`, tier B, MINUTES, blocks once -
+  #
+  # Keep these two out of `unit`. Folding them in makes the cheap tier cost
+  # minutes and destroys the reason the tiers are split at all.
+
+  integration: ["pytest", "-q", "-m", "integration"]
+  #  JS/TS:  ["npx", "vitest", "run", "tests/integration"]
+  #  Rust:   ["cargo", "test", "--tests"]      # no shell here, so "--test *" would be literal
+  #  Go:     ["go", "test", "-tags=integration", "./..."]
+
+  e2e: ["pytest", "-q", "-m", "e2e"]
+  #  Browser: ["npx", "playwright", "test"]     or ["npx", "cypress", "run"]
+  #  Rust:    ["cargo", "test", "--test", "e2e"]
+  #  Go:      ["go", "test", "./e2e/..."]
+
+# NOT here, on purpose: mutation testing and fuzzing. They are tier C —
+# quality-gate-graph.yaml runs them out of band in its terminal node and
+# records findings with experience_record. A mutation run takes minutes to
+# hours and would stall every traversal attempt; fuzzing never finishes at
+# all. Neither has a place in a file whose entries are transition blockers.
