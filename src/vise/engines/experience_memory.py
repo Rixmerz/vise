@@ -381,7 +381,9 @@ class ExperienceMemoryStore:
         tmp_path = Path(tmp_name)
         try:
             try:
-                os.write(fd, payload)
+                written = os.write(fd, payload)
+                if written != len(payload):
+                    raise OSError(f"partial write to {tmp_path}: {written}/{len(payload)} bytes")
                 os.fsync(fd)
             finally:
                 os.close(fd)
@@ -433,15 +435,13 @@ class ExperienceMemoryStore:
                 # both branches of record() save and no caller has to
                 # remember to. Before this, only the new-entry branch below
                 # saved; `_record_node_gate_failure` (engines/node_gate.py)
-                # never calls save() itself, so every repeat recorded through
+                # never called save() itself, so every repeat recorded through
                 # it left `occurrences` pinned at 1 on disk, freezing
                 # `confidence` at its first-occurrence value. (The other
                 # automatic recorder, `workflow_post_traverse._record_experience`,
-                # always saved unconditionally — but it's unreachable: it
-                # imports `workflow_manager.experience_memory`, a module that
-                # doesn't exist in this repo, so it always falls through to
-                # `_record_experience_fallback`, which never touches this
-                # store at all.)
+                # always saved — but is dead code: it imports a nonexistent
+                # `workflow_manager` module and always falls through to a
+                # fallback that never touches this store.)
                 self.save()
                 return existing
 

@@ -24,17 +24,10 @@ with no explicit ``save()``, then a fresh load from disk.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
 from vise.engines.experience_memory import ExperienceEntry, ExperienceMemoryStore
-
-
-@pytest.fixture(autouse=True)
-def isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never touch the developer's real experience store."""
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
 
 def _entry(description: str) -> ExperienceEntry:
