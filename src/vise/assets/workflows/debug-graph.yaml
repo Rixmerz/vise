@@ -27,6 +27,8 @@ nodes:
     tools_blocked:
       - "Write"
       - "Edit"
+      - "MultiEdit"
+      - "NotebookEdit"
       - "Bash"
       - "Task"
     max_visits: 10
@@ -421,6 +423,8 @@ nodes:
     tools_blocked:
       - "Write"
       - "Edit"
+      - "MultiEdit"
+      - "NotebookEdit"
       - "Task"
     max_visits: 10
     prompt_injection: |

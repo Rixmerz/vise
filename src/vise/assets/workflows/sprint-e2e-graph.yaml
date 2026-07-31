@@ -9,6 +9,14 @@ nodes:
   - id: "orient"
     name: "Orient"
     is_start: true
+    # Matches the e2e and validate nodes below: the prompt says "Read-only
+    # exploration", so the enforcer applies it. Bash stays open for reading
+    # the tree.
+    tools_blocked:
+      - "Edit"
+      - "Write"
+      - "MultiEdit"
+      - "NotebookEdit"
     prompt_injection: |
       PHASE: ORIENT
       Read-only exploration of the multi-surface scope.
@@ -59,6 +67,7 @@ nodes:
     tools_blocked:
       - "Edit"
       - "Write"
+      - "MultiEdit"
       - "NotebookEdit"
     prompt_injection: |
       PHASE: E2E
@@ -103,6 +112,7 @@ nodes:
     tools_blocked:
       - "Edit"
       - "Write"
+      - "MultiEdit"
       - "NotebookEdit"
     prompt_injection: |
       PHASE: VALIDATE

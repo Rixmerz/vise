@@ -9,6 +9,14 @@ nodes:
   - id: "fetch"
     name: "Fetch"
     is_start: true
+    # The prompt below says "Read-only". Bash is deliberately NOT blocked:
+    # step 2 is `git diff main...HEAD` / `gh pr diff`, which is how this
+    # phase reads at all.
+    tools_blocked:
+      - "Edit"
+      - "Write"
+      - "MultiEdit"
+      - "NotebookEdit"
     prompt_injection: |
       PHASE: FETCH
       Gather all context needed to review the PR. Read-only.

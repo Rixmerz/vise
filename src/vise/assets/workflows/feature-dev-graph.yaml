@@ -9,6 +9,14 @@ nodes:
   - id: "orient"
     name: "Orient"
     is_start: true
+    # The prompt below says "Read-only exploration ... before touching anything";
+    # without this list that was documentation, not a gate. Bash stays open —
+    # reading the repo legitimately needs git/grep/ls.
+    tools_blocked:
+      - "Edit"
+      - "Write"
+      - "MultiEdit"
+      - "NotebookEdit"
     prompt_injection: |
       PHASE: ORIENT
       Read-only exploration. Understand the codebase context before touching anything.
@@ -19,6 +27,13 @@ nodes:
 
   - id: "design"
     name: "Design"
+    # "No code yet" in the prompt below is the whole point of a design phase.
+    # Enforced here so the next node is reached by decision, not by drift.
+    tools_blocked:
+      - "Edit"
+      - "Write"
+      - "MultiEdit"
+      - "NotebookEdit"
     prompt_injection: |
       PHASE: DESIGN
       Decide the implementation approach. No code yet.
@@ -32,7 +47,8 @@ nodes:
     validators:
       - type: tests_pass
         weight: 1.0
-    # validators:
+    # Uncomment as an ADDITIONAL entry under the `validators:` key above — do not
+    # re-declare `validators:`, a duplicate key silently drops tests_pass.
     #   - {type: capability, capability: "validate.web.layout", args: {target: "<url>", contract: {}}, weight: 1.0}
     prompt_injection: |
       PHASE: IMPLEMENT
@@ -53,25 +69,52 @@ nodes:
         weight: 1.0
       - type: lint_pass
         weight: 0.5
+    # Coverage gate — uncomment ONE line and set the threshold this repo actually
+    # holds today (ratchet upward; a threshold nobody meets gets overridden, and an
+    # override habit is worse than no gate). No dedicated validator type is needed:
+    # every coverage tool already exits nonzero on its own threshold flag, which is
+    # all command_exit checks. Ships commented because the test-to-validate edge is
+    # validators_green (ALL must pass) and command_exit fails closed on a missing
+    # binary — a live entry would hard-block every repo without that tool installed.
+    #   - {type: command_exit, cmd: ["pytest", "--cov", "--cov-fail-under=80"], weight: 0.5}
+    #   - {type: command_exit, cmd: ["npx", "jest", "--coverage"], weight: 0.5}  # thresholds live in jest.config
+    #   - {type: command_exit, cmd: ["cargo", "llvm-cov", "--fail-under-lines", "80"], weight: 0.5}
+    #   - {type: command_exit, cmd: ["go", "tool", "cover", "-func=coverage.out"], weight: 0.5}
+    # Mutation testing (mutmut, stryker, cargo-mutants) is NOT a node gate: a full
+    # run takes minutes to hours and would stall every traversal. Run it in CI or
+    # nightly and treat surviving mutants as a backlog, not a transition blocker.
     prompt_injection: |
       PHASE: TEST
       Add or update tests covering the new behavior.
       1. Write unit tests for business logic.
       2. Add integration tests for API/DB boundaries.
-      3. Run the test suite and confirm all pass.
+      3. Cover every return path of the new code, including the guard-returns
+         and error branches — a passing suite that never enters the new branch
+         is the false green this phase exists to catch.
+      4. Run the test suite and confirm all pass.
       Signal: say "tests passing" when suite is green.
 
   - id: "validate"
     name: "Validate"
+    # The phase named "validate" validated nothing mechanically — its prompt says
+    # "run linter and type checker" and the gate opened on the agent's word. Both
+    # of these fail OPEN (no linter on PATH / no changed .py → pass, reason in
+    # evidence), so they cannot block a repo that doesn't use them.
+    validators:
+      - type: lint_pass
+        weight: 0.5
+      - type: lsp_clean
+        weight: 0.3
     # Cross-system features (form→CRM, webhook→DB, payment, OAuth) MUST pass a
     # LIVE end-to-end before "done": a real request to the deployed entrypoint +
     # assert the side-effect record exists in the target system. Green unit tests
-    # are necessary, NOT sufficient (see rules/lazy/third-party-integration-gate.md;
-    # root cause: a `recipients: []` guard-return silently skipped the CRM call
-    # while 160 tests stayed green). Uncomment for boundary-crossing features and
+    # are necessary, NOT sufficient (root cause: a `recipients: []` guard-return
+    # silently skipped the CRM call while 160 tests stayed green).
+    # Uncomment for boundary-crossing features and
     # fill the real entrypoint + record assertion. capability validate.integration.e2e
     # ships UNBOUND — capability_audit surfaces it as a GAP; bind via capability_set.
-    # validators:
+    # Uncomment as ADDITIONAL entries under the `validators:` key above — do not
+    # re-declare `validators:`, a duplicate key silently drops lint_pass/lsp_clean.
     #   - type: capability
     #     capability: "validate.integration.e2e"
     #     args:
@@ -89,10 +132,11 @@ nodes:
          webhook, external DB, payment, OAuth): the validate.integration.e2e
          node-gate validator MUST pass — a LIVE request to the deployed
          entrypoint + assert the side-effect record exists in the target
-         system. Green unit tests are NOT sufficient. Run
-         capability_audit(capability="validate.integration.e2e"); if unbound,
-         that is a GAP — bind via capability_set, never fabricate green.
-         See rules/lazy/third-party-integration-gate.md.
+         system. Green unit tests are NOT sufficient. Run capability_audit()
+         — it takes no capability argument, it audits them all — and check
+         whether validate.integration.e2e appears in the returned "unresolved"
+         list. If it does, it is unbound: that is a GAP — bind via
+         capability_set, never fabricate green.
       4. Confirm no regressions in the broader test suite.
       Signal: say "validated" when all checks pass.
 

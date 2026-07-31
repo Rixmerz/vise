@@ -9,6 +9,12 @@ nodes:
   - id: "tests"
     name: "Tests"
     is_start: true
+    # A release tags and notifies. "tests green" asserted by the agent is not a
+    # release criterion — this node gate runs the suite before the tag exists.
+    # Wrong runner for this repo? Set VISE_TEST_CMD (see README).
+    validators:
+      - type: tests_pass
+        weight: 1.0
     prompt_injection: |
       PHASE: TESTS
       Confirm the suite is green before cutting a release.

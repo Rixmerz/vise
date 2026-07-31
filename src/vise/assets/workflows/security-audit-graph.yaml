@@ -42,6 +42,18 @@ nodes:
 
   - id: "verify"
     name: "Verify"
+    # "criticals are gone" is the claim this node exists to check, so at minimum
+    # the suite must run before the audit can be written up as fixed.
+    validators:
+      - type: tests_pass
+        weight: 1.0
+    # Re-run the project's own scanners here — no universal one exists, so pick
+    # yours and uncomment. command_exit fails closed on a missing binary, which
+    # is why these ship commented rather than guessing your toolchain.
+    #   - {type: command_exit, cmd: ["pip-audit", "--strict"], weight: 0.5}
+    #   - {type: command_exit, cmd: ["npm", "audit", "--audit-level=high"], weight: 0.5}
+    #   - {type: command_exit, cmd: ["cargo", "audit"], weight: 0.5}
+    #   - {type: command_exit, cmd: ["gitleaks", "detect", "--no-banner"], weight: 0.5}
     prompt_injection: |
       PHASE: VERIFY
       Re-run the scanners and confirm criticals are gone.

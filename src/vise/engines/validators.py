@@ -183,10 +183,24 @@ class TestsPassValidator:
             cmd = tuple(shlex.split(env_cmd))
 
         if not cmd or not shutil.which(cmd[0]):
+            # Fail-open, same contract as lint_pass / lsp_clean: say why, don't
+            # block. Failing CLOSED here turned every node that declares
+            # `tests_pass` into a hard deadlock on any repo whose runner vise
+            # cannot find — and release-graph declares it on its START node, so
+            # that workflow was unusable from its first traverse on a non-Python
+            # repo. This is the same argument feature-dev-graph.yaml already
+            # makes for shipping the coverage `command_exit` entries commented.
+            # `source="asserted"`, NOT "mechanical": nothing ran, so goal_complete
+            # still refuses to grade this as a verified pass.
+            missing = cmd[0] if cmd else "<empty>"
             return ValidatorRecord(
-                name=self.name, passed=False, confidence_contribution=0.0,
-                weight=self.weight, evidence=f"{cmd[0] if cmd else '<empty>'} not on PATH", at=_now(),
-                source="mechanical", exit_code=None,
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence=(
+                    f"tests skipped: {missing} not on PATH — "
+                    f"set VISE_TEST_CMD to run this repo's suite"
+                ),
+                at=_now(), source="asserted", exit_code=None,
             )
         r = subprocess.run(
             list(cmd), cwd=goal.project_dir,

@@ -124,8 +124,13 @@ class MemoryNode:
             return 0.0
         overlap = len(set(self.tags) & set(query_tags))
         similarity = overlap / (len(self.tags) + 1) if self.tags else 0.0
-        fsrs_r = self._fsrs_retrievability()
         priority_boost = {"high": 0.3, "normal": 0.0, "low": -0.2}.get(self.priority, 0.0)
+        if overlap == 0:
+            # No topical support: FSRS decay has nothing to modulate, so it
+            # must not manufacture relevance on its own (would make nearly
+            # every stored node score positive regardless of query).
+            return priority_boost
+        fsrs_r = self._fsrs_retrievability()
         # Keep same weights as before; substitute FSRS retrievability for raw recency
         return similarity * 0.6 + fsrs_r * 0.1 + priority_boost
 

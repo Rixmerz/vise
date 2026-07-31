@@ -32,14 +32,30 @@ nodes:
 
   - id: "reversibility-check"
     name: "Reversibility Check"
+    # This node stays advisory ON PURPOSE, unlike release:tests. There is no
+    # universal rollback command to hardcode, command_exit fails closed on a
+    # missing binary, and tests_pass proves nothing about reversibility. Pick
+    # your tool's round-trip and uncomment — a mechanical round-trip here is the
+    # single highest-value gate in this graph, because it is the one phase where
+    # a false green is irreversible in production.
+    # validators:
+    #   - {type: command_exit, cmd: ["alembic", "downgrade", "-1"], weight: 1.0}
+    #   - {type: command_exit, cmd: ["bash", "-lc", "alembic upgrade head && alembic downgrade -1 && alembic upgrade head"], weight: 1.0}
+    #   - {type: command_exit, cmd: ["npx", "prisma", "migrate", "reset", "--force"], weight: 1.0}
+    #   - {type: command_exit, cmd: ["bin/rails", "db:rollback", "STEP=1"], weight: 1.0}
+    #   - {type: command_exit, cmd: ["migrate", "-path", "migrations", "-database", "$DB_URL", "down", "1"], weight: 1.0}
     prompt_injection: |
       PHASE: REVERSIBILITY CHECK
       Verify the migration can be safely rolled back.
       1. Run the forward migration against a fresh test DB.
       2. Run the reverse migration and confirm the schema returns to baseline.
-      3. Confirm no data loss in the reverse path for production-shape data.
-      4. Document any irreversible steps explicitly.
-      Signal: say "reversible" when round-trip passes.
+      3. EXECUTE the round-trip — do not reason about it. Paste the actual
+         command and its output. "The down migration looks correct" is the
+         failure this phase exists to prevent; unlike every other phase in
+         this workflow, getting it wrong cannot be undone in production.
+      4. Confirm no data loss in the reverse path for production-shape data.
+      5. Document any irreversible steps explicitly.
+      Signal: say "reversible" when the round-trip has actually run and passed.
 
   - id: "bench"
     name: "Benchmark"
