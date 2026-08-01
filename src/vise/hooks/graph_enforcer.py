@@ -246,16 +246,41 @@ def main():
 
         # 3. Check if tool is blocked ("*" = block everything)
         if "*" in tools_blocked or effective in tools_blocked:
+            reason = (
+                f"[Graph Enforcer] Tool '{effective}' is blocked at node "
+                f"'{current_node}' (workflow: {active_graph}). "
+                f"Advance the workflow with graph_traverse to use this tool, "
+                f"or graph_deactivate to end the workflow if it no longer "
+                f"describes the work. "
+                f"If the MCP server is unreachable and you cannot call "
+                f"either, run `vise graph reset --project "
+                f"{project_dir}` from a terminal to clear the state."
+            )
+            # Two channels on purpose.
+            #
+            # `hookSpecificOutput.permissionDecisionReason` is the documented
+            # PreToolUse shape and the ONLY one whose text reaches the agent:
+            # with `decision`/`message` alone the call was still denied, but the
+            # agent saw a bare "Hook PreToolUse:Edit denied this tool" and was
+            # told nothing about which phase blocked it or how to advance.
+            # Verified twice — main agent and a dispatched subagent both got the
+            # generic string. A gate that blocks without saying why teaches the
+            # agent to flail or route around it.
+            #
+            # `decision: block` stays because it is what empirically blocks on
+            # the installed Claude Code today, and blocking is the single load-
+            # bearing behaviour of this hook. Dropping it on the strength of a
+            # docs reading — while the live evidence says it works — would risk
+            # silently disarming every gate vise has. Remove it only after
+            # confirming a deny still lands without it.
             print(json.dumps({
                 "decision": "block",
-                "message": (
-                    f"[Graph Enforcer] Tool '{effective}' is blocked at node "
-                    f"'{current_node}' (workflow: {active_graph}). "
-                    f"Advance the workflow with graph_traverse to use this tool. "
-                    f"If the MCP server is unreachable and you cannot call "
-                    f"graph_reset, run `vise graph reset --project "
-                    f"{project_dir}` from a terminal to clear the state."
-                )
+                "message": reason,
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                },
             }))
             return
 

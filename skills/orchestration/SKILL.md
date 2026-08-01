@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: One engineer, many builders — wave-based parallel delegation to subagents. Use when a task spans multiple domains (backend + frontend + db), has independent streams that could run in parallel, or needs 3+ sequential phases of mechanical work. Also use proactively when about to grind through 5+ file edits yourself that a well-briefed subagent could execute.
+description: The single entry point for substantial work — picks and activates the matching phase workflow, then runs wave-based parallel delegation to subagents inside it. Use when a task spans multiple domains (backend + frontend + db), has independent streams that could run in parallel, or needs 3+ sequential phases of mechanical work. Also use proactively when about to grind through 5+ file edits yourself that a well-briefed subagent could execute.
 ---
 
 # orchestration
@@ -10,6 +10,57 @@ context. Subagents are **builders**: fresh windows that execute mechanical
 work from a self-contained brief. Never delegate thinking — architecture,
 naming, tradeoff analysis stay with the engineer. Aggressively delegate
 execution — grepping, multi-file edits, test writing, scans.
+
+## Step 0 — is there a workflow for this?
+
+Do this before dispatching anything. Delegation says *who does the work*; a
+workflow says *what has to be true before the work is allowed to advance*.
+They are different axes, and this skill used to ignore the second one
+entirely — so orchestrated work skipped every phase gate on the repo.
+
+1. Call `graph_status`. If a workflow is already active, **do not activate
+   another** — read the current node's `tools_blocked` and plan around it
+   (see the conflict rule below). Skip to the fleet table.
+2. No workflow active, and the request is multi-step? Match it and activate:
+
+   | The request is… | `graph_activate(graph_name=…)` |
+   |---|---|
+   | build/add/implement something new | `feature-dev` |
+   | something is broken, failing, wrong | `debug` |
+   | check quality, audit, harden | `quality-gate` |
+   | review a PR / a branch | `pr-review` |
+   | schema, index, data backfill | `migration` |
+   | cut a release | `release` |
+   | security surface | `security-audit` |
+
+   `graph_list_available` has the full list with descriptions when none of
+   these obviously fits.
+3. **Say which one you activated and why, in one line.** A workflow blocks
+   tools; the user must never discover it by hitting a wall.
+4. Nothing fits, or the task is a one-off? Say so in one line and orchestrate
+   without one. A wrong activation costs more than no activation.
+
+### The conflict rule — this is not optional
+
+A node's `tools_blocked` applies to subagents too. This is verified, not
+assumed: with `feature-dev` on `orient`, a `general-purpose` subagent asked to
+Edit a file was denied by the same PreToolUse hook that denies the main agent.
+Delegation is **not** an escape hatch from a phase gate, and must never be
+used as one.
+
+Two consequences:
+
+- **`debug-graph` blocks `Task` on every node except `fix`.** Under that
+  workflow you cannot dispatch at all until you reach the fix phase. That is
+  deliberate — evidence-gathering is the engineer's job — so do the reproduce
+  and analyze phases yourself and delegate only once you are on `fix`.
+- **Read-only phases (`orient`, `design`, `fetch`) block Edit/Write.** A
+  builder dispatched there fails on its first edit. Delegate reading and
+  searching in those phases; save the writing waves for the phase that allows
+  writing.
+
+If a gate is genuinely wrong for the task, `graph_deactivate` and say why —
+do not route around it with a subagent.
 
 ## The fleet — dispatch by name, not `general-purpose`
 

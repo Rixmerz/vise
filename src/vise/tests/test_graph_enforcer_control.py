@@ -292,3 +292,57 @@ def test_internal_error_approves_on_stdout_and_explains_on_stderr(tmp_path, monk
         "an enforcer that crashes must say so on stderr, not approve in silence"
     )
     assert "state hub is unreadable" in err.getvalue(), "the actual cause must be named"
+
+
+# ---------------------------------------------------------------------------
+# The denial has to SAY something — the block is only half the job
+# ---------------------------------------------------------------------------
+
+
+def test_block_emits_the_documented_pretooluse_deny_shape(isolated_xdg, fake_project):
+    """`decision`/`message` denies the call but its text never reaches the agent.
+
+    Observed twice against a live session — the main agent and a dispatched
+    subagent both saw a bare "Hook PreToolUse:Edit denied this tool" with no
+    phase, no workflow name, and no way out. Only
+    `hookSpecificOutput.permissionDecisionReason` is surfaced into the agent's
+    context, and an agent that cannot read why it was blocked either flails or
+    looks for a way around the gate.
+
+    Both channels are asserted: the legacy one because it is what empirically
+    blocks today, the documented one because it is what explains.
+    """
+    _seed_blocking_workflow(fake_project, isolated_xdg)
+
+    decision = _run_hook("Bash", fake_project, isolated_xdg)
+
+    assert decision["decision"] == "block"
+
+    hso = decision["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == decision["message"], (
+        "the two channels must carry identical text — a denial that explains "
+        "one thing to the agent and another to the log is worse than silence"
+    )
+
+
+def test_block_reason_names_the_node_the_workflow_and_both_exits(
+    isolated_xdg, fake_project
+):
+    """A reason the agent can act on, not just a refusal.
+
+    graph_deactivate is named alongside graph_traverse on purpose: when the
+    active workflow no longer describes the work — the common case for a stale
+    pointer left by an earlier session — advancing is the wrong move and reset
+    is worse, since it returns to the START node, the most restrictive node in
+    every bundled workflow.
+    """
+    _seed_blocking_workflow(fake_project, isolated_xdg)
+
+    reason = _run_hook("Bash", fake_project, isolated_xdg)["message"]
+
+    assert "Bash" in reason
+    assert "graph_traverse" in reason
+    assert "graph_deactivate" in reason
+    assert "vise graph reset" in reason
