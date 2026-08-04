@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# vise launcher — prefers the dedicated venv created by install.sh,
-# falls back to system python3. Used by .mcp.json and hooks/hooks.json
-# so a single script decides which interpreter runs vise.
+# vise launcher — prefers the dedicated venv created by install.sh, falls back
+# to system python3, and refuses to launch an interpreter that cannot import
+# vise's runtime deps. Used by .mcp.json and hooks/hooks.json so a single
+# script decides which interpreter runs vise.
 set -euo pipefail
 
 # Same data-dir rule as vise.hooks._xdg: honor XDG_DATA_HOME only when it is
@@ -21,4 +22,38 @@ for candidate in "${DATA_DIR}/venv/bin/python" "${HOME}/.local/share/vise/venv/b
   fi
 done
 
-exec python3 "$@"
+# No venv anywhere. System python3 is a legitimate host, but only if it can
+# actually import the runtime deps — `claude plugin install` copies the plugin
+# files without provisioning anything, so this is the common case for a
+# marketplace install. Exec'ing blindly here is what made that failure silent:
+# the MCP server died on `import fastmcp` during startup and Claude Code simply
+# listed no vise tools, with the traceback going nowhere the user would look.
+if python3 -c "import fastmcp, fastembed" >/dev/null 2>&1; then
+  exec python3 "$@"
+fi
+
+# Where this launcher lives IS the plugin root, whether that is a clone or the
+# copy `claude plugin install` dropped in its cache. vise-mcp is not published
+# on PyPI, so the deps-only path below has to install from here, not by name.
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+cat >&2 <<EOF
+vise: cannot start — no Python with vise's runtime deps (fastmcp, fastembed).
+
+Installing the plugin copies its files but does not provision a Python
+environment. To build one from a clone of the vise repo:
+
+    git clone https://github.com/Rixmerz/vise && cd vise
+    ./install.sh
+
+install.sh also installs vise from that clone as vise@vise-dev. If you already
+have vise@rixmerz, uninstall it first (see "Install" in the README) — loading
+both duplicates every skill, command, agent, and this MCP server. To keep the
+published install and only add the missing deps:
+
+    python3 -m venv ${DATA_DIR}/venv
+    ${DATA_DIR}/venv/bin/pip install ${PLUGIN_ROOT}
+
+Then restart Claude Code.
+EOF
+exit 1

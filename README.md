@@ -32,6 +32,13 @@ claude plugin install vise@rixmerz
 
 Restart Claude Code afterwards.
 
+`claude plugin install` copies the plugin's files but does not provision a Python environment, and vise's MCP server needs `fastmcp` and `fastembed`. If system `python3` lacks them, vise's skills, commands, and agents still load — they are plain files — but the MCP server cannot start and none of its tools appear. `bin/vise-run` detects this and prints the fix; the short version is to build the venv it looks for:
+
+```sh
+python3 -m venv ~/.local/share/vise/venv     # or $XDG_DATA_HOME/vise/venv
+~/.local/share/vise/venv/bin/pip install ~/.claude/plugins/cache/rixmerz/vise/<version>
+```
+
 ### Updating
 
 ```sh
@@ -58,7 +65,7 @@ Install **one or the other**, not both. The two marketplaces coexist fine, but i
 claude plugin uninstall vise@rixmerz
 ```
 
-The MCP server and all hooks run through `bin/vise-run`, a launcher that prefers the vise venv's python and falls back to `python3`. No installed wheel required for plugin usage.
+The MCP server and all hooks run through `bin/vise-run`, a launcher that prefers the vise venv's python and falls back to `python3`. It will not launch an interpreter that cannot import `fastmcp` and `fastembed` — it prints how to provision one and exits non-zero, because a launcher that starts a doomed interpreter turns a missing dependency into a server that silently exposes no tools.
 
 For standalone (non-plugin) usage, install the package and use the `vise-mcp` console script:
 

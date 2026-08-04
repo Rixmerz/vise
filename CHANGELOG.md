@@ -6,6 +6,21 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Fixed
+
+- **A marketplace install exposed no MCP tools, silently.** `claude plugin
+  install vise@rixmerz` copies the plugin's files but provisions no Python
+  environment, so `bin/vise-run` fell through to system `python3` — which
+  usually lacks `fastmcp` — and exec'd it anyway. The server then died on
+  `import fastmcp` during startup, with the traceback going somewhere the user
+  never looks, and Claude Code simply listed zero vise tools. Skills, commands,
+  and agents kept loading (they are plain files), which made the install look
+  successful. The launcher now verifies the interpreter can import `fastmcp` and
+  `fastembed` before exec'ing it, and otherwise prints how to provision a venv
+  and exits non-zero. The venv fast path is unchanged and skips the probe.
+
 ## [0.1.0a14] — 2026-07-31
 
 ### Fixed
