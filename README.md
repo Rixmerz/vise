@@ -22,12 +22,40 @@ The MCP surface exposes **49 tools**: `graph_*` (27), `goal_*` (7), `experience_
 
 Requirements: Claude Code (`claude` CLI), Python 3.11+, git.
 
+vise is published in the `rixmerz` marketplace:
+
 ```sh
-git clone https://github.com/Rixmerz/vise && cd vise
-./install.sh
+claude plugin marketplace add Rixmerz/claude-plugins
+claude plugin install vise@rixmerz
 ```
 
-`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the repo as a local plugin marketplace, and installs the plugin (`claude plugin marketplace add <repo>` + `claude plugin install vise@rixmerz`). Idempotent — safe to re-run. Restart Claude Code afterwards.
+Restart Claude Code afterwards.
+
+### Updating
+
+```sh
+claude plugin marketplace update rixmerz   # re-read the published index
+claude plugin update vise                  # pull the new version
+```
+
+A plugin update takes effect on restart — Claude Code loads plugins at startup.
+
+### From a clone (development)
+
+```sh
+git clone https://github.com/Rixmerz/vise && cd vise
+./install.sh          # re-run after `git pull` to update
+```
+
+`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the clone as a local marketplace named `vise-dev`, and installs `vise@vise-dev`. Re-running it updates an existing install rather than reporting it already present. Idempotent — safe to re-run.
+
+The clone path uses `vise-dev`, not `rixmerz`, on purpose. Claude Code keys marketplaces by **name** across every source, so two repos declaring the same marketplace name displace each other and the loser's plugins stop resolving. `rixmerz` is the owner namespace at [Rixmerz/claude-plugins](https://github.com/Rixmerz/claude-plugins), and a clone claiming that name would knock the published plugins offline — so the clone gets a namespace of its own.
+
+Install **one or the other**, not both. The two marketplaces coexist fine, but installing `vise@rixmerz` and `vise@vise-dev` together loads vise twice — duplicate skills, commands, agents, and a second MCP server. To switch to the clone, uninstall the published one first:
+
+```sh
+claude plugin uninstall vise@rixmerz
+```
 
 The MCP server and all hooks run through `bin/vise-run`, a launcher that prefers the vise venv's python and falls back to `python3`. No installed wheel required for plugin usage.
 

@@ -1,5 +1,6 @@
 {
-  "name": "rixmerz",
+  "name": "vise-dev",
+  "description": "Local development marketplace — lets a clone of this repo be installed as a plugin without going through the published index. For normal installs use the rixmerz marketplace (github.com/Rixmerz/claude-plugins), which is where vise is published.",
   "owner": {
     "name": "Rixmerz"
   },

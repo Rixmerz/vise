@@ -63,17 +63,34 @@ if [ "$DEV" = "1" ]; then
   echo "ok: dev extras installed into ${VENV_DIR}."
 fi
 
-# 3. Register marketplace + install plugin (idempotent).
-if claude plugin marketplace list 2>/dev/null | grep -q '^rixmerz\b\|"name": *"rixmerz"\|rixmerz '; then
-  claude plugin marketplace update rixmerz || true
+# 3. Register this CLONE as a local marketplace and install from it.
+#
+#    The name is `vise-dev`, not `rixmerz`. Claude Code keys marketplaces by
+#    NAME across all sources, so a repo that declares a name someone else
+#    already uses silently displaces theirs and every plugin from the old one
+#    stops resolving. That is not hypothetical: this repo briefly declared
+#    `rixmerz`, which is the owner namespace published at
+#    github.com/Rixmerz/claude-plugins, and it knocked livespec@rixmerz offline.
+#
+#    Published installs come from that index (`vise@rixmerz`). This script is
+#    the from-a-clone path, so it gets its own namespace and cannot collide.
+MARKETPLACE="vise-dev"
+
+if claude plugin marketplace list 2>/dev/null | grep -q "${MARKETPLACE}"; then
+  claude plugin marketplace update "$MARKETPLACE" || true
 else
   claude plugin marketplace add "$REPO_DIR"
 fi
 
-if claude plugin list 2>/dev/null | grep -q 'vise'; then
-  echo "ok: vise plugin already installed."
+if claude plugin list 2>/dev/null | grep -q "vise@${MARKETPLACE}"; then
+  # Already installed: re-point it at what the marketplace now says. Without
+  # this, `git pull && ./install.sh` printed "already installed" and updated
+  # nothing — the idempotence promise held while the update path silently
+  # did no work.
+  claude plugin update "vise@${MARKETPLACE}" || true
+  echo "ok: vise plugin updated — restart Claude Code to apply."
 else
-  claude plugin install vise@rixmerz
+  claude plugin install "vise@${MARKETPLACE}"
 fi
 
 # 4. LSP binaries: vise declares language servers for 12 ecosystems in
