@@ -20,6 +20,7 @@ description: TypeScript coding conventions — strict types, discriminated union
 - Prefer `Result<T, E>` (neverthrow) over throw for expected errors
 - Use `using`/`await using` for resource cleanup (TS 5.2+)
 - Validate at system boundaries (user input, external APIs) with Zod/Valibot
+- Before changing an exported signature, run `findReferences` on it; for an interface or abstract member run `goToImplementation`. Structural typing means anything with a matching shape conforms, so check re-exported and type-only call sites in that list too. Every entry type-checks against the new signature or is updated in this change
 
 ## DON'T
 - Don't use `any` — use `unknown` and narrow

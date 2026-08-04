@@ -19,6 +19,7 @@ description: Swift conventions — optionals discipline, value types, error hand
 - Mark classes `final` unless designed for inheritance
 - Name for clarity at the call site (Swift API Design Guidelines)
 - Use `Codable` for serialization; `Result` only where a callback demands it
+- Before changing a `public`/`open` signature, run `findReferences` on it; for a protocol requirement run `goToImplementation` to get the conforming types. Every caller and conformance in that list compiles against the new signature or is updated in this change
 
 ## DON'T
 - Don't force-unwrap (`!`) or force-`try!`/`as!` unless provably safe

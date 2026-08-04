@@ -118,6 +118,7 @@ def test_tests_pass_validator_records_source_exit_code_and_log(
     log = Path(result.full_output_path)
     assert log.exists(), "evidence log file must be written to disk"
     assert "3 passed" in log.read_text(encoding="utf-8")
+    assert result.outcome == "verified", "a real run that found no problems is a verified pass"
 
 
 def test_tests_pass_validator_skips_on_pytest_no_tests_collected(
@@ -138,6 +139,9 @@ def test_tests_pass_validator_skips_on_pytest_no_tests_collected(
     assert "no tests collected" in result.evidence
     assert result.full_output_path, "exit-5 pass must still persist evidence (auditability)"
     assert Path(result.full_output_path).exists()
+    assert result.outcome == "unverified", (
+        "nothing to check — zero tests ran, so this is not a verified pass"
+    )
 
 
 def test_tests_pass_validator_uses_vise_test_cmd_override(
@@ -214,6 +218,7 @@ def test_tests_pass_skips_open_when_runner_missing(
         "nothing ran, so this must NOT count as a mechanical pass — goal_complete "
         "grades on source == 'mechanical' and would otherwise accept a skipped suite"
     )
+    assert result.outcome == "unverified", "could not check — no runner found"
 
 
 def test_lint_pass_skips_open_when_linter_missing(
@@ -226,6 +231,7 @@ def test_lint_pass_skips_open_when_linter_missing(
         result = v.run(goal)
     assert result.passed is True, "missing linter must not block the gate (advisory)"
     assert "VISE_LINT_CMD" in result.evidence
+    assert result.outcome == "unverified", "could not check — no linter found"
 
 
 def test_lint_pass_uses_vise_lint_cmd_override(

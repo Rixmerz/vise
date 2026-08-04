@@ -4,7 +4,7 @@ description: Audits code for security findings — auth, input validation, secre
 model: opus
 effort: high
 color: orange
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, LSP
 skills:
   - ponytail
 ---

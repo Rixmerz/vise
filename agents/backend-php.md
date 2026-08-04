@@ -4,7 +4,7 @@ description: Implements server-side PHP — services, controllers, models, jobs 
 model: sonnet
 effort: medium
 color: purple
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - php-rules
   - ponytail

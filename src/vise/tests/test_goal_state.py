@@ -236,6 +236,52 @@ def test_validator_record_new_fields_default() -> None:
     assert r.full_output_path == ""
 
 
+# ---------------------------------------------------------------------------
+# outcome/passed structural consistency — a failing record can never report
+# "verified" (see the ponytail fix in ValidatorRecord.__post_init__).
+# ---------------------------------------------------------------------------
+
+def _rec(passed: bool, **overrides) -> ValidatorRecord:
+    kwargs = dict(
+        name="files_exist", passed=passed, confidence_contribution=0.0,
+        weight=0.1, evidence="x", at="2025-01-01T00:00:00+00:00",
+    )
+    kwargs.update(overrides)
+    return ValidatorRecord(**kwargs)
+
+
+def test_failing_record_default_outcome_is_failed_not_verified() -> None:
+    """The most common construction site (`passed=False`, outcome never set)
+    must never surface the contradiction `passed=False, outcome='verified'`."""
+    r = _rec(False)
+    assert r.outcome == "failed"
+
+
+def test_failing_record_explicit_verified_override_is_corrected() -> None:
+    """Even an explicit (wrong) outcome='verified' on a failing record is
+    structurally impossible — not just the unset-default case."""
+    r = _rec(False, outcome="verified")
+    assert r.outcome == "failed"
+
+
+def test_failing_record_explicit_unverified_is_left_alone() -> None:
+    """A failing record that explicitly says 'unverified' (misconfiguration,
+    not a real check) is a distinct, legitimate case and must not be
+    silently rewritten to 'failed'."""
+    r = _rec(False, outcome="unverified")
+    assert r.outcome == "unverified"
+
+
+def test_passing_record_default_outcome_stays_verified() -> None:
+    r = _rec(True)
+    assert r.outcome == "verified"
+
+
+def test_passing_record_explicit_unverified_stays_unverified() -> None:
+    r = _rec(True, outcome="unverified")
+    assert r.outcome == "unverified"
+
+
 def test_get_goal_round_trips_validator_record_new_fields(
     isolated_goal_dir: Path,
 ) -> None:

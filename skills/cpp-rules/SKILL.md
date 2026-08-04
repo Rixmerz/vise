@@ -18,6 +18,7 @@ description: C and C++ conventions — RAII, ownership, no raw new/delete, bound
 - Use `enum class`, `constexpr`, `nullptr`, and `[[nodiscard]]` where they add safety
 - Use `std::span`/`std::string_view` for non-owning views (C++20/17)
 - Check every allocation / fallible call; propagate errors explicitly
+- Before changing a declaration in a header, run `findReferences` on it; for a virtual member run `goToImplementation` to get every override. Every caller and override in that list compiles against the new signature or is updated in this change
 
 ## DO (C)
 - Check the return of `malloc`/`realloc`/`fopen` etc.; free exactly once

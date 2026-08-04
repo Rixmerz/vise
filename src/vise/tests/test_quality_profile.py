@@ -126,6 +126,7 @@ def test_validator_no_profile_skips_asserted(tmp_path, monkeypatch):
     assert rec.evidence == (
         "quality check 'sast' not configured — create .vise/quality.yaml with a `checks:` map"
     )
+    assert rec.outcome == "unverified"
 
 
 def test_validator_key_absent_skips_asserted(tmp_path, monkeypatch):
@@ -138,6 +139,7 @@ def test_validator_key_absent_skips_asserted(tmp_path, monkeypatch):
     assert rec.evidence == (
         "quality check 'sast' not configured — add `sast:` to checks: in .vise/quality.yaml"
     )
+    assert rec.outcome == "unverified"
 
 
 def test_validator_unparseable_command_skips_asserted(tmp_path, monkeypatch):
@@ -150,6 +152,7 @@ def test_validator_unparseable_command_skips_asserted(tmp_path, monkeypatch):
     assert rec.evidence == (
         "quality check 'unit' not configured — add `unit:` to checks: in .vise/quality.yaml"
     )
+    assert rec.outcome == "unverified"
 
 
 def test_validator_binary_missing_skips_asserted(tmp_path, monkeypatch):
@@ -160,6 +163,7 @@ def test_validator_binary_missing_skips_asserted(tmp_path, monkeypatch):
     assert rec.passed is True
     assert rec.source == "asserted"
     assert rec.evidence == "quality check 'sast' skipped — vise-no-such-binary-xyz not on PATH"
+    assert rec.outcome == "unverified"
 
 
 def test_validator_real_run_pass_is_mechanical(tmp_path, monkeypatch):
@@ -171,6 +175,7 @@ def test_validator_real_run_pass_is_mechanical(tmp_path, monkeypatch):
     assert rec.passed is True
     assert rec.source == "mechanical"
     assert rec.exit_code == 0
+    assert rec.outcome == "verified", "a real run that exited 0 is a verified pass"
 
 
 def test_validator_real_run_fail_is_mechanical(tmp_path, monkeypatch):

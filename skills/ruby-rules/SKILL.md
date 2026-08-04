@@ -20,6 +20,7 @@ description: Ruby coding conventions — idiomatic blocks, safe navigation, froz
 - Use `fetch` for required hash keys so missing keys fail loudly
 - Keep methods short; extract private helpers freely
 - Follow standard naming: `snake_case` methods/vars, `CamelCase` classes, `?`/`!` suffixes
+- Before changing a public method signature, run `findReferences` on it, then grep the name too — `send`, `method_missing`, and DSL callbacks are call sites no server resolves. Every caller found satisfies the new signature or is updated in this change
 
 ## DON'T
 - Don't rescue `Exception` — rescue `StandardError` or a specific subclass

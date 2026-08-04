@@ -152,6 +152,14 @@ nodes:
     # TIER B — minutes. Its own node, late on purpose: it blocks exactly once,
     # after all three second-cost tiers are green, so a lint typo never costs
     # an e2e run.
+    # lsp_clean is a self-contained validator type, not a raw command, so it
+    # does not conflict with this file's "name a CHECK, never a command"
+    # design — it is a zero-config mechanical fallback alongside the
+    # quality_check entries above, which stay unverified until a repo binds
+    # them in .vise/quality.yaml. `integration` is the last non-terminal
+    # node in this graph (deep-passes, after it, is_end and read-only), so
+    # it is the last point that can catch code written while chasing
+    # findings in static/tests/security/integration.
     validators:
       - type: quality_check
         check: integration
@@ -159,6 +167,8 @@ nodes:
       - type: quality_check
         check: e2e
         weight: 1.0
+      - type: lsp_clean
+        weight: 0.3
     prompt_injection: |
       PHASE: INTEGRATION & E2E
       Tier B — minutes, and it blocks once. Checks: integration, e2e.

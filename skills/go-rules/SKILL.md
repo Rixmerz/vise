@@ -23,6 +23,7 @@ description: Go coding conventions — context discipline, error wrapping, gorou
 - Design structs so zero value is useful
 - Use `internal/` for private packages
 - Profile before optimizing (`pprof`)
+- Before changing an exported signature, run `findReferences` on it; for an interface method run `goToImplementation` to get the implementing types. Every caller and implementor in that list satisfies the new signature or is updated in this change
 
 ## DON'T
 - Don't store `context.Context` in a struct

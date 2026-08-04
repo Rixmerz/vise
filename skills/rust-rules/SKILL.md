@@ -25,6 +25,7 @@ description: Rust coding conventions — error handling, ownership idioms, unsaf
 - Run `cargo fmt`, `cargo clippy -D warnings`, `cargo audit` in CI
 - Document public APIs with `# Examples`, `# Errors`, `# Panics`
 - Use `lto = true` and `codegen-units = 1` in release profile
+- Before changing a `pub` signature, run `findReferences` on it; for a trait method run `goToImplementation` to get every implementor. Each caller and implementor in that list compiles against the new signature or is updated in this change
 
 ## DON'T
 - Don't use `unwrap()` in production — lacks context

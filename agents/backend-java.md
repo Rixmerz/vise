@@ -4,7 +4,7 @@ description: Implements server-side Java — services, REST controllers, data mo
 model: sonnet
 effort: medium
 color: orange
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - java-rules
   - ponytail

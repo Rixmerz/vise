@@ -48,6 +48,12 @@ nodes:
 
   - id: "tag"
     name: "Tag"
+    # Deliberately NO lsp_clean here. This graph has no implementation phase —
+    # tests, changelog, version-bump, tag — so there is no implementation exit
+    # to gate. And lsp_clean's file set is the diff against origin/main, which
+    # on a release branch is the whole release: one diagnostic in any file
+    # shipped since the last tag would block cutting the tag. Code is checked
+    # by the workflow that wrote it, not again at release time.
     prompt_injection: |
       PHASE: TAG
       Create the annotated git tag for the release.

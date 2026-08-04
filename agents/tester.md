@@ -4,7 +4,7 @@ description: Writes unit and integration tests that catch real bugs — AAA stru
 model: sonnet
 effort: medium
 color: yellow
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - ponytail
 ---

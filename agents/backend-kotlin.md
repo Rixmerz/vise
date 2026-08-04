@@ -4,7 +4,7 @@ description: Implements server-side Kotlin — services, controllers, data model
 model: sonnet
 effort: medium
 color: purple
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - kotlin-rules
   - ponytail

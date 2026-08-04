@@ -4,7 +4,7 @@ description: Implements server-side Rust — services, APIs, data models, async 
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - rust-rules
   - ponytail

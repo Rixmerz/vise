@@ -92,10 +92,17 @@ nodes:
     # migration must be fully ticked off before `apply` is reachable. Lives
     # here rather than on `apply` because a node gate runs on traverse OUT,
     # and `apply` is is_end — its validators would never run.
+    #
+    # lsp_clean lives here too for the same reason: no node in this graph
+    # blocks Edit/Write, so `bench` (the last non-terminal node) is the last
+    # chance to mechanically check the migration/ORM code written in
+    # `implement` before it becomes irreversible.
     validators:
       - type: openspec
         require: tasks_complete
         weight: 1.0
+      - type: lsp_clean
+        weight: 0.3
     prompt_injection: |
       PHASE: BENCHMARK
       Measure migration cost against production-shape data.

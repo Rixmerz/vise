@@ -8,7 +8,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 
 ## Features
 
-- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own.
+- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own. Validators that cannot run — no linter on PATH, no checker installed, nothing in scope — still pass, because blocking a repo over tooling it doesn't use would be wrong. They report that pass as **unverified** rather than clean, so a green gate that verified nothing is visibly not the same as one that did.
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal. Like per-edit snapshots, the gate is **opt-in** — off by default, enable with `VISE_GOAL_GATE=1`. The `goal_*` tools work regardless; only the blocking behaviour is gated.
@@ -145,6 +145,16 @@ client reads this map (extension → server) to give agents `hover` /
 `documentSymbol` / `findReferences` / `incomingCalls` on your source. vise
 does **not** install these toolchains; it only declares which binary to
 launch per file extension. Install what you need:
+
+Declaring a server is not the same as using one, and until recently vise only
+did the first: no agent listed the `LSP` tool, so nothing could call it. Now the
+16 code-touching agents carry it, each `*-rules` skill states the circumstance
+that requires a lookup, and `skills/orchestration/SKILL.md` has the engineer
+resolve a symbol's caller set before dispatching a wave that changes its
+signature. Note what the tool does **not** do: its nine operations are all
+navigation, and none of them is diagnostics — error checking is `lsp_clean`'s
+job, and that validator shells out to per-language checkers rather than
+speaking LSP at all.
 
 | Server | Extensions | Install |
 |---|---|---|

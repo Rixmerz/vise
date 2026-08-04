@@ -19,6 +19,7 @@ description: PHP coding conventions — strict types, typed properties, PSR stan
 - Throw typed exceptions; catch specific types, add context
 - Prefer `match` over `switch` for value mapping (strict, exhaustive)
 - Use `??` and `?->` instead of `isset()` ladders
+- Before changing a public function or method signature, run `findReferences` on it; for an interface method run `goToImplementation` to get the implementing classes. Every caller and implementor in that list satisfies the new signature or is updated in this change
 
 ## DON'T
 - Don't suppress errors with `@`

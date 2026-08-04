@@ -4,7 +4,7 @@ description: Implements server-side TypeScript/Node — services, APIs, data mod
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - typescript-rules
   - ponytail

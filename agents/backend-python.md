@@ -4,7 +4,7 @@ description: Implements server-side Python — services, APIs, data models, back
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - python-rules
   - ponytail

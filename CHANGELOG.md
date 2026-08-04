@@ -8,6 +8,49 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added
+
+- **Validator passes say whether anything was actually verified.** Every
+  validator record carries an `outcome` of `verified`, `unverified`, or
+  `failed`. The fail-open contract is unchanged — a repo with no linter is not
+  blocked — but all 14 fail-open skip-pass paths across `lsp_clean` (7,
+  one per language plus the shared ones), `tests_pass`, `lint_pass`,
+  `quality_check`, and `openspec` now report
+  `unverified` instead of presenting as clean, and the outcome reaches the gate
+  result rather than only the stored record. Evidence keeps "nothing to check"
+  distinct from "could not check", because they share an outcome and mean
+  opposite things. This was a live hole, not a theoretical one: `lint_pass`
+  sits on `feature-dev`'s `validate` node at weight 0.5, so on a machine
+  without its linter that node reported a confident green having run nothing.
+  The validator docstring had described this exact failure — *"Green gate,
+  evidence reading 'not on PATH', nothing run"* — since before the fix existed.
+- **Diagnostics cover Go, Rust, and TypeScript.** `lsp_diagnostics` gained
+  `go vet`, `cargo check`, and `tsc --noEmit` under the same fail-soft
+  shell-out contract, and `lsp_clean`'s file filter widened past `.py`.
+  Whole-project checkers run once and have their findings filtered to the
+  changed set, so a diagnostic in an untouched file cannot fail a gate, and a
+  checker that exits non-zero having produced no parsed diagnostic — `cargo`
+  with no `Cargo.toml`, `tsc` with no `tsconfig.json`, a Go file outside a
+  module — reports `unverified` rather than the clean pass an empty finding
+  list would otherwise imply. `lsp_clean` is bounded to 180s per run in total,
+  and languages it did not reach in that budget are reported unverified instead
+  of the gate hanging. Each
+  checker's blocking-versus-cosmetic rule is vise's own, never inherited from
+  the tool's severity field — the precedent ruff set by marking unused imports
+  as errors. `lsp_clean` now also gates the implementation-exit node of
+  `debug`, `migration`, `quality-gate`, `security-audit`, and `sprint-e2e`,
+  where previously it ran on one node of one workflow out of nine.
+- **The declared language servers are finally reachable.** vise declared
+  `lspServers` for 12 ecosystems while no agent listed the `LSP` tool, so
+  nothing could call them. The 16 code-touching agents now carry it, each
+  `*-rules` skill states the circumstance that requires a lookup rather than
+  suggesting one, and the orchestration skill has the engineer resolve a
+  symbol's caller set before dispatching a wave that changes its signature —
+  the caller set being the input to the wave's file-ownership partition. No
+  gate asserts that an agent called `LSP`: that is satisfiable by one call with
+  a discarded result, so it would raise a measured number while measuring
+  nothing.
+
 ### Fixed
 
 - **A marketplace install exposed no MCP tools, silently.** `claude plugin

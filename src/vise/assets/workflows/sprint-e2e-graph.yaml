@@ -50,6 +50,13 @@ nodes:
 
   - id: "implement"
     name: "Implement"
+    # e2e and validate below both block Edit/Write/MultiEdit/NotebookEdit, so
+    # this is the last node in the graph where source is actually written —
+    # its exit gate is the only place a mechanical diagnostics check can run
+    # before the live E2E phase.
+    validators:
+      - type: lsp_clean
+        weight: 0.3
     prompt_injection: |
       PHASE: IMPLEMENT
       Dispatch backend and frontend agents in PARALLEL (run_in_background).

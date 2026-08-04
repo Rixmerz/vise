@@ -359,9 +359,10 @@ def register_graph_transition_tools(mcp):
             }
             if node_gate.get("skipped_count"):
                 result["gate_summary"]["hint"] = (
-                    f"{node_gate['skipped_count']} check(s) did not run — they are "
-                    f"unconfigured or their tool is missing, and reported "
-                    f"source='asserted', not 'mechanical'. Each one is an unchecked "
+                    f"{node_gate['skipped_count']} check(s) passed unverified — no "
+                    f"checker actually ran (unconfigured, tool missing, nothing in "
+                    f"scope, or the engine raised), and each reported "
+                    f"outcome='unverified', not 'verified'. Each one is an unchecked "
                     f"defect class, not a pass. Bind it or say which risk you accept."
                 )
 

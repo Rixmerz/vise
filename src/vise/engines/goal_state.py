@@ -43,6 +43,26 @@ class ValidatorRecord:
     source: str = "mechanical"       # mechanical | asserted — self-grading guard
     exit_code: int | None = None     # process exit code where meaningful
     full_output_path: str = ""       # path to persisted full stdout+stderr log
+    # verified | unverified | failed — distinguishes *why* a pass happened.
+    # "verified": a checker ran and found nothing blocking. "unverified": the
+    # gate opened without anything having actually checked the code (no
+    # checker installed, nothing in scope, or the engine raised). "failed":
+    # a checker ran and found something blocking. Default is "verified" so
+    # every pre-existing construction site (most validators never set this)
+    # keeps its current, correct meaning — they really did run a check.
+    outcome: str = "verified"
+
+    def __post_init__(self) -> None:
+        # `passed=False` and `outcome="verified"` is a structural
+        # contradiction — nothing that "verified clean" can also be a
+        # failure. Rather than patch every `_rec(False, ...)` call site by
+        # hand (an easy convention to forget), enforce it once here: any
+        # failing record that would otherwise carry the "verified" default
+        # (or an explicit but wrong override) is corrected to "failed".
+        # Explicit "unverified" on a failing record is left alone — that is
+        # a real, distinct case (e.g. a misconfigured validator).
+        if not self.passed and self.outcome == "verified":
+            self.outcome = "failed"
 
 
 @dataclass

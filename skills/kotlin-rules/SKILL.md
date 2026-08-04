@@ -19,6 +19,7 @@ description: Kotlin conventions — null safety, immutability, coroutines discip
 - Use extension functions to keep call sites readable, sparingly
 - Use scope functions with intent: `let` (nullable), `apply` (config), `run`/`with` (compute)
 - Return `Result<T>` or throw specific exceptions — be consistent per module
+- Before changing a public signature, run `findReferences` on it; for a `sealed`/interface member run `goToImplementation` to get the subtypes. Default arguments make call sites vary in arity, so read each one: every caller and implementor either satisfies the new signature or is updated in this change
 
 ## DON'T
 - Don't use `!!` to silence nullability — restructure or check

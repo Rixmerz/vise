@@ -98,20 +98,27 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
         except Exception as e:
             print(f"[vise] Warning: failed to record node-gate failure lesson: {e}", file=sys.stderr)
 
-    # A validator that SKIPPED — its tool is unconfigured or not on PATH —
-    # reports passed=True with source="asserted", never "mechanical". Returning
+    # A validator that SKIPPED — its tool is unconfigured or not on PATH, or
+    # there was nothing in scope to check — reports passed=True. Returning
     # only `failed` threw that distinction away: a node declaring 13 quality
     # checks on a repo that binds none of them returned a dict byte-identical to
     # a node that verified all 13. The agent had no channel through which a skip
     # could reach it, so a prompt saying "read the evidence of every check,
     # including the ones that passed" was impossible to obey. Carry them all.
+    #
+    # Counted by `outcome`, not `source`: `source` answers "was this
+    # self-graded by the agent" (mechanical vs asserted), a different axis.
+    # A record can be source="mechanical" (a real tool ran) yet
+    # outcome="unverified" (it had nothing to check — e.g. no changed files,
+    # or pytest exit 5 "no tests collected"). Counting that as verified is
+    # exactly the false-green this field exists to prevent.
     verified = [
         r for r in results
-        if getattr(r, "passed", False) and getattr(r, "source", "") == "mechanical"
+        if getattr(r, "passed", False) and getattr(r, "outcome", "verified") == "verified"
     ]
     skipped = [
         r for r in results
-        if getattr(r, "passed", False) and getattr(r, "source", "") != "mechanical"
+        if getattr(r, "passed", False) and getattr(r, "outcome", "verified") != "verified"
     ]
 
     return {
@@ -132,6 +139,11 @@ async def _run_node_validators(node: Any, project_dir: str, state: Any = None) -
                 "name": getattr(r, "name", "?"),
                 "passed": bool(getattr(r, "passed", False)),
                 "source": getattr(r, "source", "unknown"),
+                # verified | unverified | failed — see ValidatorRecord.outcome.
+                # Makes "passed because clean" and "passed because no checker
+                # was installed" distinguishable at the gate, not only in the
+                # stored record.
+                "outcome": getattr(r, "outcome", "verified"),
                 "evidence": getattr(r, "evidence", "")[:300],
             }
             for r in results

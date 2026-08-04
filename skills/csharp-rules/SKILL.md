@@ -18,6 +18,7 @@ description: C# conventions — nullable reference types, async/await discipline
 - Use expression-bodied members and pattern matching where they clarify
 - Use `IEnumerable<T>`/`IReadOnlyList<T>` at boundaries; materialize with `ToList()` once
 - Throw specific exceptions; use `ArgumentNullException.ThrowIfNull(x)`
+- Before changing a public member's signature, run `findReferences` on it; for an interface member run `goToImplementation`. Overloads and implementing types are what a name grep gets wrong. Every entry in that list satisfies the new signature or is updated in this change
 
 ## DON'T
 - Don't use `async void` except for event handlers

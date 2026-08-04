@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -229,6 +230,7 @@ class TestsPassValidator:
                     f"set VISE_TEST_CMD to run this repo's suite"
                 ),
                 at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
             )
         r = subprocess.run(
             list(cmd), cwd=goal.project_dir,
@@ -247,7 +249,7 @@ class TestsPassValidator:
                 weight=self.weight,
                 evidence="pytest: no tests collected (skipped) — set VISE_TEST_CMD if this repo's tests run elsewhere",
                 at=_now(), source="mechanical", exit_code=r.returncode,
-                full_output_path=log_path,
+                full_output_path=log_path, outcome="unverified",
             )
         passed = r.returncode == 0
         combined = (r.stdout or "") + (r.stderr or "")
@@ -289,6 +291,7 @@ class LintPassValidator:
                 weight=self.weight,
                 evidence=f"lint skipped: {missing} not on PATH — set VISE_LINT_CMD to lint this repo",
                 at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
             )
         r = subprocess.run(
             list(cmd), cwd=goal.project_dir,
@@ -496,26 +499,78 @@ class CapabilityValidator:
 
 # --- lsp_clean validator ---------------------------------------------------
 
+# Extension → language name, used to route each changed file to its checker
+# and to report per-language verification status (a missing Go checker must
+# never suppress Python findings, and vice versa).
+_LSP_LANG_EXTS: dict[str, frozenset[str]] = {
+    "python": frozenset({".py"}),
+    "go": frozenset({".go"}),
+    "rust": frozenset({".rs"}),
+    "typescript": frozenset({".ts", ".tsx"}),
+}
+
+# Languages whose checker runs once per changed file: the tools passed to
+# ``lsp_diagnostics`` and the label(s) recorded in ``checkers_tried``. Kept
+# as one mapping (rather than two near-identical 16-line if/elif blocks in
+# ``run``) so adding a per-file language is a dict entry, not a copy-pasted
+# branch.
+_LSP_PER_FILE_LANGS: dict[str, tuple[tuple[str, ...], frozenset[str]]] = {
+    "python": (("ruff", "mypy"), frozenset({"ruff", "mypy"})),
+    "go": (("go_vet",), frozenset({"go"})),
+}
+# Languages whose checker runs once for the whole project (cargo/tsc cannot
+# be pointed at a single file) — findings are filtered to the changed set.
+_LSP_PROJECT_LANG_TOOL: dict[str, str] = {"rust": "cargo", "typescript": "tsc"}
+
+
+def _ext_to_lang(suffix: str) -> str | None:
+    for lang, exts in _LSP_LANG_EXTS.items():
+        if suffix in exts:
+            return lang
+    return None
+
+
 @dataclass
 class LspCleanValidator:
-    """Gate that fails when changed `.py` files carry ERROR-severity diagnostics.
+    """Gate that fails when changed source files carry blocking diagnostics.
 
-    Shells out to ruff (+ optionally mypy) via ``lsp_diagnostics`` — never
-    uses multilspy which only reports syntax errors.
+    No LSP involved despite the name (kept for compatibility with workflow
+    YAML that references the ``lsp_clean`` validator type). Shells out to
+    per-language checkers via ``lsp_diagnostics`` / ``lsp_diagnostics_project``
+    — never uses multilspy, which only reports syntax errors.
 
-    Fail-open contract:
-    - No checker installed            → pass (reason recorded in evidence).
-    - No changed files                → pass.
-    - Diagnostics engine unavailable  → pass.
-    - Any unexpected exception        → pass (never block a wave on tooling bugs).
+    Covers Python (ruff + mypy), Go (go vet), Rust (cargo check), and
+    TypeScript (tsc). Each language's verification status is independent: an
+    absent checker for one language never suppresses another language's
+    findings (see ``_LSP_LANG_EXTS`` / the per-language loop in ``run``).
+
+    Fail-open contract — every path below still passes, but the record's
+    ``outcome`` says which kind of pass it was:
+    - No checker installed for any changed language → pass, outcome="unverified".
+    - No changed files                → pass, outcome="unverified".
+    - Diagnostics engine unavailable  → pass, outcome="unverified".
+    - Any unexpected exception        → pass, outcome="unverified"
+      (never block a wave on tooling bugs).
+    - At least one checker ran, nothing blocking → pass, outcome="verified".
+    - A checker ran and found blocking findings  → fail, outcome="failed".
     """
 
     weight: float = 0.3
     name: str = "lsp_clean"
 
-    # Extensions to include in the changed-files filter.
+    # Total wall-clock budget for one lsp_clean run, across every checker it
+    # invokes. Two whole-project checkers (cargo + tsc) can land in the same
+    # gate at 120s each on top of a per-file ruff/mypy pass — unbounded, that
+    # is one MCP call running for minutes. Exceeding this stops the run
+    # early: languages not yet checked are reported unverified rather than
+    # left to whatever the OS eventually does.
+    time_budget_s: float = 180.0
+
+    # Extensions to include in the changed-files filter — derived from
+    # _LSP_LANG_EXTS so the two can never drift apart (a language added to
+    # one without the other used to make by_lang come up empty silently).
     _SOURCE_EXTS: frozenset[str] = field(
-        default_factory=lambda: frozenset({".py"}),
+        default_factory=lambda: frozenset().union(*_LSP_LANG_EXTS.values()),
         init=False, repr=False, compare=False,
     )
 
@@ -544,7 +599,10 @@ class LspCleanValidator:
 
     def run(self, goal) -> ValidatorRecord:  # goal: Goal | SimpleNamespace
         try:
-            from vise.engines.lsp_diagnostics import lsp_diagnostics
+            from vise.engines.lsp_diagnostics import (
+                lsp_diagnostics,
+                lsp_diagnostics_project,
+            )
 
             project_dir: str = str(goal.project_dir)
             changed = self._changed_files(project_dir)
@@ -554,42 +612,119 @@ class LspCleanValidator:
                     name=self.name, passed=True,
                     confidence_contribution=self.weight,
                     weight=self.weight,
-                    evidence="lsp_clean: no changed source files (skipped)",
+                    evidence="lsp_clean: nothing to check — no changed source files (skipped)",
                     at=_now(), source="mechanical", exit_code=0,
+                    outcome="unverified",
                 )
 
+            # Group changed files by language so one absent checker cannot
+            # suppress findings from a language whose checker IS available.
+            by_lang: dict[str, list[str]] = {}
+            for f in changed:
+                lang = _ext_to_lang(Path(f).suffix)
+                if lang:
+                    by_lang.setdefault(lang, []).append(f)
+
             errors: list[str] = []
-            any_tool_available = False
+            lang_status: dict[str, str] = {}
+            checkers_tried: set[str] = set()
+            start = time.monotonic()
+            budget_hit = False
 
-            for file_path in changed:
-                result = lsp_diagnostics(project_dir, file_path)
-                if result.get("available"):
-                    any_tool_available = True
-                    for diag in result.get("diagnostics", []):
-                        if diag.get("severity") == "error":
-                            rel = Path(file_path).relative_to(project_dir)
-                            errors.append(
-                                f"{rel}:{diag.get('line', '?')} "
-                                f"{diag.get('code', '')} {diag.get('message', '')}"
-                            )
+            for lang, files in by_lang.items():
+                if time.monotonic() - start > self.time_budget_s:
+                    # Budget already spent by earlier languages in this same
+                    # run — do not start another checker. Reported the same
+                    # as "unverified" (the gate still opens) but the overall
+                    # evidence names the reason so it isn't confused with
+                    # "no checker installed".
+                    lang_status[lang] = "unverified"
+                    budget_hit = True
+                    continue
 
-            if not any_tool_available:
+                if lang in _LSP_PER_FILE_LANGS:
+                    tools, tried_names = _LSP_PER_FILE_LANGS[lang]
+                    checkers_tried.update(tried_names)
+                    any_available = False
+                    for file_path in files:
+                        result = lsp_diagnostics(project_dir, file_path, tools=tools)
+                        if result.get("available"):
+                            any_available = True
+                            for diag in result.get("diagnostics", []):
+                                if diag.get("severity") == "error":
+                                    rel = Path(file_path).relative_to(project_dir)
+                                    errors.append(
+                                        f"{rel}:{diag.get('line', '?')} "
+                                        f"{diag.get('code', '')} {diag.get('message', '')}"
+                                    )
+                    lang_status[lang] = "verified" if any_available else "unverified"
+
+                elif lang in _LSP_PROJECT_LANG_TOOL:
+                    tool = _LSP_PROJECT_LANG_TOOL[lang]
+                    checkers_tried.add(tool)
+                    result = lsp_diagnostics_project(project_dir, tools=(tool,))
+                    if result.get("available"):
+                        lang_status[lang] = "verified"
+                        # Whole-project run — filter findings to the changed
+                        # set so a diagnostic in an untouched file never
+                        # fails the gate.
+                        changed_set = {str(Path(p).resolve()) for p in files}
+                        for diag in result.get("diagnostics", []):
+                            diag_file = diag.get("file", "")
+                            try:
+                                resolved = str(Path(diag_file).resolve())
+                            except Exception:
+                                resolved = diag_file
+                            if resolved not in changed_set:
+                                continue
+                            if diag.get("severity") == "error":
+                                try:
+                                    rel = Path(diag_file).relative_to(project_dir)
+                                except ValueError:
+                                    rel = Path(diag_file).name
+                                errors.append(
+                                    f"{rel}:{diag.get('line', '?')} "
+                                    f"{diag.get('code', '')} {diag.get('message', '')}"
+                                )
+                    else:
+                        lang_status[lang] = "unverified"
+
+            any_verified = any(status == "verified" for status in lang_status.values())
+            status_str = "; ".join(
+                f"{lang}: {status}" for lang, status in sorted(lang_status.items())
+            )
+            if budget_hit:
+                status_str += f" [time budget of {self.time_budget_s:.0f}s exceeded]"
+
+            if not any_verified:
+                tried = ", ".join(sorted(checkers_tried))
                 return ValidatorRecord(
                     name=self.name, passed=True,
                     confidence_contribution=self.weight,
                     weight=self.weight,
-                    evidence="lsp_clean: no diagnostics tool available (skipped)",
+                    # Deliberately does NOT claim the checker was absent. This
+                    # branch is also reached when a checker was found, ran, and
+                    # returned no verdict (cargo with no Cargo.toml, tsc with no
+                    # tsconfig) — saying "install one" there is the same species
+                    # of false evidence this outcome field exists to end. The
+                    # cause is logged by the runner that gave up.
+                    evidence=(
+                        f"lsp_clean: could not check — no checker returned a verdict "
+                        f"(tried {tried}; either absent or it failed to run — see the "
+                        f"vise log) [{status_str}]"
+                    )[:500],
                     at=_now(), source="asserted", exit_code=0,
+                    outcome="unverified",
                 )
 
             passed = not errors
             if passed:
-                evidence = f"lsp_clean: {len(changed)} file(s) clean"
+                evidence = f"lsp_clean: {len(changed)} file(s) clean [{status_str}]"
             else:
                 lines = "; ".join(errors[:5])
                 if len(errors) > 5:
                     lines += f" … (+{len(errors) - 5} more)"
-                evidence = f"lsp_clean: {len(errors)} error(s): {lines}"
+                evidence = f"lsp_clean: {len(errors)} error(s): {lines} [{status_str}]"
 
             return ValidatorRecord(
                 name=self.name, passed=passed,
@@ -597,6 +732,7 @@ class LspCleanValidator:
                 weight=self.weight,
                 evidence=evidence[:500],
                 at=_now(), source="mechanical", exit_code=0 if passed else 1,
+                outcome="verified" if passed else "failed",
             )
 
         except Exception as exc:
@@ -604,8 +740,9 @@ class LspCleanValidator:
                 name=self.name, passed=True,
                 confidence_contribution=self.weight,
                 weight=self.weight,
-                evidence=f"lsp_clean: internal error (fail-open): {exc}"[:300],
+                evidence=f"lsp_clean: could not check — internal error (fail-open): {exc}"[:300],
                 at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
             )
 
 
@@ -669,6 +806,7 @@ class QualityCheckValidator:
                 name=label, passed=True, confidence_contribution=self.weight,
                 weight=self.weight, evidence=evidence,
                 at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
             )
 
         cmd = resolved
@@ -681,6 +819,7 @@ class QualityCheckValidator:
                     f"{_not_found_reason(cmd[0])}"
                 ),
                 at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
             )
 
         try:
@@ -786,13 +925,20 @@ class OpenSpecValidator:
         label = f"{self.name}:{self.require or '?'}"
 
         def _rec(passed: bool, evidence: str, *, source: str = "mechanical",
-                 exit_code: int | None = None) -> ValidatorRecord:
-            return ValidatorRecord(
+                 exit_code: int | None = None,
+                 outcome: str | None = None) -> ValidatorRecord:
+            kwargs: dict[str, Any] = dict(
                 name=label, passed=passed,
                 confidence_contribution=self.weight if passed else 0.0,
                 weight=self.weight, evidence=evidence[:300], at=_now(),
                 source=source, exit_code=exit_code,
             )
+            # Only the fail-open skip paths pass outcome explicitly — every
+            # other call here is a real structural or CLI check and keeps the
+            # ValidatorRecord default ("verified").
+            if outcome is not None:
+                kwargs["outcome"] = outcome
+            return ValidatorRecord(**kwargs)
 
         if self.require not in _OPENSPEC_LEVELS:
             return _rec(False, (
@@ -872,7 +1018,7 @@ class OpenSpecValidator:
             return _rec(True, (
                 "openspec CLI not on PATH — structural levels still enforced; "
                 "install with `npm i -g @fission-ai/openspec` for strict validation"
-            ), source="asserted")
+            ), source="asserted", outcome="unverified")
         try:
             r = subprocess.run(
                 ["openspec", "validate", "--all", "--strict", "--json"],
@@ -901,7 +1047,7 @@ class OpenSpecValidator:
             return _rec(True, (
                 "openspec validate found nothing to validate — no specs and no "
                 "changes exist yet; gate the `deltas` level to require content"
-            ), source="asserted")
+            ), source="asserted", outcome="unverified")
         if failed:
             return _rec(False, (
                 f"openspec validate --strict: {failed}/{items} invalid — "

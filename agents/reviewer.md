@@ -4,7 +4,7 @@ description: Adversarial code review — runs tests, reads the diff, hunts regre
 model: opus
 effort: high
 color: red
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, LSP
 skills:
   - ponytail
   - architecture

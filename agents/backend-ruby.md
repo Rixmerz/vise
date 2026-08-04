@@ -4,7 +4,7 @@ description: Implements server-side Ruby — services, controllers, models, back
 model: sonnet
 effort: medium
 color: red
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - ruby-rules
   - ponytail

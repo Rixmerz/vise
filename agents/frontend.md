@@ -4,7 +4,7 @@ description: Implements frontend UI — components, pages, hooks, state manageme
 model: sonnet
 effort: medium
 color: green
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - typescript-rules
   - ponytail

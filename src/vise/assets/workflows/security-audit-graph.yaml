@@ -44,9 +44,14 @@ nodes:
     name: "Verify"
     # "criticals are gone" is the claim this node exists to check, so at minimum
     # the suite must run before the audit can be written up as fixed.
+    # lsp_clean rides along: no node in this graph blocks Edit/Write, so
+    # `verify` (the last non-terminal node, right before `doc`) is the last
+    # chance to mechanically check the patches written in `fix-criticals`.
     validators:
       - type: tests_pass
         weight: 1.0
+      - type: lsp_clean
+        weight: 0.3
     # Re-run the project's own scanners here — no universal one exists, so pick
     # yours and uncomment. command_exit fails closed on a missing binary, which
     # is why these ship commented rather than guessing your toolchain.

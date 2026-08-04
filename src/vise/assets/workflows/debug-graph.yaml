@@ -462,9 +462,15 @@ nodes:
     mcps_enabled:
       - "*"
     max_visits: 30
+    # lsp_clean gates the exit of the one node in this graph where Edit/Write
+    # are actually open ("ALL tools" below) — every downstream node
+    # (verify, report) blocks or does not touch source, so this is the last
+    # point a mechanical diagnostics check can run before the fix is judged.
     validators:
       - type: tests_pass
         weight: 1.0
+      - type: lsp_clean
+        weight: 0.3
     prompt_injection: |
       ======================================================================
       PHASE 7: IMPLEMENT FIX

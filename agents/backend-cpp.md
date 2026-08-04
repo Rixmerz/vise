@@ -4,7 +4,7 @@ description: Implements systems/server-side C and C++ — libraries, services, d
 model: sonnet
 effort: medium
 color: cyan
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - cpp-rules
   - ponytail

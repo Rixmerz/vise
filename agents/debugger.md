@@ -4,7 +4,7 @@ description: Diagnoses bugs evidence-first — minimal reproduction, layer attri
 model: sonnet
 effort: high
 color: purple
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - ponytail
 ---

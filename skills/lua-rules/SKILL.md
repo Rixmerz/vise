@@ -17,6 +17,7 @@ description: Lua conventions — locals by default, explicit nil handling, 1-bas
 - Prefer `ipairs` for arrays, `pairs` for maps; don't mutate a table while iterating it
 - Localize hot globals (`local insert = table.insert`) in performance-critical loops
 - Set string patterns carefully — Lua patterns are not regex
+- Before changing the signature of a function exposed on a module table, run `findReferences` on it, then grep the name as well — dynamic `require` and table indexing hide call sites from any server. Every caller found matches the new arity or is updated in this change
 
 ## DON'T
 - Don't create accidental globals by forgetting `local`

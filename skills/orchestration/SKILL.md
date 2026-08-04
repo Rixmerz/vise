@@ -135,6 +135,32 @@ tradeoffs are never in this table — those stay with the engineer.
 - Within a wave, everything runs concurrently. Do not serialize work that
   shares no files and no data dependency.
 
+## Resolve the caller set before you dispatch the wave
+
+If a wave will change the parameters or return type of a symbol used outside
+its own file, resolve that symbol's references **before** dispatching: the
+native `LSP` tool's `findReferences` and `incomingCalls` (plus
+`goToImplementation` for an interface method) take `filePath`, `line`,
+`character` and return the actual call sites. Enumerate the result in **every**
+brief in that wave.
+
+The builders have `LSP` too, for what a brief could not anticipate. That is not
+a reason to leave this to them: resolving the caller set once beats each builder
+re-deriving it from its own fresh window and disagreeing about the answer — and
+the caller set is the input to the file-ownership partition in the hard rules
+below. You cannot say who owns which file until you know which files the
+signature reaches, so this runs before the wave is even shaped.
+
+`LSP` is navigation only. It has no diagnostics operation — it answers "what
+touches this", never "is this broken". Error checking is the validator's job.
+
+**No language server configured for that language?** Fall back to text search,
+and say in the brief that the caller list is unverified and may be incomplete.
+A missing server never blocks the dispatch — it downgrades the evidence.
+
+A wave that only adds new code, touching no existing signature, needs none of
+this. Skip it and dispatch.
+
 ## Hard rules
 
 - **Never two agents writing the same file in one wave.** Partition scope

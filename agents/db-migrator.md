@@ -4,7 +4,7 @@ description: Writes versioned database migrations with mandatory rollbacks. Use 
 model: sonnet
 effort: medium
 color: pink
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - ponytail
 ---

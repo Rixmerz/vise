@@ -4,7 +4,7 @@ description: Implements server-side C# — services, controllers, data models, b
 model: sonnet
 effort: medium
 color: green
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - csharp-rules
   - ponytail

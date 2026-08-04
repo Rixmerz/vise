@@ -268,3 +268,291 @@ def test_real_ruff_f401_warning_and_f821_error(tmp_py) -> None:
     # F401 must be warning (not error)
     assert "F401" in by_code, f"expected F401 in diagnostics; got codes: {list(by_code)}"
     assert by_code["F401"] == "warning", f"F401 must be warning, got {by_code['F401']!r}"
+
+
+# ---------------------------------------------------------------------------
+# go vet — per-file checker.  Subprocess boundary always mocked: go is not
+# installed in this environment, and a skipped test is a test that never
+# runs.
+# ---------------------------------------------------------------------------
+
+
+def _fake_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
+    from types import SimpleNamespace
+    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+
+
+def test_go_vet_available_and_clean(tmp_py) -> None:
+    fp = tmp_py("clean.go", "package main\n")
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stderr="")):
+            result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is True
+    assert result["tools_run"] == ["go_vet"]
+    assert result["diagnostics"] == []
+
+
+def test_go_vet_available_and_broken(tmp_py) -> None:
+    fp = tmp_py("bad.go", "package main\n")
+    vet_stderr = f"{fp}:3:2: Printf call has arguments but no formatting directives\n"
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stderr=vet_stderr, returncode=1)):
+            result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is True
+    errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+    assert errors, f"expected go vet finding to be classified as error; got {result['diagnostics']}"
+    assert errors[0]["source"] == "go vet"
+    assert errors[0]["line"] == 3
+
+
+def test_go_vet_absent_is_skipped(tmp_py) -> None:
+    fp = tmp_py("any.go", "package main\n")
+    with patch.object(diag, "_find_checker", return_value=None):
+        result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is False
+    assert result["tools_run"] == []
+
+
+# ---------------------------------------------------------------------------
+# cargo check --message-format=json — whole-project checker.
+# ---------------------------------------------------------------------------
+
+
+def _cargo_line(level: str, message: str, file_name: str, line: int = 1, col: int = 1, code: str | None = None) -> str:
+    import json as _json
+    obj = {
+        "reason": "compiler-message",
+        "message": {
+            "level": level,
+            "message": message,
+            "code": {"code": code} if code else None,
+            "spans": [
+                {"is_primary": True, "file_name": file_name, "line_start": line, "column_start": col},
+            ],
+        },
+    }
+    return _json.dumps(obj)
+
+
+def test_cargo_check_available_and_clean(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/cargo"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stdout="")):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["available"] is True
+    assert result["diagnostics"] == []
+
+
+def test_cargo_check_available_and_broken(tmp_path: Path) -> None:
+    stdout = _cargo_line("error", "mismatched types", "src/main.rs", line=10, col=5, code="E0308") + "\n"
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/cargo"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stdout=stdout)):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["available"] is True
+    errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+    assert errors, f"expected cargo error to be classified as error; got {result['diagnostics']}"
+    assert errors[0]["file"] == str(Path(tmp_path) / "src/main.rs")
+
+
+def test_cargo_check_warning_level_is_warning(tmp_path: Path) -> None:
+    stdout = _cargo_line("warning", "unused variable", "src/lib.rs") + "\n"
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/cargo"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stdout=stdout)):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["diagnostics"][0]["severity"] == "warning"
+
+
+def test_cargo_check_absent_is_skipped(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value=None):
+        result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["available"] is False
+
+
+# ---------------------------------------------------------------------------
+# tsc --noEmit — whole-project checker.
+# ---------------------------------------------------------------------------
+
+
+def test_tsc_available_and_clean(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/tsc"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stdout="")):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
+
+    assert result["available"] is True
+    assert result["diagnostics"] == []
+
+
+def test_tsc_available_and_broken(tmp_path: Path) -> None:
+    stdout = "src/index.ts(12,7): error TS2345: Argument of type 'string' is not assignable.\n"
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/tsc"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stdout=stdout)):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
+
+    assert result["available"] is True
+    errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+    assert errors, f"expected tsc error to be classified as error; got {result['diagnostics']}"
+    assert errors[0]["code"] == "TS2345"
+    assert errors[0]["file"] == str(Path(tmp_path) / "src/index.ts")
+
+
+def test_tsc_absent_is_skipped(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value=None):
+        result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
+
+    assert result["available"] is False
+
+
+def test_lsp_diagnostics_project_all_absent(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value=None):
+        result = diag.lsp_diagnostics_project(str(tmp_path))
+
+    assert result["available"] is False
+    assert "reason" in result
+
+
+# ---------------------------------------------------------------------------
+# Regression: a non-zero exit with NOTHING parsed must be treated as a
+# checker failure (-> None -> unverified upstream), never as a clean pass.
+# Real triggers: cargo run from outside the crate root ("could not find
+# Cargo.toml"), tsconfig.json not at project_dir, a Go file outside a module
+# — all exit non-zero with empty/unmatched output.
+# ---------------------------------------------------------------------------
+
+
+def test_go_vet_nonzero_exit_nothing_parsed_is_unavailable(tmp_py) -> None:
+    """go vet failing to resolve a module (not a real vet finding) must not
+    read as a clean pass just because nothing matched the line parser."""
+    fp = tmp_py("orphan.go", "package main\n")
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(
+            diag.subprocess, "run",
+            return_value=_fake_completed(stderr="go: cannot find main module\n", returncode=1),
+        ):
+            result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is False, (
+        "a non-zero exit with nothing parsed must be unavailable (unverified), "
+        f"got: {result}"
+    )
+
+
+def test_cargo_check_nonzero_exit_nothing_parsed_is_unavailable(tmp_path: Path) -> None:
+    """cargo run outside a crate root (no Cargo.toml) exits non-zero with
+    empty stdout — must not read as 'rust: verified'."""
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/cargo"):
+        with patch.object(
+            diag.subprocess, "run",
+            return_value=_fake_completed(stdout="", stderr="error: could not find `Cargo.toml`", returncode=101),
+        ):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["available"] is False, (
+        f"a non-zero cargo exit with nothing parsed must be unavailable, got: {result}"
+    )
+
+
+def test_tsc_nonzero_exit_nothing_parsed_is_unavailable(tmp_path: Path) -> None:
+    """tsc failing to even start (tsconfig.json not at project_dir) exits
+    non-zero with a line the regex cannot match — must not read as a clean
+    pass."""
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/tsc"):
+        with patch.object(
+            diag.subprocess, "run",
+            return_value=_fake_completed(
+                stdout="error TS5058: The specified path does not exist.\n", returncode=1,
+            ),
+        ):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
+
+    assert result["available"] is False, (
+        f"a non-zero tsc exit with nothing parsed must be unavailable, got: {result}"
+    )
+
+
+# A non-zero exit WITH parsed diagnostics is the normal findings case — the
+# guard above must not swallow it. test_go_vet_available_and_broken,
+# test_cargo_check_available_and_broken, and test_tsc_available_and_broken
+# already cover this (all use returncode=1/non-zero with real findings).
+
+
+# ---------------------------------------------------------------------------
+# go vet: project_dir must be threaded through as cwd (module resolution
+# depends on it), and both go vet output shapes must parse.
+# ---------------------------------------------------------------------------
+
+
+def test_go_vet_runs_with_project_dir_as_cwd(tmp_py) -> None:
+    fp = tmp_py("clean.go", "package main\n")
+    project_dir = str(Path(fp).parent)
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed()) as mock_run:
+            diag.lsp_diagnostics(project_dir=project_dir, file_path=fp, tools=("go_vet",))
+
+    assert mock_run.call_args.kwargs.get("cwd") == project_dir, (
+        "go vet must run with cwd=project_dir so module resolution matches "
+        "the caller's project, not the MCP server's own cwd"
+    )
+
+
+def test_go_vet_load_failure_format_is_parsed(tmp_py) -> None:
+    """go's module-load failure format ('vet: ./main.go:6:2: undefined: X')
+    must still parse — dropping it silently hides a genuine compile error."""
+    fp = tmp_py("bad.go", "package main\n")
+    vet_stderr = "vet: ./main.go:6:2: undefined: someUndefinedName\n"
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(diag.subprocess, "run", return_value=_fake_completed(stderr=vet_stderr, returncode=2)):
+            result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is True, f"expected the load-failure line to parse; got: {result}"
+    errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+    assert errors, f"expected the undefined-name finding to survive parsing; got {result['diagnostics']}"
+    assert errors[0]["line"] == 6
+    assert errors[0]["col"] == 2
+    assert "undefined: someUndefinedName" in errors[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# TimeoutExpired — fail-soft contract's "never hangs" half, asserted for the
+# three new checkers (previously untested).
+# ---------------------------------------------------------------------------
+
+
+def test_go_vet_timeout_is_unavailable(tmp_py) -> None:
+    fp = tmp_py("slow.go", "package main\n")
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/go"):
+        with patch.object(
+            diag.subprocess, "run",
+            side_effect=diag.subprocess.TimeoutExpired(cmd=["go", "vet"], timeout=30.0),
+        ):
+            result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp, tools=("go_vet",))
+
+    assert result["available"] is False
+    assert result["tools_run"] == []
+
+
+def test_cargo_check_timeout_is_unavailable(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/cargo"):
+        with patch.object(
+            diag.subprocess, "run",
+            side_effect=diag.subprocess.TimeoutExpired(cmd=["cargo", "check"], timeout=120.0),
+        ):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("cargo",))
+
+    assert result["available"] is False
+
+
+def test_tsc_timeout_is_unavailable(tmp_path: Path) -> None:
+    with patch.object(diag, "_find_checker", return_value="/usr/bin/tsc"):
+        with patch.object(
+            diag.subprocess, "run",
+            side_effect=diag.subprocess.TimeoutExpired(cmd=["tsc"], timeout=120.0),
+        ):
+            result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
+
+    assert result["available"] is False

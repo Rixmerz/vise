@@ -302,6 +302,7 @@ def test_validated_skips_as_asserted_when_cli_absent(tmp_path, monkeypatch):
     assert rec.passed is True
     assert rec.source == "asserted", "a skip must not count as mechanical evidence"
     assert "npm i -g" in rec.evidence
+    assert rec.outcome == "unverified", "could not check — openspec CLI not on PATH"
 
 
 def test_validated_treats_an_empty_set_as_asserted(tmp_path, monkeypatch):
@@ -319,6 +320,7 @@ def test_validated_treats_an_empty_set_as_asserted(tmp_path, monkeypatch):
     assert rec.passed is True
     assert rec.source == "asserted"
     assert "nothing to validate" in rec.evidence
+    assert rec.outcome == "unverified", "nothing to check — no specs and no changes exist"
 
 
 def test_validated_fails_and_quotes_the_cli_error(tmp_path, monkeypatch):
@@ -352,6 +354,7 @@ def test_validated_passes_on_a_clean_run(tmp_path, monkeypatch):
     assert rec.passed is True
     assert rec.source == "mechanical"
     assert "3/3 valid" in rec.evidence
+    assert rec.outcome == "verified", "a real validate run with no failures is verified"
 
 
 def test_validated_falls_back_to_exit_code_on_unparseable_output(tmp_path, monkeypatch):

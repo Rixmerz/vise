@@ -25,6 +25,10 @@ BUILTIN_TOOLS = {
     "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
     "Glob", "Grep", "Bash", "BashOutput", "KillShell",
     "Task", "WebFetch", "WebSearch", "TodoWrite", "Skill",
+    # LSP is the host's code-intelligence tool — the consumer of the language
+    # servers vise declares in plugin.json. It belongs here because this set
+    # exists to catch names that will not resolve at launch, and this one does.
+    "LSP",
 }
 VALID_MODELS = {"sonnet", "opus", "haiku", "fable", "inherit"}
 VALID_EFFORT = {"low", "medium", "high", "xhigh", "max"}

@@ -20,6 +20,7 @@ description: Java coding conventions — immutability, Optional discipline, reso
 - Use `equals`/`hashCode` together, or a `record`; keep them consistent
 - Streams for transformation pipelines; plain loops when clearer or hot-path
 - Catch the most specific exception; wrap with context via a cause
+- Before changing a `public`/`protected` signature, run `findReferences` on it; for an interface or abstract method run `goToImplementation`. Overloads and implementing classes are what a method-name grep gets wrong. Every entry in that list compiles against the new signature or is updated in this change
 
 ## DON'T
 - Don't return `null` collections — return `List.of()` / `Collections.emptyList()`

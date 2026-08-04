@@ -1,11 +1,21 @@
-"""lsp_diagnostics — stateless shell-out diagnostics (ruff + mypy).
+"""lsp_diagnostics — stateless shell-out diagnostics (ruff/mypy, go vet,
+cargo check, tsc).
 
-No multilspy dependency: shells out to ruff / mypy when present on PATH (or in the venv), degrades
-gracefully when absent.
+No LSP is involved despite the name (kept for compatibility with workflow
+YAML that references the ``lsp_clean`` validator type — see
+``vise.engines.validators.LspCleanValidator``). No multilspy dependency
+either: shells out to per-language checkers when present on PATH (or in the
+venv), degrades gracefully when absent.
 
 Public API
 ----------
 lsp_diagnostics(project_dir, file_path) -> dict
+    Per-file checkers: ruff, mypy (Python), go vet (Go). Safe to call once
+    per changed file.
+lsp_diagnostics_project(project_dir) -> dict
+    Whole-project checkers: cargo check (Rust), tsc (TypeScript). These
+    cannot be pointed at a single file — call once per project and filter
+    the returned diagnostics (each carries a "file" key) to the changed set.
 
 Fail-soft contract
 ------------------
@@ -19,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -31,6 +42,9 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SUBPROCESS_TIMEOUT: float = 30.0
+# Whole-project checkers (cargo, tsc) compile/typecheck the entire project,
+# not one file — their timeout budget is the project's, not the file's.
+_PROJECT_SUBPROCESS_TIMEOUT: float = 120.0
 
 # Allowlist of ruff codes that count as blocking errors in the lsp_clean
 # validator.  Only genuinely-broken code belongs here — syntax errors and
@@ -211,6 +225,227 @@ def _run_mypy(file_path: str) -> list[dict[str, Any]] | None:
         return None
 
 
+def _run_go_vet(project_dir: str, file_path: str) -> list[dict[str, Any]] | None:
+    """Run `go vet` on *file_path* and return normalised diagnostic dicts, or None on failure.
+
+    Unlike ruff, `go vet` has no style/lint mode to conflate with correctness
+    — every finding it reports (bad Printf verbs, unreachable code, lock
+    copies, …) is a genuine bug class, not a preference. So no allowlist is
+    needed here: every finding is classified "error" directly.
+    """
+    go = _find_checker("go")
+    if not go:
+        return None
+
+    try:
+        result = subprocess.run(
+            [go, "vet", file_path],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+            shell=False,
+        )
+        # go vet writes findings to stderr, one per line, plus "# <package>"
+        # header lines to skip. Two output shapes: a real vet finding
+        # ("path/to/file.go:LINE:COL: message") and a module-load failure
+        # ("vet: ./main.go:6:2: undefined: X", no package header) — the
+        # latter still has a usable file:line:col, just prefixed by "vet: ".
+        diags: list[dict[str, Any]] = []
+        for line in result.stderr.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("vet: "):
+                line = line[len("vet: "):]
+            parts = line.split(":", 3)
+            if len(parts) < 4:
+                continue
+            try:
+                line_num = int(parts[1].strip())
+                col_num = int(parts[2].strip())
+            except ValueError:
+                continue
+            diags.append(
+                {
+                    "severity": "error",
+                    "line": line_num,
+                    "col": col_num,
+                    "message": parts[3].strip(),
+                    "source": "go vet",
+                    "code": "",
+                }
+            )
+        # A non-zero exit with nothing parsed means the tool failed for a
+        # reason unrelated to findings (module resolution, file outside a
+        # module, internal error) — reporting "[]" here would read as a
+        # clean pass. Only a genuine zero-diagnostics-and-zero-exit run is a
+        # verified clean result; see the ruff precedent above.
+        if result.returncode != 0 and not diags:
+            log.warning(
+                "[lsp_diagnostics] go vet exited %d with nothing parsed on %s: %s",
+                result.returncode, file_path, result.stderr[:300],
+            )
+            return None
+        return diags
+
+    except subprocess.TimeoutExpired:
+        log.warning("[lsp_diagnostics] go vet timed out on %s", file_path)
+        return None
+    except Exception as exc:
+        log.warning("[lsp_diagnostics] go vet failed: %s", exc)
+        return None
+
+
+def _run_cargo_check(project_dir: str) -> list[dict[str, Any]] | None:
+    """Run `cargo check --message-format=json` once for the whole project.
+
+    Rust compiles per-crate — cargo cannot check a single file. Each returned
+    diagnostic carries an absolute "file" key so the caller can filter to the
+    changed-file set.
+
+    Blocking rule: trust rustc's own `level` field directly (error → blocking,
+    warning → cosmetic). Unlike ruff, rustc does not mark style lints as
+    "error" — its error level already means "does not compile" — so no
+    separate allowlist is needed.
+    """
+    cargo = _find_checker("cargo")
+    if not cargo:
+        return None
+
+    try:
+        result = subprocess.run(
+            [cargo, "check", "--message-format=json"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=_PROJECT_SUBPROCESS_TIMEOUT,
+            shell=False,
+        )
+        diags: list[dict[str, Any]] = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("reason") != "compiler-message":
+                continue
+            message = obj.get("message") or {}
+            level = message.get("level", "")
+            if level == "error":
+                severity = "error"
+            elif level == "warning":
+                severity = "warning"
+            else:
+                continue  # note, help, ice-summary, etc. — not a diagnostic
+            spans = message.get("spans") or []
+            primary = next((s for s in spans if s.get("is_primary")), spans[0] if spans else {})
+            file_name = primary.get("file_name", "")
+            if not file_name:
+                continue
+            code = message.get("code") or {}
+            diags.append(
+                {
+                    "severity": severity,
+                    "line": primary.get("line_start", 0),
+                    "col": primary.get("column_start", 0),
+                    "message": message.get("message", ""),
+                    "source": "cargo",
+                    "code": code.get("code", "") if isinstance(code, dict) else "",
+                    "file": str(Path(project_dir) / file_name),
+                }
+            )
+        # cargo exits non-zero both for "found errors" (diags is non-empty —
+        # the normal, working case) and for "could not even start" (e.g. no
+        # Cargo.toml in project_dir — empty stdout, diags stays empty). Only
+        # the latter is a checker failure; conflating it with a clean pass
+        # would report "rust: verified" on a project cargo never actually
+        # checked.
+        if result.returncode != 0 and not diags:
+            log.warning(
+                "[lsp_diagnostics] cargo check exited %d with nothing parsed in %s: %s",
+                result.returncode, project_dir, result.stderr[:300],
+            )
+            return None
+        return diags
+
+    except subprocess.TimeoutExpired:
+        log.warning("[lsp_diagnostics] cargo check timed out in %s", project_dir)
+        return None
+    except Exception as exc:
+        log.warning("[lsp_diagnostics] cargo check failed: %s", exc)
+        return None
+
+
+# tsc --pretty false output: "path/to/file.ts(10,5): error TS2345: message"
+_TSC_LINE_RE = re.compile(r"^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+(TS\d+):\s+(.*)$")
+
+
+def _run_tsc(project_dir: str) -> list[dict[str, Any]] | None:
+    """Run `tsc --noEmit` once for the whole project.
+
+    TypeScript type-checks against the whole program (imports, tsconfig) —
+    tsc cannot be pointed at a single file. Each returned diagnostic carries
+    an absolute "file" key so the caller can filter to the changed-file set.
+
+    Blocking rule: every diagnostic tsc emits under --noEmit is a genuine
+    type error, not a style choice — there is no cosmetic-lint mode to guard
+    against here, so tsc's own error/warning label is trusted directly.
+    """
+    tsc = _find_checker("tsc")
+    if not tsc:
+        return None
+
+    try:
+        result = subprocess.run(
+            [tsc, "--noEmit", "--pretty", "false"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=_PROJECT_SUBPROCESS_TIMEOUT,
+            shell=False,
+        )
+        diags: list[dict[str, Any]] = []
+        for line in result.stdout.splitlines():
+            m = _TSC_LINE_RE.match(line.strip())
+            if not m:
+                continue
+            file_name, line_s, col_s, severity, code, msg = m.groups()
+            diags.append(
+                {
+                    "severity": severity,
+                    "line": int(line_s),
+                    "col": int(col_s),
+                    "message": msg.strip(),
+                    "source": "tsc",
+                    "code": code,
+                    "file": str(Path(project_dir) / file_name),
+                }
+            )
+        # Same non-zero-with-nothing-parsed guard as cargo/ruff: tsc exits
+        # non-zero both for "found type errors" (diags non-empty) and for
+        # "could not even run" (e.g. tsconfig.json not at project_dir —
+        # TS5058/TS18003 on stderr or an unmatched stdout line, diags empty).
+        # The latter must read as unverified, not as a clean pass.
+        if result.returncode != 0 and not diags:
+            log.warning(
+                "[lsp_diagnostics] tsc exited %d with nothing parsed in %s: %s",
+                result.returncode, project_dir, (result.stdout or result.stderr)[:300],
+            )
+            return None
+        return diags
+
+    except subprocess.TimeoutExpired:
+        log.warning("[lsp_diagnostics] tsc timed out in %s", project_dir)
+        return None
+    except Exception as exc:
+        log.warning("[lsp_diagnostics] tsc failed: %s", exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -221,12 +456,16 @@ def lsp_diagnostics(
     file_path: str,
     tools: tuple[str, ...] = ("ruff", "mypy"),
 ) -> dict[str, Any]:
-    """Run available checkers on *file_path* and return normalised diagnostics.
+    """Run available per-file checkers on *file_path* and return normalised diagnostics.
 
-    Checkers tried (in order): ruff, mypy — filtered by *tools* (default both;
-    pass ``tools=("ruff",)`` for a fast lint-only pass).  Each is optional — if
-    absent it is silently skipped.  If ALL are absent the result is
-    ``{"available": False}``.
+    Checkers tried: ruff, mypy (Python), go_vet (Go) — filtered by *tools*
+    (default ``("ruff", "mypy")``; pass ``tools=("ruff",)`` for a fast
+    lint-only pass, or ``tools=("go_vet",)`` for a Go file). Each is optional
+    — if absent it is silently skipped. If ALL requested tools are absent the
+    result is ``{"available": False}``.
+
+    cargo (Rust) and tsc (TypeScript) are NOT available here — they cannot be
+    pointed at a single file. Use ``lsp_diagnostics_project`` for those.
 
     Returns::
 
@@ -234,7 +473,7 @@ def lsp_diagnostics(
             "available": True,
             "diagnostics": [
                 {"severity": "error"|"warning", "line": int, "col": int,
-                 "message": str, "source": "ruff"|"mypy", "code": str}
+                 "message": str, "source": "ruff"|"mypy"|"go vet", "code": str}
             ],
             "tools_run": ["ruff", "mypy"],
             # "reason" only present when available=False
@@ -256,6 +495,12 @@ def lsp_diagnostics(
                 all_diags.extend(mypy_result)
                 tools_run.append("mypy")
 
+        if "go_vet" in tools:
+            go_result = _run_go_vet(project_dir, file_path)
+            if go_result is not None:
+                all_diags.extend(go_result)
+                tools_run.append("go_vet")
+
         if not tools_run:
             return {
                 "available": False,
@@ -263,7 +508,7 @@ def lsp_diagnostics(
                 "tools_run": [],
                 "reason": (
                     "no diagnostics tool found (install ruff: pip install ruff, "
-                    "or mypy: pip install mypy)"
+                    "or mypy: pip install mypy, or go: https://go.dev/dl/)"
                 ),
             }
 
@@ -275,6 +520,66 @@ def lsp_diagnostics(
 
     except Exception as exc:
         log.warning("[lsp_diagnostics] unexpected error: %s", exc)
+        return {
+            "available": False,
+            "diagnostics": [],
+            "tools_run": [],
+            "reason": f"internal error: {exc}",
+        }
+
+
+def lsp_diagnostics_project(
+    project_dir: str,
+    tools: tuple[str, ...] = ("cargo", "tsc"),
+) -> dict[str, Any]:
+    """Run available *whole-project* checkers once and return unfiltered diagnostics.
+
+    cargo and tsc cannot be pointed at a single file — they compile/typecheck
+    the whole crate/program. Each returned diagnostic carries an absolute
+    "file" key so the caller can filter to the changed-file set before
+    classification; a diagnostic in an unchanged file must not fail the gate.
+
+    Same fail-soft contract as ``lsp_diagnostics``: absent checker → skipped,
+    checker error / unparsable output → logged and skipped, never raises.
+
+    Returns the same shape as ``lsp_diagnostics`` (diagnostics additionally
+    carry a "file" key).
+    """
+    try:
+        all_diags: list[dict[str, Any]] = []
+        tools_run: list[str] = []
+
+        if "cargo" in tools:
+            cargo_result = _run_cargo_check(project_dir)
+            if cargo_result is not None:
+                all_diags.extend(cargo_result)
+                tools_run.append("cargo")
+
+        if "tsc" in tools:
+            tsc_result = _run_tsc(project_dir)
+            if tsc_result is not None:
+                all_diags.extend(tsc_result)
+                tools_run.append("tsc")
+
+        if not tools_run:
+            return {
+                "available": False,
+                "diagnostics": [],
+                "tools_run": [],
+                "reason": (
+                    "no whole-project diagnostics tool found (install cargo: "
+                    "https://rustup.rs, or tsc: npm install -g typescript)"
+                ),
+            }
+
+        return {
+            "available": True,
+            "diagnostics": all_diags,
+            "tools_run": tools_run,
+        }
+
+    except Exception as exc:
+        log.warning("[lsp_diagnostics] project-level unexpected error: %s", exc)
         return {
             "available": False,
             "diagnostics": [],

@@ -26,6 +26,8 @@ description: Python coding conventions — modern typing, async discipline, safe
 - Add context to errors: `raise ValueError(f"Invalid user {user_id}") from e`
 - Use `Enum` for finite option sets instead of magic strings
 - Configure `ruff check` + `ruff format` + `mypy --strict` in CI
+- Before changing a public signature, run `findReferences` on it. Every caller in that list satisfies the new signature or is updated in this change
+- Dynamic dispatch (`getattr`, registries, plugin entry points) hides call sites no server can resolve — grep the name as well before a signature change lands
 
 ## DON'T
 - Don't use `import *` in production code

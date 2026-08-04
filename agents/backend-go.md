@@ -4,7 +4,7 @@ description: Implements server-side Go — services, HTTP handlers, data models,
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP
 skills:
   - go-rules
   - ponytail
