@@ -27,7 +27,7 @@ git clone https://github.com/Rixmerz/vise && cd vise
 ./install.sh
 ```
 
-`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the repo as a local plugin marketplace, and installs the plugin (`claude plugin marketplace add <repo>` + `claude plugin install vise@vise`). Idempotent — safe to re-run. Restart Claude Code afterwards.
+`install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the repo as a local plugin marketplace, and installs the plugin (`claude plugin marketplace add <repo>` + `claude plugin install vise@rixmerz`). Idempotent — safe to re-run. Restart Claude Code afterwards.
 
 The MCP server and all hooks run through `bin/vise-run`, a launcher that prefers the vise venv's python and falls back to `python3`. No installed wheel required for plugin usage.
 

@@ -64,8 +64,8 @@ if [ "$DEV" = "1" ]; then
 fi
 
 # 3. Register marketplace + install plugin (idempotent).
-if claude plugin marketplace list 2>/dev/null | grep -q '^vise\b\|"name": *"vise"\|vise '; then
-  claude plugin marketplace update vise || true
+if claude plugin marketplace list 2>/dev/null | grep -q '^rixmerz\b\|"name": *"rixmerz"\|rixmerz '; then
+  claude plugin marketplace update rixmerz || true
 else
   claude plugin marketplace add "$REPO_DIR"
 fi
@@ -73,7 +73,7 @@ fi
 if claude plugin list 2>/dev/null | grep -q 'vise'; then
   echo "ok: vise plugin already installed."
 else
-  claude plugin install vise@vise
+  claude plugin install vise@rixmerz
 fi
 
 # 4. LSP binaries: vise declares language servers for 12 ecosystems in
