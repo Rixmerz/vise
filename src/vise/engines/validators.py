@@ -704,6 +704,213 @@ class QualityCheckValidator:
         )
 
 
+#: Requirement levels ``OpenSpecValidator`` understands, weakest first. Order
+#: matters only for documentation; each level is checked independently.
+_OPENSPEC_LEVELS: tuple[str, ...] = (
+    "structure", "change", "deltas", "tasks_complete", "validated",
+)
+
+
+def _parse_openspec_report(stdout: str) -> tuple[int, int, list[str]] | None:
+    """``(items, failed, error_messages)`` from ``openspec validate --json``.
+
+    Returns None when the payload cannot be read, so the caller can fall back
+    to the exit code rather than inventing a verdict. The CLI may print a
+    spinner line before the JSON, hence the slice from the first brace.
+    """
+    start = stdout.find("{")
+    if start < 0:
+        return None
+    try:
+        data = json.loads(stdout[start:])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    totals = (data.get("summary") or {}).get("totals") or {}
+    try:
+        items = int(totals.get("items", 0))
+        failed = int(totals.get("failed", 0))
+    except (TypeError, ValueError):
+        return None
+    messages: list[str] = []
+    for item in data.get("items") or []:
+        if not isinstance(item, dict) or item.get("valid"):
+            continue
+        for issue in item.get("issues") or []:
+            if isinstance(issue, dict) and issue.get("level") == "ERROR":
+                messages.append(f"{item.get('id', '?')}: {issue.get('message', '')}")
+    return items, failed, messages
+
+
+@dataclass
+class OpenSpecValidator:
+    """Gate on OpenSpec spec-driven planning state — see
+    ``vise.engines.openspec_profile``.
+
+    Unlike ``quality_check``, levels 1-4 of this validator FAIL CLOSED when
+    unsatisfied. That is the point: OpenSpec is mandatory, and the four
+    structural levels are answered by reading ``openspec/`` with stdlib string
+    work, so a red gate always means "the plan is missing", never "your machine
+    is missing a tool". The fix is a repo-local command (``openspec init``,
+    write the proposal), not an install every teammate has to repeat.
+
+    Level 5 (``validated``) is the exception and the only tier that shells out.
+    ``openspec`` is a Node CLI; when it is absent this SKIPS with
+    ``source="asserted"`` and evidence naming the install, matching how
+    ``quality_check`` reports an unbound check. Structure stays enforced by
+    levels 1-4 either way, so skipping here narrows depth, not coverage.
+
+    ``require`` levels:
+
+    - ``structure``      — an ``openspec/`` root exists
+    - ``change``         — at least one active change with a ``proposal.md``
+    - ``deltas``         — that change carries well-formed spec deltas
+                           (delta headers present, every requirement has a
+                           scenario)
+    - ``tasks_complete`` — every checklist box in ``tasks.md`` is ticked
+    - ``validated``      — ``openspec validate --all --strict`` exits 0
+
+    ``change`` optionally pins one change by directory name; the default
+    accepts any active change, which is the common single-change-in-flight
+    case. An unrecognized ``require`` fails closed, like ``UnknownValidator``.
+    """
+
+    require: str = "change"
+    change: str = ""
+    weight: float = 1.0
+    name: str = "openspec"
+    timeout: int = 120
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        label = f"{self.name}:{self.require or '?'}"
+
+        def _rec(passed: bool, evidence: str, *, source: str = "mechanical",
+                 exit_code: int | None = None) -> ValidatorRecord:
+            return ValidatorRecord(
+                name=label, passed=passed,
+                confidence_contribution=self.weight if passed else 0.0,
+                weight=self.weight, evidence=evidence[:300], at=_now(),
+                source=source, exit_code=exit_code,
+            )
+
+        if self.require not in _OPENSPEC_LEVELS:
+            return _rec(False, (
+                f"openspec misconfigured: unknown require={self.require!r} — "
+                f"valid levels: {list(_OPENSPEC_LEVELS)}"
+            ))
+
+        from vise.engines.openspec_profile import active_changes, openspec_root
+
+        if openspec_root(goal.project_dir) is None:
+            return _rec(False, (
+                "no openspec/ root — this repo has not adopted OpenSpec. "
+                "Run `openspec init` and propose the change before implementing."
+            ))
+        if self.require == "structure":
+            return _rec(True, "openspec/ root present")
+
+        if self.require == "validated":
+            return self._run_cli(goal, label, _rec)
+
+        changes = active_changes(goal.project_dir)
+        if self.change:
+            changes = [c for c in changes if c.name == self.change]
+            if not changes:
+                return _rec(False, (
+                    f"change {self.change!r} not found under openspec/changes/ "
+                    "— create it with `openspec new change`"
+                ))
+        if not changes:
+            return _rec(False, (
+                "no active change under openspec/changes/ — the work in flight "
+                "is unspecified. Run `openspec new change <name>` (or /opsx:propose) first."
+            ))
+
+        if self.require == "change":
+            ok = [c for c in changes if c.has_proposal]
+            if ok:
+                return _rec(True, f"active change(s) with a proposal: {', '.join(c.name for c in ok)}")
+            return _rec(False, (
+                "change(s) " + ", ".join(c.name for c in changes) +
+                " have no proposal.md — write the proposal before implementing"
+            ))
+
+        if self.require == "deltas":
+            ok = [c for c in changes if c.deltas.well_formed]
+            if ok:
+                return _rec(True, (
+                    "well-formed spec deltas in: " +
+                    ", ".join(f"{c.name} ({c.deltas.requirements} req)" for c in ok)
+                ))
+            return _rec(False, "; ".join(self._delta_gap(c) for c in changes))
+
+        # tasks_complete
+        ok = [c for c in changes if c.tasks_complete]
+        if ok:
+            return _rec(True, "tasks complete in: " + ", ".join(
+                f"{c.name} ({c.tasks_summary})" for c in ok))
+        return _rec(False, "no change has all tasks ticked — " + "; ".join(
+            f"{c.name}: {c.tasks_summary}" if c.has_tasks else f"{c.name}: no tasks.md"
+            for c in changes))
+
+    @staticmethod
+    def _delta_gap(c: Any) -> str:
+        """Why this change's deltas are not well-formed, named precisely."""
+        d = c.deltas
+        if not d.files:
+            return f"{c.name}: no specs/**/*.md delta files"
+        if d.headers == 0:
+            return f"{c.name}: no `## ADDED|MODIFIED|REMOVED|RENAMED Requirements` header"
+        if d.requirements == 0:
+            return f"{c.name}: no `### Requirement:` blocks"
+        return (f"{c.name}: requirement(s) with no `#### Scenario:` — "
+                + ", ".join(d.orphan_requirements[:5]))
+
+    def _run_cli(self, goal: Goal, label: str, _rec: Callable[..., ValidatorRecord]) -> ValidatorRecord:
+        if not _runnable("openspec", goal.project_dir):
+            return _rec(True, (
+                "openspec CLI not on PATH — structural levels still enforced; "
+                "install with `npm i -g @fission-ai/openspec` for strict validation"
+            ), source="asserted")
+        try:
+            r = subprocess.run(
+                ["openspec", "validate", "--all", "--strict", "--json"],
+                cwd=goal.project_dir, capture_output=True, text=True,
+                check=False, timeout=self.timeout,
+                # The CLI phones home unless told otherwise; a gate must not
+                # make a network call to decide whether a repo is compliant.
+                env={**os.environ, "OPENSPEC_TELEMETRY": "0", "NO_COLOR": "1"},
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return _rec(False, str(e))
+
+        report = _parse_openspec_report(r.stdout)
+        if report is None:
+            # Unparseable output — trust the exit code, quote what we got.
+            ev = (r.stdout[-300:] or r.stderr[-300:] or "openspec validate --all --strict --json")
+            return _rec(r.returncode == 0, ev, exit_code=r.returncode)
+
+        items, failed, messages = report
+        if items == 0:
+            # Exit 0 over an empty set is a vacuum, not a verification. Marking
+            # it "asserted" keeps goal_complete from grading it as verified —
+            # the same rule quality_check applies to an unbound check. The
+            # `deltas` level is what makes content mandatory; this level only
+            # says the content that exists is well-formed.
+            return _rec(True, (
+                "openspec validate found nothing to validate — no specs and no "
+                "changes exist yet; gate the `deltas` level to require content"
+            ), source="asserted")
+        if failed:
+            return _rec(False, (
+                f"openspec validate --strict: {failed}/{items} invalid — "
+                + "; ".join(messages[:3])
+            ), exit_code=r.returncode)
+        return _rec(True, f"openspec validate --strict: {items}/{items} valid",
+                    exit_code=r.returncode)
+
+
 @dataclass
 class UnknownValidator:
     """Fail-closed stand-in for a validator config with an unrecognized type.
@@ -746,6 +953,7 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "capability": CapabilityValidator,
     "lsp_clean": LspCleanValidator,
     "quality_check": QualityCheckValidator,
+    "openspec": OpenSpecValidator,
 }
 
 
