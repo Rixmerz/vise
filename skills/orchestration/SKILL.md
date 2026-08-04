@@ -40,6 +40,43 @@ entirely — so orchestrated work skipped every phase gate on the repo.
 4. Nothing fits, or the task is a one-off? Say so in one line and orchestrate
    without one. A wrong activation costs more than no activation.
 
+## Step 0.5 — the spec phase is mandatory, and you cannot talk your way past it
+
+`feature-dev` and `migration` both carry a `spec` node between design and
+implement. Its exit edge is `validators_green`, so unlike a phrase edge there
+is no sentence you can say to open it — the gate reads `openspec/` off disk and
+opens only when a well-formed change proposal is actually there.
+
+What "well-formed" means, concretely, because this is where it goes red:
+
+- `openspec/changes/<name>/proposal.md` exists
+- `openspec/changes/<name>/specs/<capability>/spec.md` carries a delta header
+  (`## ADDED Requirements`, `## MODIFIED Requirements`, `## REMOVED Requirements`)
+- **every `### Requirement:` has at least one `#### Scenario:`** — the single
+  most common failure; a requirement with no scenario is rejected outright
+- `tasks.md` is the real checklist, because `validate` (feature-dev) and
+  `bench` (migration) will not open until every box in it is ticked
+
+Get there with `openspec new change <name>`, then `openspec status --change
+<name> --json` for the artifact order. The bundled `/opsx:propose` skill drives
+the whole sequence if you prefer.
+
+Three things that are *not* escape hatches:
+
+- **Delegating.** A subagent hits the same gate — it is a node gate, not a
+  prompt. Dispatching a builder from `spec` does not move the workflow.
+- **`VISE_NODE_GATE_OVERRIDE=1`.** It bypasses the block and records the
+  attempt. Using it because the proposal is unwritten is the habit the gate
+  exists to prevent; using it because the *gate* is wrong is a bug report.
+- **Skipping the workflow.** If the work genuinely doesn't change the system's
+  contract, don't activate `feature-dev` for it — say so in one line and
+  orchestrate bare. A wrong activation costs more than no activation.
+
+Bug fixes are the honest exception: `debug` has no spec phase on purpose. A fix
+that restores specified behaviour changes no contract, and forcing a proposal
+for it would be ceremony. A fix that *changes* behaviour is a feature — use
+`feature-dev`.
+
 ### The conflict rule — this is not optional
 
 A node's `tools_blocked` applies to subagents too. This is verified, not

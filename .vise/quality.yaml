@@ -66,6 +66,17 @@ checks:
   #   git log -p --all | grep -Ei 'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|BEGIN [A-Z ]*PRIVATE KEY'
   secrets: [".venv/bin/python", "-m", "detect_secrets", "scan"]
 
+  # OpenSpec planning artifacts. Bound here so a node can gate on the check
+  # NAME `spec` the same way it gates on `lint` — but note this is the WEAKER
+  # of the two paths to the same tool. The dedicated `openspec` validator
+  # (require: deltas / tasks_complete) reads openspec/ in pure Python and FAILS
+  # closed; a quality_check skip-passes when unbound. Use `openspec` for the
+  # mandatory phase gate and this entry for ad-hoc `quality-gate` runs.
+  #
+  # `openspec` is a Node CLI, so unlike every other command here it is not in
+  # .venv. That is exactly why the mandatory gate does not depend on it.
+  spec: ["openspec", "validate", "--all", "--strict"]
+
   # Deliberately absent, and each absence is a real gap, not an oversight:
   #   types       — no mypy/pyright config here yet
   #   complexity  — ruff C901 is not enabled; see [tool.ruff.lint] select
