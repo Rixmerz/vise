@@ -46,10 +46,13 @@ incumbent wins. Never migrate a toolchain as a side effect of another change.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Parameterize SQL with the driver's bound params — never a template literal into a query
-- Never `eval`, `new Function`, or `child_process.exec` with interpolated input — use `execFile` with an argument array
-- Treat every external payload as `unknown` and narrow it through a schema before use
-- Use `crypto.randomUUID`/`randomBytes` for tokens and `timingSafeEqual` to compare secrets
-- Never interpolate user data into `innerHTML`, `dangerouslySetInnerHTML`, or a `v-html` binding
+- Parameterize SQL with the driver's bound params — never a template literal into a query (CWE-89)
+- Never `eval` or `new Function` on external input (CWE-94); use `execFile` with an argument array instead of `child_process.exec` (CWE-78)
+- Treat every external payload as `unknown` and narrow it through a schema before use (CWE-20)
+- Use `crypto.randomUUID`/`randomBytes` for tokens (CWE-330) and `timingSafeEqual` to compare secrets (CWE-208)
+- Never interpolate user data into `innerHTML`, `dangerouslySetInnerHTML`, or a `v-html` binding (CWE-79)
+- Never fetch a URL built from user input server-side without an allowlist (CWE-918)

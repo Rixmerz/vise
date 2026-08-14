@@ -37,10 +37,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Prepared statements with bound parameters for every query — this is the single most common finding in PHP code
-- `password_hash`/`password_verify` for passwords — never md5, sha1, or a hand-rolled salt
-- `random_bytes`/`random_int` for tokens, `hash_equals` for comparison
-- Escape output for its destination context — `htmlspecialchars` for HTML, never raw echo of user data
-- Never `unserialize()` untrusted input; use `json_decode`
+- Prepared statements with bound parameters for every query — the single most common finding in PHP code (CWE-89)
+- `password_hash`/`password_verify` for passwords — never md5, sha1, or a hand-rolled salt (CWE-916, CWE-327)
+- `random_bytes`/`random_int` for tokens (CWE-330), `hash_equals` for comparison (CWE-208)
+- Escape output for its destination context — `htmlspecialchars` for HTML, never a raw echo of user data (CWE-79)
+- Never `unserialize()` untrusted input; use `json_decode` (CWE-502)
+- Never `include`/`require` a path derived from a request (CWE-98), and never `eval()` (CWE-95)

@@ -36,10 +36,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- `PreparedStatement` or the ORM's bound parameters — never a string-interpolated query
-- Never deserialize untrusted data with Java serialization
-- `ProcessBuilder` with an argument list, never a joined shell string
-- `SecureRandom` for tokens, `MessageDigest.isEqual` for comparison
-- Disable external entities on every XML parser (XXE)
+- `PreparedStatement` or the ORM's bound parameters — never a string-interpolated query (CWE-89)
+- Never deserialize untrusted data with Java serialization (CWE-502)
+- `ProcessBuilder` with an argument list, never a joined shell string (CWE-78)
+- `SecureRandom` for tokens (CWE-330), `MessageDigest.isEqual` for comparison (CWE-208)
+- Disable external entities on every XML parser (CWE-611)
+- Platform types from Java interop are unvalidated input at the boundary — annotate and check them (CWE-20)

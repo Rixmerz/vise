@@ -16,7 +16,7 @@ Treat those files with the same care as the code.
 | `src/vise/assets/workflows/` | the 9 bundled `*-graph.yaml` workflows |
 | `src/vise/tests/` | the whole suite — asset honesty tests live here too |
 | `agents/` | 19 bundled subagent charters |
-| `skills/` | 20 bundled skills (`engineering-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, and the 15 `*-rules`) |
+| `skills/` | 21 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` |
 | `hooks/hooks.json` | the 8 hook registrations |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
@@ -88,7 +88,12 @@ change makes one of these tests fail, the fix is almost never to loosen the test
   the skill silently never fires on those files.
 - Every `*-rules` skill states the precedence pointer to `engineering-baseline`
   and keeps its `## Security` section last — security outranks style, and the
-  reader should hit it after the style rules, not before.
+  reader should hit it after the style rules, not before. Each bullet in that
+  section carries the CWE to cite when reporting it.
+- No asset may tell an agent to produce a CVSS score. It cannot know the
+  deployment, exposure, or data classification, and an invented number carries
+  more authority than its evidence. Rank on attacker preconditions instead —
+  `skills/security-baseline/SKILL.md` has the ladder.
 - Third-party packages in a rules skill belong under
   `## Tooling — greenfield defaults only`. A rules skill must never tell an
   agent to migrate a project's toolchain as a side effect of another change.

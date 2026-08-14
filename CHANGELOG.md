@@ -32,10 +32,32 @@ you may already depend on, it says so under **Behaviour change**.
   while `plugin.json` configured `sourcekit-lsp` and a Lua server — so the
   setup looked complete and Swift work still routed to `general-purpose`, which
   preloads nothing. Both rules skills had never applied to a single file.
-- **Every `*-rules` skill has a `## Security` section.** Only `php-rules`
-  carried a prepared-statements line; `java`, `kotlin`, `csharp`, `go`, `rust`,
-  and `python` rules had no injection rule at all, which made "follow the
-  language rules" mean something different per language.
+- **Every `*-rules` skill has a `## Security` section, CWE-tagged.** Only
+  `php-rules` carried a prepared-statements line; `java`, `kotlin`, `csharp`,
+  `go`, `rust`, and `python` rules had no injection rule at all, which made
+  "follow the language rules" mean something different per language. Every
+  bullet now carries the CWE to cite — a finding without an ID is a sentence,
+  with one it is a class that can be deduped across a report and compared
+  across languages.
+- **`security-baseline` — how to name, rank, and triage a finding.** vise had
+  security *advice* and no security *vocabulary*: zero mentions of CWE, CVE,
+  OWASP, or supply chain across every agent and skill. The new skill carries a
+  CWE-indexed surface checklist (the OWASP Top 10 in the order a code reader
+  meets it), a severity ladder anchored on the preconditions an attacker needs,
+  the reachability-first protocol for a dependency advisory, and supply-chain
+  rules. `security-auditor` and `reviewer` preload it.
+  **Deliberately excluded: CVSS scoring.** An agent reading a diff cannot know
+  the deployment, the network exposure, or the data classification, so a derived
+  `7.5` is fabricated precision that outranks its own evidence. Assets may quote
+  a project's score and never produce one — `test_asset_coverage.py` enforces
+  that, matching the instruction rather than the word so prose about CVSS stays
+  legal.
+- **`security-auditor` runs the scanners instead of auditing by reading.** A
+  code read cannot see a vulnerable transitive dependency, and reasoning about
+  versions from memory turns a stale advisory into a false all-clear. It now
+  runs the project's `sast`/`sca`/`secrets` checks, reports a scanner that is
+  not installed as *not checked* rather than as clean, and quotes advisory IDs
+  and version ranges from the tool's output rather than from memory.
 - **`CLAUDE.md`.** vise gates other repos on having project instructions and
   had none of its own — including the `.venv/bin/python` rule that
   `.vise/quality.yaml` already explains at length to nobody who reads it first.
@@ -115,6 +137,15 @@ you may already depend on, it says so under **Behaviour change**.
   perfectly good incumbent. `python-rules` no longer presents `asyncio.TaskGroup`
   as a drop-in for `gather`; `gather(return_exceptions=True)` has no TaskGroup
   equivalent.
+- **`security-audit`'s `verify` node gates on something.** It shipped with four
+  commented-out `command_exit` scanner lines, so the node whose whole claim is
+  "the criticals are gone" checked nothing. They were commented for a real
+  reason — `command_exit` fails *closed* on a missing binary and would block
+  every repo without that toolchain — so the replacement is `quality_check`,
+  which reads the command out of `.vise/quality.yaml` and skip-passes with an
+  honest "not configured" record. `scan` stays deliberately ungated and now says
+  why: node validators run on every traverse, so gating `scan` on SAST would
+  block the path to `triage` exactly when the scanner found something.
 - **`orchestration` routes to `sprint-e2e`, `backend-swift`, and
   `backend-lua`,** and says out loud that `general-purpose` preloads nothing —
   so a brief dispatching it must name the skills to load.

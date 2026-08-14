@@ -54,10 +54,13 @@ of another change.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Parameterize with `db.Query(q, args...)` — never `fmt.Sprintf` into SQL
-- `exec.Command("cmd", args...)` with separate arguments, never a shell string
-- Use `crypto/rand` for tokens and `subtle.ConstantTimeCompare` for secret comparison
-- Render HTML with `html/template`, never `text/template`
-- Check `filepath.Clean` results against the intended root before opening a user-supplied path
+- Parameterize with `db.Query(q, args...)` — never `fmt.Sprintf` into SQL (CWE-89)
+- `exec.Command("cmd", args...)` with separate arguments, never a shell string (CWE-78)
+- Use `crypto/rand` for tokens (CWE-330) and `subtle.ConstantTimeCompare` for secret comparison (CWE-208)
+- Render HTML with `html/template`, never `text/template` (CWE-79)
+- Check `filepath.Clean` results against the intended root before opening a user-supplied path (CWE-22)
+- Bound request bodies and concurrent work — an unbounded `io.ReadAll` on a request is a DoS (CWE-400)

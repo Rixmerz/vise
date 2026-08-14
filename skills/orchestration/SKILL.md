@@ -134,7 +134,8 @@ brief: *"Load the `engineering-baseline` and `bash-rules` skills before your
 first edit."* The rules that ship and apply:
 
 `engineering-baseline` (always) · `ponytail` (always, when writing) ·
-`sql-rules` · `bash-rules` · `web-ui-rules` · and the twelve `<lang>-rules`
+`security-baseline` (auditing, triaging scanner output, or a security-sensitive
+diff) · `sql-rules` · `bash-rules` · `web-ui-rules` · and the twelve `<lang>-rules`
 skills — `python` `typescript` `go` `rust` `java` `kotlin` `csharp` `ruby`
 `php` `swift` `lua` `cpp`.
 

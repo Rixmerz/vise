@@ -56,10 +56,13 @@ migration tool and naming always win over anything preferred here.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the surface-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Every value is a bound parameter. Interpolation into SQL is the finding — an internal-looking integer is still user input one call up
-- Identifiers (table/column names) cannot be bound: validate them against an allowlist, never a string from the request
-- Grant the application role only the privileges it uses; migrations run under a separate, more privileged role
-- Never put credentials, tokens, or personal data in a migration, a seed file, or a fixture
-- Mask or omit personal data when copying production rows into a test dataset
+- Every value is a bound parameter. Interpolation into SQL is the finding — an internal-looking integer is still user input one call up (CWE-89)
+- Identifiers (table/column names) cannot be bound: validate them against an allowlist, never a string from the request (CWE-89)
+- Grant the application role only the privileges it uses; migrations run under a separate, more privileged role (CWE-250)
+- Never put credentials, tokens, or personal data in a migration, a seed file, or a fixture (CWE-798)
+- Mask or omit personal data when copying production rows into a test dataset (CWE-359)
+- Enable row-level security or an explicit tenant predicate on every multi-tenant table — a forgotten `WHERE tenant_id` is cross-tenant read (CWE-639)

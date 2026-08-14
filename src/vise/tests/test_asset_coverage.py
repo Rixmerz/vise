@@ -254,3 +254,122 @@ def test_docs_writer_can_run_what_it_promises_to_verify():
             "docs-writer's charter promises verified/executed examples but the "
             "agent has no Bash tool, so the promise is unkeepable by construction."
         )
+
+
+# ---------------------------------------------------------------------------
+# Security findings need a shared vocabulary, not just good advice
+# ---------------------------------------------------------------------------
+
+_CWE = re.compile(r"\bCWE-\d{1,4}\b")
+
+
+@pytest.mark.parametrize("name", RULES_SKILLS)
+def test_security_sections_cite_cwe(name: str):
+    """A finding without a CWE is a sentence; with one it is a class.
+
+    Two reviewers writing "unsafe query building" and "user input reaches SQL"
+    are reporting one defect, and only the ID makes that visible. It is also
+    what lets a finding be deduped across a report and compared across
+    languages — the reason these sections carry IDs rather than prose alone.
+    """
+    text = (SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+    section = text[text.index("## Security"):]
+
+    ids = _CWE.findall(section)
+    assert len(ids) >= 3, (
+        f"{name}'s Security section cites {len(ids)} CWE ids; it should tag its "
+        "footguns so a finding can be named the same way across languages."
+    )
+
+
+def test_security_baseline_ships_and_is_preloaded_where_it_matters():
+    """The skill that says how to rank a finding has to reach the agents that rank."""
+    assert (SKILLS_DIR / "security-baseline" / "SKILL.md").is_file()
+
+    for agent in ("security-auditor", "reviewer"):
+        assert "security-baseline" in _skills_of(AGENTS_DIR / f"{agent}.md"), (
+            f"{agent} reports security findings but does not preload "
+            "security-baseline, so it has no severity ladder and no CWE index — "
+            "which is how an invented CVSS score gets into a report."
+        )
+
+
+def test_no_asset_tells_an_agent_to_derive_a_cvss_score():
+    """A CVSS vector computed from a code read is fabricated precision.
+
+    The deployment, network exposure, and data classification are all unknown to
+    an agent reading a diff, and a made-up `7.5` carries more authority than the
+    evidence behind it. Assets may *describe* CVSS or forbid deriving one; what
+    none of them may do is instruct an agent to produce a score.
+
+    Matches the instruction, not the word: a verb of production next to CVSS,
+    minus any line that negates it. Prose about CVSS is fine and common — the
+    security-baseline description and its own DON'T line both mention it.
+    """
+    produce = re.compile(
+        r"\b(comput\w*|calculat\w*|assign\w*|deriv\w*|scor\w*|rate|rank)\b[^.]{0,60}\bCVSS\b"
+        r"|\bCVSS\b[^.]{0,60}\b(comput\w*|calculat\w*|assign\w*|deriv\w*|yourself)\b",
+        re.I,
+    )
+    negated = re.compile(r"\b(never|not|no|don't|do not|instead of|invent\w*|"
+                         r"fabricat\w*|quote|without|cannot)\b", re.I)
+
+    offenders = [
+        f"{path.parent.name}/{path.name}: {line.strip()}"
+        for path in [*AGENT_FILES, *SKILL_FILES]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if produce.search(line) and not negated.search(line)
+    ]
+
+    assert not offenders, (
+        "assets instructing an agent to produce a CVSS score:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_security_audit_workflow_actually_gates_on_its_scanners():
+    """`verify` claims the criticals are gone — something has to check.
+
+    The node shipped with four commented-out `command_exit` lines, so it gated on
+    nothing at all. They were commented out for a real reason (command_exit fails
+    CLOSED on a missing binary, blocking every repo without that toolchain);
+    quality_check is the fail-open equivalent, reading the command out of
+    .vise/quality.yaml and skip-passing with an honest "not configured" record.
+    """
+    graph_path = (
+        Path(__file__).resolve().parents[1]
+        / "assets" / "workflows" / "security-audit-graph.yaml"
+    )
+    graph = yaml.safe_load(graph_path.read_text(encoding="utf-8"))
+    verify = next(n for n in graph["nodes"] if n["id"] == "verify")
+    checks = {
+        v.get("check") for v in (verify.get("validators") or [])
+        if v.get("type") == "quality_check"
+    }
+
+    assert {"sast", "sca", "secrets"} <= checks, (
+        f"security-audit `verify` gates on {sorted(checks)}; it must re-run the "
+        "sast, sca, and secrets checks it told the agent to run at `scan`."
+    )
+
+
+def test_scan_node_is_not_gated_on_scanner_exit_codes():
+    """A scanner exiting nonzero at `scan` means it FOUND something.
+
+    Node validators run on every traverse, not only on validators_green edges
+    (`_graph_transition` runs the node gate before the edge condition is even
+    examined). Gating `scan` on sast would therefore block the path to `triage`
+    exactly when there is something to triage.
+    """
+    graph_path = (
+        Path(__file__).resolve().parents[1]
+        / "assets" / "workflows" / "security-audit-graph.yaml"
+    )
+    graph = yaml.safe_load(graph_path.read_text(encoding="utf-8"))
+    scan = next(n for n in graph["nodes"] if n["id"] == "scan")
+
+    assert not (scan.get("validators") or []), (
+        "security-audit `scan` declares validators. The node gate runs them on "
+        "every traverse, so a SAST that found a real finding would block the "
+        "move to triage — the one phase that exists to process it."
+    )

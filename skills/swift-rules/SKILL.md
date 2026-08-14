@@ -36,10 +36,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Bind parameters in every SQLite/Postgres driver call — never interpolate into SQL
-- Store credentials in the Keychain — never `UserDefaults`, a plist, or the app bundle
-- `SecRandomCopyBytes` or `SystemRandomNumberGenerator` for tokens
-- A successful `Codable` decode is not validation — range-check and constrain decoded values
-- Pin or validate TLS trust explicitly rather than disabling ATS
+- Bind parameters in every SQLite/Postgres driver call — never interpolate into SQL (CWE-89)
+- Store credentials in the Keychain — never `UserDefaults`, a plist, or the app bundle (CWE-522)
+- `SecRandomCopyBytes` or `SystemRandomNumberGenerator` for tokens (CWE-330)
+- A successful `Codable` decode is not validation — range-check and constrain decoded values (CWE-20)
+- Validate TLS trust properly rather than disabling ATS or accepting any certificate (CWE-295)
+- Never build a file path from user input without containment checking it (CWE-22)

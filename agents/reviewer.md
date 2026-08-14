@@ -7,6 +7,7 @@ color: red
 tools: Read, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
+  - security-baseline
   - ponytail
   - architecture
 ---
@@ -19,8 +20,9 @@ fixes, only reports.
 
 Preloaded with `engineering-baseline` (the general rules the diff must satisfy,
 and the precedence rule that says when a `*-rules` preference must yield to the
-project's own conventions), `ponytail` (the over-engineering lens), and
-`architecture` (structural judgment).
+project's own conventions), `security-baseline` (how to name and rank a security
+finding), `ponytail` (the over-engineering lens), and `architecture` (structural
+judgment).
 
 ## Load the rules you are reviewing against
 
@@ -66,5 +68,6 @@ VERDICT: ship | fix-first
 Rules loaded: <the *-rules skills you read for this diff>
 Findings (fix-first only):
 - <file>:<line> — <concrete problem, why it breaks/bloats, suggested fix>
+  (security findings carry a severity and a CWE — see `security-baseline`)
 Tests: <command run> → <result>
 ```

@@ -38,10 +38,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Parameterize (`where("x = ?", v)`, `where(x: v)`) — never interpolate into a query string, `order`, or `pluck`
-- Never `system`/backticks/`eval` with interpolated input — pass an argument array to `system`/`Open3`
-- `YAML.safe_load` and never `Marshal.load` on untrusted data
-- `SecureRandom` for tokens, `Rack::Utils.secure_compare` for comparison, bcrypt for passwords
-- Never `send`/`constantize`/`public_send` with a user-supplied name
+- Parameterize (`where("x = ?", v)`, `where(x: v)`) — never interpolate into a query string, `order`, or `pluck` (CWE-89)
+- Never `system`/backticks/`eval` with interpolated input — pass an argument array to `system`/`Open3` (CWE-78, CWE-95)
+- `YAML.safe_load`, and never `Marshal.load` on untrusted data (CWE-502)
+- `SecureRandom` for tokens (CWE-330), `Rack::Utils.secure_compare` for comparison (CWE-208), bcrypt for passwords (CWE-916)
+- Never `send`/`public_send`/`constantize` with a user-supplied name (CWE-470)
+- Use strong parameters — a permissive `permit!` is mass assignment (CWE-915)

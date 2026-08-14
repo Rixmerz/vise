@@ -36,10 +36,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Parameterized `SqlCommand`, or EF Core's interpolation-safe `FromSqlInterpolated` — never a concatenated query
-- Never `BinaryFormatter`, and never `JsonSerializer` with unrestricted type handling on untrusted input
-- `Process` with `ArgumentList`, never a joined command string
-- `RandomNumberGenerator` for tokens, `CryptographicOperations.FixedTimeEquals` for comparison
-- Set `XmlResolver = null` on `XmlReaderSettings` (XXE)
+- Parameterized `SqlCommand`, or EF Core's interpolation-safe `FromSqlInterpolated` — never a concatenated query (CWE-89)
+- Never `BinaryFormatter`, and never a deserializer with unrestricted type handling on untrusted input (CWE-502)
+- `Process` with `ArgumentList`, never a joined command string (CWE-78)
+- `RandomNumberGenerator` for tokens (CWE-330), `CryptographicOperations.FixedTimeEquals` for comparison (CWE-208)
+- Set `XmlResolver = null` on `XmlReaderSettings` (CWE-611)
+- Validate a user-supplied path with `Path.GetFullPath` against the intended root (CWE-22)

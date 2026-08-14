@@ -56,20 +56,37 @@ failed and why, in your report.
 
 ### Security — non-negotiable, outranks every style rule
 - Parameterize every query. String interpolation into SQL, shell, HTML, LDAP,
-  or a template is the finding, regardless of how trusted the input looks.
+  or a template is the finding, regardless of how trusted the input looks
+  (CWE-89, CWE-78, CWE-79).
 - Validate external input at the trust boundary: user input, API responses,
-  environment variables, file contents, message payloads.
+  environment variables, file contents, message payloads (CWE-20).
 - Never commit a secret — not in code, not in a config default, not in a test
-  fixture, not in a comment. Read them from the environment or a secret store.
-- Never log credentials, tokens, full card numbers, or personal data.
-- Deny by default on authz. An endpoint with no explicit check is unprotected.
+  fixture, not in a comment. Read them from the environment or a secret store
+  (CWE-798).
+- Never log credentials, tokens, full card numbers, or personal data
+  (CWE-532, CWE-359).
+- Deny by default on authz. An endpoint with no explicit check is unprotected,
+  not "protected by default" (CWE-862).
+- Use a CSPRNG for anything security-bearing, and a constant-time compare for
+  anything secret (CWE-330, CWE-208).
+
+Cite the CWE when you report a finding — `security-baseline` has the surface
+index, the severity ladder, and the triage protocol for a dependency CVE. The
+language's own footguns live in that language's `*-rules` skill.
 
 ### Dependencies
 - Follow `ponytail`'s ladder before adding one.
 - A new dependency needs a stated reason why the stdlib and the existing
   manifest could not do it.
 - Pin versions the way the project already pins them. Never add an unpinned
-  dependency to a repo that pins.
+  dependency to a repo that pins (CWE-1104).
+- Update the lockfile in the same commit as the manifest.
+- A new dependency is a new trust relationship: confirm it is the package you
+  meant, not a typosquat, and never fetch build inputs without an integrity
+  check (CWE-494).
+- Never dismiss an SCA advisory from memory. Quote the tool's output, establish
+  whether the vulnerable path is reachable, and prefer the version bump —
+  `security-baseline` has the protocol.
 
 ### Naming and structure
 - Name for the reader at the call site, not for the implementation.

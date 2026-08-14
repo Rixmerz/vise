@@ -39,10 +39,13 @@ stated below.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Bound every buffer write (`snprintf`, `std::string`, `std::span`) — `strcpy`/`strcat`/`sprintf`/`gets` are findings, not style notes
-- Check for integer overflow before any size computation that feeds an allocation or an index
-- Never pass a user-controlled string as a format string
-- Zero secrets before freeing them (`explicit_bzero`/`SecureZeroMemory`) — a plain `memset` can be optimized away
-- Build with a sanitizer (ASan/UBSan) in CI; an unsanitized C++ test suite proves very little about memory safety
+- Bound every buffer write (`snprintf`, `std::string`, `std::span`) — `strcpy`/`strcat`/`sprintf`/`gets` are findings, not style notes (CWE-787, CWE-121)
+- Check for integer overflow before any size computation that feeds an allocation or an index (CWE-190, CWE-680)
+- Never pass a user-controlled string as a format string (CWE-134)
+- Never use a pointer after free or after move (CWE-416); never return a reference to a local (CWE-562)
+- Zero secrets before freeing them (`explicit_bzero`/`SecureZeroMemory`) — a plain `memset` can be optimized away (CWE-244)
+- Build with a sanitizer (ASan/UBSan) in CI; an unsanitized C++ suite proves very little about memory safety

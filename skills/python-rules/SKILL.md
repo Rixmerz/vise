@@ -57,10 +57,13 @@ an unrelated change.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the language-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Parameterize SQL with the driver's placeholders or bound params — never an f-string, `%`, or `.format()` into a query
-- `subprocess.run([...], shell=False)` with an argument list; never `shell=True`, never `os.system()`
-- Never `pickle.loads` or `yaml.load` untrusted data — `yaml.safe_load`, and a signed format instead of pickle
-- Use `secrets` (not `random`) for tokens, and `hmac.compare_digest` to compare them
-- Never build a path from user input without resolving it and checking it stays inside the intended root
+- Parameterize SQL with the driver's placeholders or bound params — never an f-string, `%`, or `.format()` into a query (CWE-89)
+- `subprocess.run([...], shell=False)` with an argument list; never `shell=True`, never `os.system()` (CWE-78)
+- Never `pickle.loads` or `yaml.load` untrusted data — `yaml.safe_load`, and a signed format instead of pickle (CWE-502)
+- Use `secrets` (not `random`) for tokens (CWE-330), and `hmac.compare_digest` to compare them (CWE-208)
+- Resolve a user-supplied path and check it stays inside the intended root before opening it (CWE-22)
+- Disable entity resolution when parsing XML (`defusedxml`) (CWE-611)

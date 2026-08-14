@@ -45,11 +45,13 @@ existing scripts before introducing a new style.
 
 ## Security — outranks every rule above
 
-See `engineering-baseline` for the general floor. These are the surface-specific footguns:
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
 
-- Never `eval`, and never pass a user-controlled string to `sh -c` — build an argument array
-- Quote every expansion; an unquoted `$var` containing a space or a glob is a command-injection vector
-- Never `rm -rf` a path built from an unvalidated variable — set `${dir:?}` so an empty value aborts instead of expanding to `/`
-- Never pipe a download straight into a shell, and verify checksums on anything you do fetch
-- Keep secrets out of the command line — arguments are visible in `ps`; pass them via the environment or a file descriptor
-- Set restrictive permissions (`umask 077`) before writing anything that holds a credential
+- Never `eval`, and never pass a user-controlled string to `sh -c` — build an argument array (CWE-78)
+- Quote every expansion; an unquoted `$var` holding a space or a glob is an argument-injection vector (CWE-88)
+- Never `rm -rf` a path built from an unvalidated variable — write `${dir:?}` so an empty value aborts instead of expanding to `/` (CWE-22)
+- Never pipe a download straight into a shell, and verify checksums on anything you do fetch (CWE-494)
+- Keep secrets out of the command line — arguments are visible in `ps`; pass them via the environment or a file descriptor (CWE-214)
+- Set restrictive permissions (`umask 077`) before writing anything that holds a credential (CWE-732)
