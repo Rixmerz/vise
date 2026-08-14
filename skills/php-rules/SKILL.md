@@ -8,6 +8,10 @@ description: PHP coding conventions — strict types, typed properties, PSR stan
 > Apply ONLY when the file under edit or review is PHP (`.php`). If the current
 > file is not PHP, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Start every file with `declare(strict_types=1);`
 - Type every property, parameter, and return (including `void`/`never`/nullable `?T`)
@@ -30,3 +34,16 @@ description: PHP coding conventions — strict types, typed properties, PSR stan
 - Don't mix business logic into templates
 - Don't return mixed `false`-or-value sentinels — throw or return null with a nullable type
 - Don't ignore `phpstan`/`psalm` findings without justification
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Prepared statements with bound parameters for every query — the single most common finding in PHP code (CWE-89)
+- `password_hash`/`password_verify` for passwords — never md5, sha1, or a hand-rolled salt (CWE-916, CWE-327)
+- `random_bytes`/`random_int` for tokens (CWE-330), `hash_equals` for comparison (CWE-208)
+- Escape output for its destination context — `htmlspecialchars` for HTML, never a raw echo of user data (CWE-79)
+- Never `unserialize()` untrusted input; use `json_decode` (CWE-502)
+- Never `include`/`require` a path derived from a request (CWE-98), and never `eval()` (CWE-95)

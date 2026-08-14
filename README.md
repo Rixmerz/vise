@@ -148,7 +148,7 @@ launch per file extension. Install what you need:
 
 Declaring a server is not the same as using one, and until recently vise only
 did the first: no agent listed the `LSP` tool, so nothing could call it. Now the
-16 code-touching agents carry it, each `*-rules` skill states the circumstance
+18 code-touching agents carry it, each `*-rules` skill states the circumstance
 that requires a lookup, and `skills/orchestration/SKILL.md` has the engineer
 resolve a symbol's caller set before dispatching a wave that changes its
 signature. Note what the tool does **not** do: its nine operations are all

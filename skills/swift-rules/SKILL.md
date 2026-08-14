@@ -9,6 +9,10 @@ description: Swift conventions — optionals discipline, value types, error hand
 > current file is not Swift, do not use this skill — it does not apply to other
 > languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Prefer `let` over `var`; prefer `struct`/`enum` (value types) over `class`
 - Unwrap optionals with `if let`/`guard let`/`??` — use guard for early exit
@@ -29,3 +33,16 @@ description: Swift conventions — optionals discipline, value types, error hand
 - Don't use reference types when a value type models the data correctly
 - Don't ignore compiler warnings or leave `print()` diagnostics in shipping code
 - Don't subclass `NSObject`/use `@objc` unless interop actually requires it
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Bind parameters in every SQLite/Postgres driver call — never interpolate into SQL (CWE-89)
+- Store credentials in the Keychain — never `UserDefaults`, a plist, or the app bundle (CWE-522)
+- `SecRandomCopyBytes` or `SystemRandomNumberGenerator` for tokens (CWE-330)
+- A successful `Codable` decode is not validation — range-check and constrain decoded values (CWE-20)
+- Validate TLS trust properly rather than disabling ATS or accepting any certificate (CWE-295)
+- Never build a file path from user input without containment checking it (CWE-22)

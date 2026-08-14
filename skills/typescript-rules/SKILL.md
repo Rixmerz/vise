@@ -9,6 +9,10 @@ description: TypeScript coding conventions — strict types, discriminated union
 > (`.ts`/`.tsx`/`.js`/`.jsx`). If the current file is not TS/JS, do not use this
 > skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Use `strict: true` in tsconfig
 - Prefer `satisfies` over `as` for type validation without widening
@@ -17,9 +21,9 @@ description: TypeScript coding conventions — strict types, discriminated union
 - Prefer generics over overloads when possible
 - Use branded types for domain IDs (`UserId`, `OrderId`) to prevent mixing
 - Use exhaustive checking with `assertNever` in switch defaults
-- Prefer `Result<T, E>` (neverthrow) over throw for expected errors
+- Model expected (non-exceptional) failures as values rather than throws, and be consistent per module — a single `Result` island in a throwing codebase is worse than either convention alone
 - Use `using`/`await using` for resource cleanup (TS 5.2+)
-- Validate at system boundaries (user input, external APIs) with Zod/Valibot
+- Validate at system boundaries (user input, external APIs) with the project's schema library — Zod or Valibot if the project has not chosen one
 - Before changing an exported signature, run `findReferences` on it; for an interface or abstract member run `goToImplementation`. Structural typing means anything with a matching shape conforms, so check re-exported and type-only call sites in that list too. Every entry type-checks against the new signature or is updated in this change
 
 ## DON'T
@@ -30,3 +34,25 @@ description: TypeScript coding conventions — strict types, discriminated union
 - Don't create wrapper types for primitives without branded types
 - Don't use `!` (non-null assertion) except in tests
 - Don't ignore TypeScript errors with `@ts-ignore` — use `@ts-expect-error` if unavoidable
+
+## Tooling — greenfield defaults only
+
+Recommendations for a project that has **not** already chosen; the project's
+incumbent wins. Never migrate a toolchain as a side effect of another change.
+
+- `strict: true` plus `noUncheckedIndexedAccess` in a new tsconfig
+- A schema validator (Zod/Valibot) at the boundaries, not hand-written guards
+- `Result`-style error values only where adopted module-wide
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Parameterize SQL with the driver's bound params — never a template literal into a query (CWE-89)
+- Never `eval` or `new Function` on external input (CWE-94); use `execFile` with an argument array instead of `child_process.exec` (CWE-78)
+- Treat every external payload as `unknown` and narrow it through a schema before use (CWE-20)
+- Use `crypto.randomUUID`/`randomBytes` for tokens (CWE-330) and `timingSafeEqual` to compare secrets (CWE-208)
+- Never interpolate user data into `innerHTML`, `dangerouslySetInnerHTML`, or a `v-html` binding (CWE-79)
+- Never fetch a URL built from user input server-side without an allowlist (CWE-918)

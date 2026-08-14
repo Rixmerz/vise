@@ -8,6 +8,10 @@ description: Lua conventions — locals by default, explicit nil handling, 1-bas
 > Apply ONLY when the file under edit or review is Lua (`.lua`). If the current
 > file is not Lua, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Declare every variable `local` — never rely on globals implicitly
 - Return a module table at the end of a file; keep helpers local
@@ -27,3 +31,16 @@ description: Lua conventions — locals by default, explicit nil handling, 1-bas
 - Don't rely on table iteration order from `pairs`
 - Don't `error()` with a bare string across module boundaries without context
 - Don't leave `print` debugging in committed code — use the host's logger
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Bind or escape SQL parameters through the driver — never `..` concatenation into a query (CWE-89)
+- Never `load`/`loadstring` untrusted input (CWE-94), and never `os.execute`/`io.popen` with interpolation (CWE-78)
+- In OpenResty, never store per-request data in a module-level global — it leaks across requests and users (CWE-488)
+- Use the host's CSPRNG for tokens; `math.random` is not one (CWE-330)
+- Escape output for its context before rendering it into HTML (CWE-79)
+- Lua patterns are not regex — do not rely on one as a security filter (CWE-20)

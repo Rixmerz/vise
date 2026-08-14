@@ -9,6 +9,10 @@ description: Ruby coding conventions — idiomatic blocks, safe navigation, froz
 > If the current file is not Ruby, do not use this skill — it does not apply to
 > other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Add `# frozen_string_literal: true` at the top of every file
 - Prefer guard clauses (`return unless x`) over nested conditionals
@@ -31,3 +35,16 @@ description: Ruby coding conventions — idiomatic blocks, safe navigation, froz
 - Don't leave `puts`/`p` debugging in committed code — use a logger
 - Don't overuse metaprogramming when a plain method is clearer
 - Don't ignore `rubocop` offenses without an inline disable + reason
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Parameterize (`where("x = ?", v)`, `where(x: v)`) — never interpolate into a query string, `order`, or `pluck` (CWE-89)
+- Never `system`/backticks/`eval` with interpolated input — pass an argument array to `system`/`Open3` (CWE-78, CWE-95)
+- `YAML.safe_load`, and never `Marshal.load` on untrusted data (CWE-502)
+- `SecureRandom` for tokens (CWE-330), `Rack::Utils.secure_compare` for comparison (CWE-208), bcrypt for passwords (CWE-916)
+- Never `send`/`public_send`/`constantize` with a user-supplied name (CWE-470)
+- Use strong parameters — a permissive `permit!` is mass assignment (CWE-915)

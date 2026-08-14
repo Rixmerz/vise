@@ -8,6 +8,10 @@ description: C# conventions — nullable reference types, async/await discipline
 > Apply ONLY when the file under edit or review is C# (`.cs`). If the current
 > file is not C#, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Enable nullable reference types (`#nullable enable`) and honor the annotations
 - `async`/`await` all the way; return `Task`/`Task<T>`; suffix async methods with `Async`
@@ -29,3 +33,16 @@ description: C# conventions — nullable reference types, async/await discipline
 - Don't enumerate an `IEnumerable` multiple times when it may be a deferred/expensive query
 - Don't use `string` concatenation in loops — use `StringBuilder`/`string.Join`
 - Don't leave `Console.WriteLine` for diagnostics — use `ILogger`
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Parameterized `SqlCommand`, or EF Core's interpolation-safe `FromSqlInterpolated` — never a concatenated query (CWE-89)
+- Never `BinaryFormatter`, and never a deserializer with unrestricted type handling on untrusted input (CWE-502)
+- `Process` with `ArgumentList`, never a joined command string (CWE-78)
+- `RandomNumberGenerator` for tokens (CWE-330), `CryptographicOperations.FixedTimeEquals` for comparison (CWE-208)
+- Set `XmlResolver = null` on `XmlReaderSettings` (CWE-611)
+- Validate a user-supplied path with `Path.GetFullPath` against the intended root (CWE-22)

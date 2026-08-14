@@ -8,6 +8,10 @@ description: Go coding conventions — context discipline, error wrapping, gorou
 > Apply ONLY when the file under edit or review is Go (`.go`). If the current
 > file is not Go, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - `context.Context` always first parameter
 - Add context to errors: `fmt.Errorf("doing X: %w", err)`
@@ -33,6 +37,30 @@ description: Go coding conventions — context discipline, error wrapping, gorou
 - Don't use generic package names (`util`, `helpers`, `common`)
 - Don't force OOP patterns (deep embedding, getters/setters)
 - Don't create interfaces before concrete types exist
-- Don't use `gorilla/mux` for new projects (use chi or stdlib 1.22+)
-- Don't use `logrus` for new projects (use slog or zerolog)
 - Don't start goroutines inside functions without making concurrency explicit to caller
+
+## Tooling — greenfield defaults only
+
+Recommendations for a project that has **not** already chosen; the project's
+incumbent router, logger, and test helpers win. Never swap one as a side effect
+of another change.
+
+- Routing: `net/http` alone covers most needs since the 1.22 pattern syntax;
+  reach for `chi` when you want middleware composition. `gorilla/mux` is
+  maintained again and is a fine incumbent — do not migrate off it for style
+- Logging: `log/slog` (stdlib) for new code; `zerolog` when allocation-free
+  logging is measured to matter
+- `go vet` plus `staticcheck` in CI
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Parameterize with `db.Query(q, args...)` — never `fmt.Sprintf` into SQL (CWE-89)
+- `exec.Command("cmd", args...)` with separate arguments, never a shell string (CWE-78)
+- Use `crypto/rand` for tokens (CWE-330) and `subtle.ConstantTimeCompare` for secret comparison (CWE-208)
+- Render HTML with `html/template`, never `text/template` (CWE-79)
+- Check `filepath.Clean` results against the intended root before opening a user-supplied path (CWE-22)
+- Bound request bodies and concurrent work — an unbounded `io.ReadAll` on a request is a DoS (CWE-400)

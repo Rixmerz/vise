@@ -1,13 +1,17 @@
 ---
 name: cpp-rules
-description: C and C++ conventions — RAII, ownership, no raw new/delete, bounds and lifetime safety. Use ONLY when the file under edit or review is C/C++ (.c/.h/.cpp/.cc/.hpp); do NOT apply to any other language.
+description: C and C++ conventions — RAII, ownership, no raw new/delete, bounds and lifetime safety. Use ONLY when the file under edit or review is C/C++ (.c/.h/.cpp/.cc/.cxx/.hpp/.hxx/.C/.H); do NOT apply to any other language.
 ---
 
 # C / C++ Rules
 
 > Apply ONLY when the file under edit or review is C or C++
-> (`.c`/`.h`/`.cpp`/`.cc`/`.cxx`/`.hpp`). If the current file is neither, do not
-> use this skill — it does not apply to other languages.
+> (`.c`/`.h`/`.cpp`/`.cc`/`.cxx`/`.hpp`/`.hxx`/`.C`/`.H`). If the current file is
+> neither, do not use this skill — it does not apply to other languages.
+
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
 
 ## DO (C++)
 - RAII for every resource; wrap ownership in `unique_ptr`/`shared_ptr`, never raw owning pointers
@@ -32,3 +36,16 @@ description: C and C++ conventions — RAII, ownership, no raw new/delete, bound
 - Don't rely on implementation-defined or undefined behavior (signed overflow, aliasing)
 - Don't cast away `const`; don't C-cast in C++ — use `static_cast`/`reinterpret_cast`
 - Don't ignore compiler warnings — build with `-Wall -Wextra` and a sanitizer in CI
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- Bound every buffer write (`snprintf`, `std::string`, `std::span`) — `strcpy`/`strcat`/`sprintf`/`gets` are findings, not style notes (CWE-787, CWE-121)
+- Check for integer overflow before any size computation that feeds an allocation or an index (CWE-190, CWE-680)
+- Never pass a user-controlled string as a format string (CWE-134)
+- Never use a pointer after free or after move (CWE-416); never return a reference to a local (CWE-562)
+- Zero secrets before freeing them (`explicit_bzero`/`SecureZeroMemory`) — a plain `memset` can be optimized away (CWE-244)
+- Build with a sanitizer (ASan/UBSan) in CI; an unsanitized C++ suite proves very little about memory safety

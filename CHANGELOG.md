@@ -10,6 +10,62 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Added
 
+- **`engineering-baseline` — the general rules every agent now carries, and the
+  precedence rule that settles conflicts.** vise shipped twelve per-language
+  rules skills and no language-agnostic ones: nothing on errors, secrets,
+  dependencies, naming, or reporting, and — worse — no stated order between the
+  three instruction sources an agent loads at once. `python-rules` said "use
+  uv" while the repo used pip; `ponytail` said "stdlib first" while
+  `typescript-rules` mandated Zod; nothing said which wins, so the agent picked
+  whichever it read last. The new skill states a five-rung order (user request
+  → safety → the project's existing conventions → the language rules →
+  minimalism) and every one of the 19 agents preloads it.
+- **Three new rules skills for surfaces agents were already touching blind.**
+  `sql-rules` (parameterization, reversible DDL, expand/contract, concurrent
+  index creation) — `db-migrator` wrote SQL with no SQL rules at all.
+  `bash-rules` (strict mode, quoting, no `eval`) — 18 agents have `Bash`.
+  `web-ui-rules` (semantic HTML, accessibility, CSS, XSS sinks) — `frontend`
+  claimed to cover styling and accessibility while preloading only
+  `typescript-rules`.
+- **`backend-swift` and `backend-lua`.** `swift-rules` and `lua-rules` shipped
+  with no agent preloading them and no row in the orchestration fleet table,
+  while `plugin.json` configured `sourcekit-lsp` and a Lua server — so the
+  setup looked complete and Swift work still routed to `general-purpose`, which
+  preloads nothing. Both rules skills had never applied to a single file.
+- **Every `*-rules` skill has a `## Security` section, CWE-tagged.** Only
+  `php-rules` carried a prepared-statements line; `java`, `kotlin`, `csharp`,
+  `go`, `rust`, and `python` rules had no injection rule at all, which made
+  "follow the language rules" mean something different per language. Every
+  bullet now carries the CWE to cite — a finding without an ID is a sentence,
+  with one it is a class that can be deduped across a report and compared
+  across languages.
+- **`security-baseline` — how to name, rank, and triage a finding.** vise had
+  security *advice* and no security *vocabulary*: zero mentions of CWE, CVE,
+  OWASP, or supply chain across every agent and skill. The new skill carries a
+  CWE-indexed surface checklist (the OWASP Top 10 in the order a code reader
+  meets it), a severity ladder anchored on the preconditions an attacker needs,
+  the reachability-first protocol for a dependency advisory, and supply-chain
+  rules. `security-auditor` and `reviewer` preload it.
+  **Deliberately excluded: CVSS scoring.** An agent reading a diff cannot know
+  the deployment, the network exposure, or the data classification, so a derived
+  `7.5` is fabricated precision that outranks its own evidence. Assets may quote
+  a project's score and never produce one — `test_asset_coverage.py` enforces
+  that, matching the instruction rather than the word so prose about CVSS stays
+  legal.
+- **`security-auditor` runs the scanners instead of auditing by reading.** A
+  code read cannot see a vulnerable transitive dependency, and reasoning about
+  versions from memory turns a stale advisory into a false all-clear. It now
+  runs the project's `sast`/`sca`/`secrets` checks, reports a scanner that is
+  not installed as *not checked* rather than as clean, and quotes advisory IDs
+  and version ranges from the tool's output rather than from memory.
+- **`CLAUDE.md`.** vise gates other repos on having project instructions and
+  had none of its own — including the `.venv/bin/python` rule that
+  `.vise/quality.yaml` already explains at length to nobody who reads it first.
+- **`test_asset_coverage.py`,** pinning the structural invariants no
+  frontmatter check could see: every agent preloads the baseline, every
+  code-touching agent can reach language rules, no rules skill is orphaned,
+  the twelve backend charters carry one identical contract, and an agent never
+  promises something its granted tools cannot do.
 - **Validator passes say whether anything was actually verified.** Every
   validator record carries an `outcome` of `verified`, `unverified`, or
   `failed`. The fail-open contract is unchanged — a repo with no linter is not
@@ -42,7 +98,7 @@ you may already depend on, it says so under **Behaviour change**.
   where previously it ran on one node of one workflow out of nine.
 - **The declared language servers are finally reachable.** vise declared
   `lspServers` for 12 ecosystems while no agent listed the `LSP` tool, so
-  nothing could call them. The 16 code-touching agents now carry it, each
+  nothing could call them. The 18 code-touching agents now carry it, each
   `*-rules` skill states the circumstance that requires a lookup rather than
   suggesting one, and the orchestration skill has the engineer resolve a
   symbol's caller set before dispatching a wave that changes its signature —
@@ -51,6 +107,53 @@ you may already depend on, it says so under **Behaviour change**.
   a discarded result, so it would raise a measured number while measuring
   nothing.
 
+### Changed
+
+- **The five language-agnostic code agents can now load language rules.**
+  `tester`, `debugger`, `db-migrator`, `reviewer`, and `security-auditor`
+  carried `ponytail` and nothing else — the whole conventions layer reached 11
+  of 17 agents. They now have the `Skill` tool and a charter section naming
+  which `*-rules` skill to load for the file at hand.
+- **The twelve `backend-*` charters are one contract again.** `backend-python`
+  and `backend-typescript` carried "validate external input at boundaries;
+  parameterize every query" and "no dead code or broken imports left behind";
+  the other eight did not, so the same request met a different standard per
+  language. `backend-cpp` and `backend-rust` moved to `effort: high`.
+- **Tooling mandates moved to `## Tooling — greenfield defaults only`.** A
+  rules skill telling an agent "don't use pip", "use structlog", or "use
+  neverthrow" was, in a repo that had already chosen, an instruction to migrate
+  a toolchain as a side effect of an unrelated change. Those lines now say they
+  apply only where the project has no incumbent.
+- **`docs-writer` has `Bash`.** Its charter promised "keep examples runnable —
+  copy-paste must work against the current code" while granting no tool that
+  could run anything; the promise was unkeepable by construction.
+- **`security-auditor` no longer preloads `ponytail`.** It writes no code, and
+  "the shortest thing that works" is the wrong lens for an audit.
+- **`cpp-rules` triggers on `.cxx`, `.hxx`, `.C`, and `.H`.** Its description —
+  which is what decides whether a skill loads — listed five extensions while
+  `plugin.json` mapped clangd over nine.
+- **`go-rules` no longer calls `gorilla/mux` unfit for new projects.** It has
+  been maintained again since 2023, and the rule was pushing migrations off a
+  perfectly good incumbent. `python-rules` no longer presents `asyncio.TaskGroup`
+  as a drop-in for `gather`; `gather(return_exceptions=True)` has no TaskGroup
+  equivalent.
+- **`security-audit`'s `verify` node gates on something.** It shipped with four
+  commented-out `command_exit` scanner lines, so the node whose whole claim is
+  "the criticals are gone" checked nothing. They were commented for a real
+  reason — `command_exit` fails *closed* on a missing binary and would block
+  every repo without that toolchain — so the replacement is `quality_check`,
+  which reads the command out of `.vise/quality.yaml` and skip-passes with an
+  honest "not configured" record. `scan` stays deliberately ungated and now says
+  why: node validators run on every traverse, so gating `scan` on SAST would
+  block the path to `triage` exactly when the scanner found something.
+- **`orchestration` routes to `sprint-e2e`, `backend-swift`, and
+  `backend-lua`,** and says out loud that `general-purpose` preloads nothing —
+  so a brief dispatching it must name the skills to load.
+- **`agent-autoheal` says where a heal may land.** Its cold path edited
+  `agents/<name>.md`; for a bundled agent that file lives in the plugin install
+  directory and is overwritten on the next update, losing the heal silently.
+  Bundled charters are now shadowed under `.claude/agents/` or fixed by
+  briefing instead.
 ### Fixed
 
 - **A marketplace install exposed no MCP tools, silently.** `claude plugin

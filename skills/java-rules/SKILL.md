@@ -8,6 +8,10 @@ description: Java coding conventions — immutability, Optional discipline, reso
 > Apply ONLY when the file under edit or review is Java (`.java`). If the current
 > file is not Java, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Prefer `final` fields and immutable objects; use `record` for data carriers
 - Use `Optional<T>` for return values that may be absent — never for fields or params
@@ -32,3 +36,16 @@ description: Java coding conventions — immutability, Optional discipline, reso
 - Don't call overridable methods from a constructor
 - Don't use checked exceptions for control flow
 - Don't leave `System.out.println` in production code — use a logger (SLF4J)
+
+## Security — outranks every rule above
+
+`engineering-baseline` is the general floor and `security-baseline` says how to
+name, rank, and triage what you find. These are the surface-specific footguns,
+tagged with the CWE to cite when you report one:
+
+- `PreparedStatement` with placeholders — never string-concatenated SQL, and never a concatenated JPQL/HQL query (CWE-89)
+- Never deserialize untrusted data with `ObjectInputStream` (CWE-502)
+- `ProcessBuilder` with an argument list, never a joined shell string (CWE-78)
+- `SecureRandom` for tokens (CWE-330), `MessageDigest.isEqual` for comparison (CWE-208), and a real KDF — bcrypt/scrypt/Argon2 — for passwords (CWE-916)
+- Disable external entities on every XML parser and document builder (CWE-611)
+- Validate a user-supplied path against its intended root before `Files.newInputStream` (CWE-22)

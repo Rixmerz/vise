@@ -12,21 +12,42 @@ nodes:
     prompt_injection: |
       PHASE: SCAN
       Run the configured security scanners across the codebase.
-      1. Run SAST tools (bandit, semgrep, gosec, eslint-security, etc.).
-      2. Run dependency vulnerability scan (pip-audit, npm audit, cargo audit).
-      3. Run secret detection (trufflehog, gitleaks) on the working tree and history.
-      4. Persist raw findings to a scratch file for triage.
+      `.vise/quality.yaml` names them under `sast`, `sca`, and `secrets` — use
+      those commands, not a guess, so `verify` re-runs the identical checks.
+      1. Run SAST (bandit, semgrep, gosec, eslint-security, ...).
+      2. Run dependency vulnerability scan (pip-audit, npm audit, cargo audit,
+         govulncheck, osv-scanner).
+      3. Run secret detection (gitleaks, trufflehog) on the working tree AND history.
+      4. Persist raw findings to a scratch file for triage, and record which
+         scanners RAN versus which were not installed. A scanner that did not run
+         is a gap in the audit's scope, never a clean result — it goes in the
+         report's NOT CHECKED list by name.
+      This node is deliberately ungated: a scanner exiting nonzero here means it
+      FOUND something, which is the reason to advance to triage, not to block.
       Signal: say "scan complete" when results are gathered.
 
   - id: "triage"
     name: "Triage"
     prompt_injection: |
       PHASE: TRIAGE
-      Classify findings by severity and exploitability.
-      1. Group by severity: critical / high / medium / low.
-      2. Mark false positives with a reason.
-      3. For each true positive, estimate blast radius.
-      4. Build the fix-order list, criticals first.
+      Classify findings by severity and exploitability. Load the
+      `security-baseline` skill first — it carries the CWE surface index, the
+      severity ladder, and the CVE protocol this phase runs on.
+      1. Tag every true positive with its CWE. One CWE per finding, the most
+         specific that fits. No confident match means no ID — never invent one.
+      2. Rank by the PRECONDITIONS an attacker needs (critical = unauthenticated
+         and remote; high = any authenticated user reaches another's data; medium
+         = needs privilege they must already hold; low = defense-in-depth). State
+         the precondition — it is the severity argument.
+      3. Do NOT compute a CVSS vector from a code read: the deployment, exposure,
+         and data classification are unknown to you. Quote the project's score if
+         it has one; never derive one.
+      4. For each dependency advisory, quote the CVE/GHSA id and the affected and
+         fixed ranges FROM THE TOOL'S OUTPUT, never from memory. Then establish
+         reachability — does this project call the vulnerable path at all? An
+         unreachable advisory is medium at most, and say why.
+      5. Mark false positives with a reason.
+      6. Build the fix-order list, criticals first.
       Signal: say "triaged" when classification is done.
 
   - id: "fix-criticals"
@@ -47,18 +68,32 @@ nodes:
     # lsp_clean rides along: no node in this graph blocks Edit/Write, so
     # `verify` (the last non-terminal node, right before `doc`) is the last
     # chance to mechanically check the patches written in `fix-criticals`.
+    # The scanners re-run HERE, not at `scan`. This is the node whose claim is
+    # "the criticals are gone", so this is the only place their exit code is
+    # evidence rather than noise — at `scan` a nonzero exit means the audit found
+    # something, which must not block the path to triage.
+    #
+    # quality_check, not command_exit: command_exit fails CLOSED on a missing
+    # binary, which is why the previous version of this node shipped four
+    # commented-out lines that gated nothing on every repo. quality_check reads
+    # the check name out of .vise/quality.yaml and skip-passes with
+    # source="asserted" when the profile, the key, or the binary is absent — so
+    # an unconfigured repo is not blocked, and the record says "not configured"
+    # instead of presenting as clean.
     validators:
       - type: tests_pass
         weight: 1.0
       - type: lsp_clean
         weight: 0.3
-    # Re-run the project's own scanners here — no universal one exists, so pick
-    # yours and uncomment. command_exit fails closed on a missing binary, which
-    # is why these ship commented rather than guessing your toolchain.
-    #   - {type: command_exit, cmd: ["pip-audit", "--strict"], weight: 0.5}
-    #   - {type: command_exit, cmd: ["npm", "audit", "--audit-level=high"], weight: 0.5}
-    #   - {type: command_exit, cmd: ["cargo", "audit"], weight: 0.5}
-    #   - {type: command_exit, cmd: ["gitleaks", "detect", "--no-banner"], weight: 0.5}
+      - type: quality_check
+        check: sast
+        weight: 1.0
+      - type: quality_check
+        check: sca
+        weight: 1.0
+      - type: quality_check
+        check: secrets
+        weight: 1.0
     prompt_injection: |
       PHASE: VERIFY
       Re-run the scanners and confirm criticals are gone.
@@ -74,8 +109,13 @@ nodes:
     prompt_injection: |
       PHASE: DOCUMENT
       Record what was found, what was fixed, and what remains.
-      1. Write an audit report: scope, methodology, findings, fixes.
-      2. List accepted-risk findings with rationale and review date.
+      1. Write an audit report: scope, methodology, findings, fixes. Every
+         finding carries file:line, severity, and its CWE; every dependency
+         finding carries the advisory id, reachability, and the fixed version.
+      2. List accepted-risk findings with rationale and review date. An accepted
+         risk with no stated mitigation is an unfixed finding with better
+         wording — say which one it is.
+      2b. List every scanner that did not run, by name, under NOT CHECKED.
       3. Update SECURITY.md with any new disclosure or hardening guidance.
       4. Schedule the next audit cycle.
       Signal: audit complete — report filed.
