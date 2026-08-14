@@ -32,6 +32,7 @@ entirely — so orchestrated work skipped every phase gate on the repo.
    | schema, index, data backfill | `migration` |
    | cut a release | `release` |
    | security surface | `security-audit` |
+   | a multi-day slice, end to end | `sprint-e2e` |
 
    `graph_list_available` has the full list with descriptions when none of
    these obviously fits.
@@ -109,7 +110,8 @@ agent carries nothing. Pass its name as `subagent_type`.
 |------|-------|
 | Server-side Python / Go / Rust / TypeScript | `vise:backend-python` · `vise:backend-go` · `vise:backend-rust` · `vise:backend-typescript` |
 | Server-side Java / C# / Kotlin / Ruby / PHP / C·C++ | `vise:backend-java` · `vise:backend-csharp` · `vise:backend-kotlin` · `vise:backend-ruby` · `vise:backend-php` · `vise:backend-cpp` |
-| UI — components, pages, hooks, styling | `vise:frontend` |
+| Server-side Swift / Lua (Vapor, OpenResty, engine glue) | `vise:backend-swift` · `vise:backend-lua` |
+| UI — components, pages, hooks, styling, accessibility | `vise:frontend` |
 | Schema change, index, data backfill | `vise:db-migrator` |
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |
 | Unit / integration tests for landed code | `vise:tester` |
@@ -117,9 +119,28 @@ agent carries nothing. Pass its name as `subagent_type`.
 | Adversarial review before commit/merge | `vise:reviewer` (read-only) |
 | Security surface (auth, input, secrets) | `vise:security-auditor` (read-only) |
 
-Match the backend agent to the file's language, not the task's vibe. No
-specialist fits (infra, config, glue) → `general-purpose`. Design/naming/
-tradeoffs are never in this table — those stay with the engineer.
+Match the backend agent to the file's language, not the task's vibe.
+Design/naming/tradeoffs are never in this table — those stay with the engineer.
+
+### When no specialist fits
+
+Infra, config, CI, Dockerfiles, Terraform, glue → `general-purpose`. That agent
+**preloads nothing**: no `engineering-baseline`, no language rules, no
+`ponytail`. A brief that does not say so gets an agent working without any of
+vise's conventions.
+
+So when you dispatch `general-purpose` to touch code, name the skills in the
+brief: *"Load the `engineering-baseline` and `bash-rules` skills before your
+first edit."* The rules that ship and apply:
+
+`engineering-baseline` (always) · `ponytail` (always, when writing) ·
+`sql-rules` · `bash-rules` · `web-ui-rules` · and the twelve `<lang>-rules`
+skills — `python` `typescript` `go` `rust` `java` `kotlin` `csharp` `ruby`
+`php` `swift` `lua` `cpp`.
+
+Nothing matches the language at all (Elixir, Zig, Nix, HCL) → say so in the
+brief and in your report, and hold `general-purpose` to `engineering-baseline`
+plus the project's existing files as the standard.
 
 ## Maximize parallelism
 

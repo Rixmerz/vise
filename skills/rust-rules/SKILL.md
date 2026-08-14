@@ -8,9 +8,13 @@ description: Rust coding conventions — error handling, ownership idioms, unsaf
 > Apply ONLY when the file under edit or review is Rust (`.rs`). If the current
 > file is not Rust, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Use `?` for error propagation
-- Use `thiserror` for library errors, `anyhow` for application errors
+- Give libraries a concrete error enum and applications a boxed/erased error; `thiserror` and `anyhow` are the greenfield defaults for those two shapes
 - Use `expect("reason")` over `unwrap()` when panic is intentional
 - Add `// SAFETY:` comment to every `unsafe` block
 - Use iterators (`.iter().map().filter().collect()`) over manual index loops
@@ -39,3 +43,13 @@ description: Rust coding conventions — error handling, ownership idioms, unsaf
 - Don't use `Box<dyn FnMut>` callbacks for observer — use channels
 - Don't add `#[inline]` without profiling data
 - Don't ignore `cargo audit` results in CI
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- Use bound parameters (`sqlx::query!`, `.bind(..)`) — never `format!` into SQL
+- `Command::new(..).arg(..)` with separate arguments, never `sh -c` with interpolation
+- Use `OsRng`/`getrandom` for tokens and a constant-time compare (`subtle`) for secrets
+- Every `unsafe` block is a security surface — an undocumented one is a finding, not a style note
+- Prefer checked arithmetic (`checked_add`, `try_into`) wherever the value derives from input

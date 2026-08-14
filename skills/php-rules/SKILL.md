@@ -8,6 +8,10 @@ description: PHP coding conventions — strict types, typed properties, PSR stan
 > Apply ONLY when the file under edit or review is PHP (`.php`). If the current
 > file is not PHP, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Start every file with `declare(strict_types=1);`
 - Type every property, parameter, and return (including `void`/`never`/nullable `?T`)
@@ -30,3 +34,13 @@ description: PHP coding conventions — strict types, typed properties, PSR stan
 - Don't mix business logic into templates
 - Don't return mixed `false`-or-value sentinels — throw or return null with a nullable type
 - Don't ignore `phpstan`/`psalm` findings without justification
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- Prepared statements with bound parameters for every query — this is the single most common finding in PHP code
+- `password_hash`/`password_verify` for passwords — never md5, sha1, or a hand-rolled salt
+- `random_bytes`/`random_int` for tokens, `hash_equals` for comparison
+- Escape output for its destination context — `htmlspecialchars` for HTML, never raw echo of user data
+- Never `unserialize()` untrusted input; use `json_decode`

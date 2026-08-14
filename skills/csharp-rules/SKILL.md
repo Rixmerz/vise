@@ -8,6 +8,10 @@ description: C# conventions — nullable reference types, async/await discipline
 > Apply ONLY when the file under edit or review is C# (`.cs`). If the current
 > file is not C#, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Enable nullable reference types (`#nullable enable`) and honor the annotations
 - `async`/`await` all the way; return `Task`/`Task<T>`; suffix async methods with `Async`
@@ -29,3 +33,13 @@ description: C# conventions — nullable reference types, async/await discipline
 - Don't enumerate an `IEnumerable` multiple times when it may be a deferred/expensive query
 - Don't use `string` concatenation in loops — use `StringBuilder`/`string.Join`
 - Don't leave `Console.WriteLine` for diagnostics — use `ILogger`
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- Parameterized `SqlCommand`, or EF Core's interpolation-safe `FromSqlInterpolated` — never a concatenated query
+- Never `BinaryFormatter`, and never `JsonSerializer` with unrestricted type handling on untrusted input
+- `Process` with `ArgumentList`, never a joined command string
+- `RandomNumberGenerator` for tokens, `CryptographicOperations.FixedTimeEquals` for comparison
+- Set `XmlResolver = null` on `XmlReaderSettings` (XXE)

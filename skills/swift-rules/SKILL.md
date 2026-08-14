@@ -9,6 +9,10 @@ description: Swift conventions — optionals discipline, value types, error hand
 > current file is not Swift, do not use this skill — it does not apply to other
 > languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Prefer `let` over `var`; prefer `struct`/`enum` (value types) over `class`
 - Unwrap optionals with `if let`/`guard let`/`??` — use guard for early exit
@@ -29,3 +33,13 @@ description: Swift conventions — optionals discipline, value types, error hand
 - Don't use reference types when a value type models the data correctly
 - Don't ignore compiler warnings or leave `print()` diagnostics in shipping code
 - Don't subclass `NSObject`/use `@objc` unless interop actually requires it
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- Bind parameters in every SQLite/Postgres driver call — never interpolate into SQL
+- Store credentials in the Keychain — never `UserDefaults`, a plist, or the app bundle
+- `SecRandomCopyBytes` or `SystemRandomNumberGenerator` for tokens
+- A successful `Codable` decode is not validation — range-check and constrain decoded values
+- Pin or validate TLS trust explicitly rather than disabling ATS

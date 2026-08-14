@@ -8,6 +8,10 @@ description: Java coding conventions — immutability, Optional discipline, reso
 > Apply ONLY when the file under edit or review is Java (`.java`). If the current
 > file is not Java, do not use this skill — it does not apply to other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Prefer `final` fields and immutable objects; use `record` for data carriers
 - Use `Optional<T>` for return values that may be absent — never for fields or params
@@ -32,3 +36,13 @@ description: Java coding conventions — immutability, Optional discipline, reso
 - Don't call overridable methods from a constructor
 - Don't use checked exceptions for control flow
 - Don't leave `System.out.println` in production code — use a logger (SLF4J)
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- `PreparedStatement` with placeholders — never string-concatenated SQL, and never a concatenated JPQL/HQL query
+- Never deserialize untrusted data with `ObjectInputStream`
+- `ProcessBuilder` with an argument list, never a joined shell string
+- `SecureRandom` for tokens, `MessageDigest.isEqual` for comparison, `password_hash`-grade KDFs (bcrypt/scrypt/Argon2) for passwords
+- Disable external entities on every XML parser and document builder (XXE)

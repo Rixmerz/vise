@@ -42,11 +42,34 @@ Only then:
 - The next REAL dispatch is the test — no synthetic re-runs.
 - Agent .md files are read fresh per spawn — no session restart needed.
 
+## Where the heal is allowed to land
+
+Check this before applying a **(b) charter gap** fix, because the obvious target
+is the wrong one half the time.
+
+- `.claude/agents/<name>.md` — the project's own agent. **Editable.** It is
+  under version control and survives everything.
+- `<plugin-root>/agents/<name>.md` — a bundled vise agent, living wherever the
+  plugin was installed. **A charter edit here is silently reverted on the next
+  plugin update.** Never write the heal there.
+
+To heal a bundled agent, copy the charter to `.claude/agents/<name>.md` first
+and edit the copy — a project-level agent of the same name takes precedence over
+the plugin's. Say in your report that you shadowed a bundled agent, because the
+copy now stops receiving upstream improvements to that charter.
+
+If the failure is really vise's fault rather than this project's, the fix is a
+bug report against vise, not a local shadow. Prefer classification **(a)
+briefing gap** or **(d) procedure gap** for bundled agents — both land in files
+the project owns and neither gets overwritten.
+
 ## Guards
 
 - Never delete existing rules while adding one.
 - Agent files <150 lines; over → split into runbooks.
 - One incident never justifies a charter edit.
+- Never edit a charter inside the plugin install directory — shadow it under
+  `.claude/agents/` instead.
 
 ## Storage limits — a convention, not a feature
 

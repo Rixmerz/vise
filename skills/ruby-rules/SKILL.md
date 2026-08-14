@@ -9,6 +9,10 @@ description: Ruby coding conventions — idiomatic blocks, safe navigation, froz
 > If the current file is not Ruby, do not use this skill — it does not apply to
 > other languages.
 
+Precedence: `engineering-baseline` settles conflicts — safety outranks
+everything, and the project's existing conventions outrank every preference
+stated below.
+
 ## DO
 - Add `# frozen_string_literal: true` at the top of every file
 - Prefer guard clauses (`return unless x`) over nested conditionals
@@ -31,3 +35,13 @@ description: Ruby coding conventions — idiomatic blocks, safe navigation, froz
 - Don't leave `puts`/`p` debugging in committed code — use a logger
 - Don't overuse metaprogramming when a plain method is clearer
 - Don't ignore `rubocop` offenses without an inline disable + reason
+
+## Security — outranks every rule above
+
+See `engineering-baseline` for the general floor. These are the language-specific footguns:
+
+- Parameterize (`where("x = ?", v)`, `where(x: v)`) — never interpolate into a query string, `order`, or `pluck`
+- Never `system`/backticks/`eval` with interpolated input — pass an argument array to `system`/`Open3`
+- `YAML.safe_load` and never `Marshal.load` on untrusted data
+- `SecureRandom` for tokens, `Rack::Utils.secure_compare` for comparison, bcrypt for passwords
+- Never `send`/`constantize`/`public_send` with a user-supplied name

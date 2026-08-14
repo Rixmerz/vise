@@ -87,3 +87,65 @@ def test_read_only_phases_named_by_the_skill_really_block_edits(graph_name, node
         f"{graph_name}:{node_id} no longer blocks Edit — the orchestration "
         "skill still describes it as a read-only phase"
     )
+
+
+# ---------------------------------------------------------------------------
+# The reverse direction — a workflow nobody routes to is a workflow nobody runs
+# ---------------------------------------------------------------------------
+
+# `dogfood` is vise developing vise; it is not a workflow a user's request maps
+# onto, so it is deliberately absent from the routing table. Every other bundled
+# graph must be reachable, or it ships as a file `graph_activate` accepts and
+# nothing ever names. `sprint-e2e` sat unrouted this way.
+_INTENTIONALLY_UNROUTED = {"dogfood"}
+
+
+def test_every_bundled_workflow_is_routable():
+    routed = set(_routed_names())
+    unrouted = _bundled_graph_names() - routed - _INTENTIONALLY_UNROUTED
+
+    assert not unrouted, (
+        f"bundled workflows the orchestration skill never routes to: "
+        f"{sorted(unrouted)}. Add a row to the Step 0 table, or add the name to "
+        "_INTENTIONALLY_UNROUTED with the reason it is not user-facing."
+    )
+
+
+def test_unrouted_allowlist_stays_honest():
+    """An allowlist entry for a graph that no longer ships hides the next drift."""
+    stale = _INTENTIONALLY_UNROUTED - _bundled_graph_names()
+    assert not stale, f"_INTENTIONALLY_UNROUTED names graphs that do not ship: {sorted(stale)}"
+
+
+# ---------------------------------------------------------------------------
+# The fleet table must name agents that exist
+# ---------------------------------------------------------------------------
+
+_AGENTS = _REPO / "agents"
+
+
+def test_fleet_table_names_only_agents_that_ship():
+    """`subagent_type: vise:backend-swift` fails at dispatch if the file is gone."""
+    text = _SKILL.read_text(encoding="utf-8")
+    referenced = set(re.findall(r"`vise:([a-z0-9-]+)`", text))
+    shipped = {p.stem for p in _AGENTS.glob("*.md")}
+
+    missing = sorted(referenced - shipped)
+    assert not missing, (
+        f"orchestration skill dispatches to agents that do not ship: {missing}"
+    )
+
+
+def test_every_shipped_agent_appears_in_the_fleet_table():
+    """An agent no table names is an agent the orchestrator never picks."""
+    text = _SKILL.read_text(encoding="utf-8")
+    referenced = set(re.findall(r"`vise:([a-z0-9-]+)`", text))
+    shipped = {p.stem for p in _AGENTS.glob("*.md")}
+
+    missing = sorted(shipped - referenced)
+    assert not missing, (
+        f"agents that ship but the orchestration skill never routes work to: "
+        f"{missing}. They can still be dispatched by name, but nothing tells the "
+        "engineer they exist — which is how backend-swift and backend-lua would "
+        "have been born unreachable."
+    )
