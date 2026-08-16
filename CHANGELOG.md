@@ -50,7 +50,6 @@ you may already depend on, it says so under **Behaviour change**.
 - **README documents the validator registry**, with a test that a new validator
   cannot ship undiscoverable — the same orphan failure as `swift-rules`, one
   layer down.
-
 - **`engineering-baseline` — the general rules every agent now carries, and the
   precedence rule that settles conflicts.** vise shipped twelve per-language
   rules skills and no language-agnostic ones: nothing on errors, secrets,
