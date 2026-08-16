@@ -164,6 +164,51 @@ Environment variables (all optional):
 | `VISE_QUALITY_PROFILE` | Override path to the `.vise/quality.yaml` file the `quality_check` node-gate validator reads (`checks: {name: [cmd, ...]}`). Defaults to `<project_dir>/.vise/quality.yaml` |
 | `VISE_OPENSPEC_ROOT` | Override the `openspec/` directory the `openspec` node-gate validator reads. Defaults to `<project_dir>/openspec`. Set it when planning artifacts live outside the code tree |
 
+## Node-gate validators
+
+A workflow node declares `validators:`; the gate runs them all and is
+**pass-all binary** — one red validator holds the transition. The registry:
+
+| `type` | Checks | Fail-open when |
+|---|---|---|
+| `tests_pass` | the project's test suite | no runner detected (set `VISE_TEST_CMD`) |
+| `lint_pass` | the project's linter | linter not on PATH (set `VISE_LINT_CMD`) |
+| `command_exit` | an arbitrary `cmd:` exits 0 | **never** — fails closed on a missing binary |
+| `files_exist` | declared `paths:` are present | never |
+| `capability` | a resolved capability tool returns ok | capability unbound |
+| `lsp_clean` | per-language diagnostics on changed files | no checker for that language |
+| `quality_check` | a `check:` name from `.vise/quality.yaml` | no profile, key absent, or binary missing |
+| `openspec` | `openspec/` planning artifacts | only the `validated` level; the four structural ones fail closed |
+| `no_new_deps` | no dependency manifest gained entries | not a git repo, no manifest, unresolvable base |
+| `diff_scope` | the diff stays inside declared `allow:` globs | not a git repo, or nothing changed |
+
+A fail-open pass reports `outcome: "unverified"` and `source: "asserted"` — it
+never reads as clean, and `goal_complete` will not grade it as verified.
+
+`no_new_deps` and `diff_scope` turn two rules that were previously only prose
+into something a gate can read. Neither bans anything:
+
+```yaml
+- id: "implement"
+  validators:
+    # ponytail requires a stated reason for a new dependency. Naming it here
+    # IS the statement; anything else added to a manifest or lockfile blocks
+    # and the evidence names the package.
+    - type: no_new_deps
+      allow: ["httpx"]
+      weight: 0.3
+    # The orchestration skill's hard rule — partition scope by file ownership
+    # before dispatching a wave. Empty `allow` FAILS CLOSED: a scope gate that
+    # permits everything when misconfigured is worse than no gate.
+    - type: diff_scope
+      allow: ["src/api/**", "tests/api/**"]
+      weight: 0.3
+```
+
+Both diff against `base:` (default `HEAD`, i.e. uncommitted work) and
+`diff_scope` also sees untracked files, since a brand-new file outside the
+partition is exactly the case worth catching.
+
 ## LSP servers
 
 `.claude-plugin/plugin.json` declares `lspServers` — Claude Code's own LSP

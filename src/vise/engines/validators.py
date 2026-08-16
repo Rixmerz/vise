@@ -17,6 +17,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -358,6 +359,210 @@ class FileExistsValidator:
             weight=self.weight,
             evidence="all present" if passed else f"missing: {missing}",
             at=_now(),
+            source="mechanical", exit_code=0 if passed else 1,
+        )
+
+
+# --- git-diff validators ---------------------------------------------------
+#
+# Both close a gap between what an agent charter PROMISES and what anything
+# checks. `ponytail` says a new dependency needs a stated reason; nothing
+# measured whether one appeared. The orchestration skill says a wave must not
+# write outside its partition; nothing measured that either. A promise no gate
+# can read is a preference, and preferences drift.
+
+# Dependency manifests worth watching, across the ecosystems vise ships rules
+# for. Lockfiles are included deliberately: a transitive addition is still a new
+# trust relationship, and it is the one nobody declares.
+_DEP_MANIFESTS: tuple[str, ...] = (
+    "pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.cfg",
+    "Pipfile", "uv.lock", "poetry.lock",
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "go.mod", "go.sum",
+    "Cargo.toml", "Cargo.lock",
+    "pom.xml", "build.gradle", "build.gradle.kts", "gradle/libs.versions.toml",
+    "Gemfile", "Gemfile.lock",
+    "composer.json", "composer.lock",
+    "Package.swift", "Package.resolved",
+    "*.csproj", "packages.config", "Directory.Packages.props",
+)
+
+# Diff noise that is never a dependency, whatever the manifest's format.
+_DEP_NOISE = re.compile(r"^\+\s*(#|//|$|\[|\{|\}|version\s*=|name\s*=)")
+
+
+def _git(args: list[str], cwd: str, timeout: int = 30) -> subprocess.CompletedProcess | None:
+    """Run git, or return None when git is unusable here. Never raises."""
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            check=False, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def _unverified(name: str, weight: float, why: str) -> ValidatorRecord:
+    """A pass that checked nothing, labelled as such.
+
+    Same contract every other validator here follows: never block a repo over
+    tooling it does not have, and never let that pass read as clean.
+    """
+    return ValidatorRecord(
+        name=name, passed=True, confidence_contribution=0.0, weight=weight,
+        evidence=why, at=_now(), source="asserted", exit_code=None,
+        outcome="unverified",
+    )
+
+
+@dataclass
+class NoNewDepsValidator:
+    """Fail when a dependency manifest gained entries in the diff being gated.
+
+    Not a ban — an accounting check. `ponytail`'s ladder ends with "write it
+    yourself", and `engineering-baseline` requires a stated reason why the
+    stdlib and the existing manifest could not do it. This makes an undeclared
+    addition visible at the gate instead of at review time, and `allow` is how a
+    declared one passes: naming the package in the node config IS the statement.
+
+    Fail-open, like every validator here: no git, no manifests, or an unknown
+    base ref reports `unverified` rather than blocking.
+    """
+    base: str = "HEAD"
+    allow: tuple[str, ...] = ()
+    weight: float = 0.3
+    name: str = "no_new_deps"
+    timeout: int = 30
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        proj = goal.project_dir
+
+        if (r := _git(["rev-parse", "--git-dir"], proj, self.timeout)) is None or r.returncode != 0:
+            return _unverified(self.name, self.weight, "not a git repository — nothing to diff")
+        if (r := _git(["rev-parse", "--verify", self.base], proj, self.timeout)) is None or r.returncode != 0:
+            return _unverified(self.name, self.weight, f"base ref {self.base!r} does not resolve")
+
+        # Glob entries (`*.csproj`) must be EXPANDED, not passed through: a
+        # pattern always "exists" as a string, so forwarding it unresolved made
+        # a repo with no manifest at all look like it had one, and the
+        # never-checked case reported itself as verified.
+        present: list[str] = []
+        root = Path(proj)
+        for m in _DEP_MANIFESTS:
+            if "*" in m:
+                present.extend(
+                    str(hit.relative_to(root)) for hit in sorted(root.glob(m))
+                )
+            elif (root / m).exists():
+                present.append(m)
+        if not present:
+            return _unverified(self.name, self.weight, "no dependency manifest in this repo")
+
+        diff = _git(["diff", "-U0", self.base, "--", *present], proj, self.timeout)
+        if diff is None or diff.returncode != 0:
+            return _unverified(self.name, self.weight, "git diff failed against the manifests")
+
+        added: list[str] = []
+        current = ""
+        for line in diff.stdout.splitlines():
+            if line.startswith("+++ b/"):
+                current = line[6:]
+                continue
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            if _DEP_NOISE.match(line):
+                continue
+            body = line[1:].strip()
+            if not body:
+                continue
+            # `allow` matches on substring: a manifest line is
+            # `requests==2.31.0` in one ecosystem and `"requests": "^2.31"` in
+            # another, and a node config should not have to know which.
+            if any(pkg and pkg in body for pkg in self.allow):
+                continue
+            added.append(f"{current}: {body}"[:160])
+
+        passed = not added
+        evidence = (
+            f"no manifest additions vs {self.base} ({len(present)} manifest(s) checked)"
+            if passed else
+            f"{len(added)} dependency line(s) added vs {self.base}: " + "; ".join(added[:5])
+        )
+        return ValidatorRecord(
+            name=self.name, passed=passed,
+            confidence_contribution=self.weight if passed else 0.0,
+            weight=self.weight, evidence=evidence[:300], at=_now(),
+            source="mechanical", exit_code=0 if passed else 1,
+        )
+
+
+@dataclass
+class DiffScopeValidator:
+    """Fail when the diff touches a file outside the node's declared scope.
+
+    The orchestration skill's hard rule is "never two agents writing the same
+    file in one wave — partition scope by file ownership before dispatching".
+    Nothing enforced it, so a builder that wandered outside its partition was
+    caught by review or not at all.
+
+    `allow` is a list of fnmatch globs, relative to the repo root. Empty
+    `allow` FAILS CLOSED — same choice `quality_check` makes for an empty
+    `check:`. A scope gate that permits everything when misconfigured is worse
+    than no gate, because it reads as one.
+    """
+    allow: tuple[str, ...] = ()
+    base: str = "HEAD"
+    weight: float = 0.3
+    name: str = "diff_scope"
+    timeout: int = 30
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        proj = goal.project_dir
+
+        if not self.allow:
+            return ValidatorRecord(
+                name=self.name, passed=False, confidence_contribution=0.0,
+                weight=self.weight,
+                evidence="diff_scope misconfigured: no `allow:` globs given in the graph node",
+                at=_now(), source="mechanical", exit_code=None,
+            )
+
+        if (r := _git(["rev-parse", "--git-dir"], proj, self.timeout)) is None or r.returncode != 0:
+            return _unverified(self.name, self.weight, "not a git repository — nothing to diff")
+        if (r := _git(["rev-parse", "--verify", self.base], proj, self.timeout)) is None or r.returncode != 0:
+            return _unverified(self.name, self.weight, f"base ref {self.base!r} does not resolve")
+
+        # Tracked changes plus untracked files: a builder creating a brand-new
+        # file outside its partition is exactly the case this exists to catch,
+        # and `git diff` alone never sees it.
+        changed: list[str] = []
+        tracked = _git(["diff", "--name-only", self.base], proj, self.timeout)
+        if tracked is None or tracked.returncode != 0:
+            return _unverified(self.name, self.weight, "git diff failed")
+        changed.extend(tracked.stdout.split())
+        untracked = _git(
+            ["ls-files", "--others", "--exclude-standard"], proj, self.timeout
+        )
+        if untracked is not None and untracked.returncode == 0:
+            changed.extend(untracked.stdout.split())
+
+        if not changed:
+            return _unverified(self.name, self.weight, f"no files changed vs {self.base}")
+
+        outside = sorted({
+            f for f in changed
+            if not any(fnmatch(f, pattern) for pattern in self.allow)
+        })
+        passed = not outside
+        evidence = (
+            f"all {len(set(changed))} changed file(s) inside scope"
+            if passed else
+            f"{len(outside)} file(s) outside {list(self.allow)}: " + ", ".join(outside[:8])
+        )
+        return ValidatorRecord(
+            name=self.name, passed=passed,
+            confidence_contribution=self.weight if passed else 0.0,
+            weight=self.weight, evidence=evidence[:300], at=_now(),
             source="mechanical", exit_code=0 if passed else 1,
         )
 
@@ -1100,6 +1305,8 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "lsp_clean": LspCleanValidator,
     "quality_check": QualityCheckValidator,
     "openspec": OpenSpecValidator,
+    "no_new_deps": NoNewDepsValidator,
+    "diff_scope": DiffScopeValidator,
 }
 
 
