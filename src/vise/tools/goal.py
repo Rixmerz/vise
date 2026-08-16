@@ -144,10 +144,20 @@ def register_goal(mcp) -> None:
         results, confidence = val_engine.run_validators(g)
         result_dicts = [asdict(r) for r in results]
 
+        # `attempts` advances here and nowhere else. A validation round IS an
+        # attempt at the goal, and it is the same call that appends the
+        # confidence sample, so the counter and the plateau window stay in
+        # step by construction. Nothing used to increment it at all, which
+        # made two things false at once: `engines.goal_gate` releases the
+        # Stop hook at `attempts >= VISE_GOAL_GATE_MAX_ATTEMPTS`, so that
+        # escape hatch could never fire; and the block message told the agent
+        # "attempt 0/50" on every single turn, which reads as "the cap is not
+        # what is holding you here" no matter how long the loop had run.
         engine.update_goal(
             resolved_dir,
             last_results=results,
             confidence=confidence,
+            attempts=g.attempts + 1,
         )
         engine.append_history(
             resolved_dir,
