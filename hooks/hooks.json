@@ -32,6 +32,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"${VISE_SNAPSHOT_ON_EDIT:-}\" ] && PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/snapshot_trigger.py\" --pre || true",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [

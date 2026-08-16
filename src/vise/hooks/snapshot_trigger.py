@@ -1,5 +1,43 @@
 #!/usr/bin/env python3
-"""PostToolUse hook: OPT-IN per-edit snapshot + delta summary.
+"""OPT-IN snapshot capture around tool calls, in two modes.
+
+Run with ``--pre`` it is a PreToolUse hook on Bash; run with no argument it is
+the PostToolUse hook described below. The mode comes from argv rather than
+from the payload because ``hooks.json`` is the only caller and an explicit
+flag is testable without simulating Claude Code's event shape.
+
+Why a pre mode exists
+---------------------
+The post hook records what the tree looks like *after* a tool ran. That is a
+useful timeline and a useless rescue: capturing after ``git reset --hard``
+documents the damage. Measured before this hook existed —
+
+    t=0   Edit  -> snapshot v1
+    t=5   Edit  -> throttled (30 s)        <- v2 never captured
+    t=10  git checkout -- .                <- v2 destroyed
+
+    v2 recoverable from any snapshot: False
+
+so the capture has to happen *before* the destructive command, and it must
+ignore the 30 s throttle — the throttle is precisely what dropped v2. What
+bounds the history instead is ``snapshots.create(dedup=True)``: a run of
+destructive commands with no edits between them describes one tree, so it
+writes one snapshot.
+
+The pre hook only fires for commands ``_should_skip`` classifies as writers,
+so ``git status`` and friends cost nothing beyond the process that decides so.
+
+Cost
+----
+``hooks.json`` gates this on the *presence* of ``VISE_SNAPSHOT_ON_EDIT`` in
+the shell, before spawning Python: the feature is off by default and users who
+never enable it pay a shell test (~1 ms) instead of an interpreter start
+(~30 ms) on every Bash call. The gate deliberately tests presence, not value —
+the truthy spelling (``1``/``true``/``yes``/``on``) is decided in exactly one
+place, ``core.snapshots.on_edit_capture_enabled``, and a second copy of that
+rule in shell is how the hook and ``snapshot_list`` would come to disagree.
+
+PostToolUse mode: OPT-IN per-edit snapshot + delta summary.
 
 Snapshots are semantic-first: the primary trigger is a workflow *phase
 transition* (``graph_traverse`` -> ``create_for_phase_transition``), which
@@ -169,8 +207,47 @@ def _emit_context(text: str) -> None:
     sys.stdout.flush()
 
 
+def _pre_main(payload: dict) -> int:
+    """Capture BEFORE a Bash command that is about to touch the working tree.
+
+    Deliberately not throttled: the 30 s throttle is what dropped the edit that
+    the destructive command then destroyed. `dedup=True` is what keeps the
+    history bounded instead — an unchanged tree reuses the existing snapshot.
+    """
+    if payload.get("tool_name") != "Bash":
+        return 0
+    if _should_skip(payload):
+        return 0
+
+    from vise.core.snapshots import on_edit_capture_enabled
+
+    if not on_edit_capture_enabled():
+        return 0
+
+    try:
+        from vise.core import snapshots
+    except Exception as e:
+        print(f"[vise.snapshot] import failed: {e}", file=sys.stderr)
+        return 0
+
+    cmd = (payload.get("tool_input", {}) or {}).get("command", "")
+    try:
+        snap = snapshots.create(
+            _project_dir(), label=f"pre-bash: {cmd[:60]}", phase="", dedup=True
+        )
+    except Exception as e:
+        print(f"[vise.snapshot] pre-capture skipped: {e}", file=sys.stderr)
+        return 0
+
+    if snap is not None:
+        print(f"[vise.snapshot] pre-bash {snap.id}", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     payload = _read_input()
+    if "--pre" in sys.argv[1:]:
+        return _pre_main(payload)
     if _should_skip(payload):
         return 0
 
