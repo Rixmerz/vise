@@ -115,8 +115,34 @@ src/vise/
 ├── hooks/         # Claude Code hook entry points (see table above)
 ├── assets/        # bundled workflows (9), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
-└── cli/           # `vise` CLI (graph/experience management offline)
+└── cli/           # `vise` CLI (graph/experience/insights, offline)
 ```
+
+### `vise insights` — what the gates actually did
+
+vise gates other repos on evidence, so it keeps some about itself. Every red
+gate, every override, and every validator outcome is appended to
+`gates.jsonl` alongside the workflow activations, and this command reads it
+back:
+
+```bash
+vise insights          # human summary
+vise insights --json   # machine-readable
+```
+
+Two numbers there are worth more than the rest:
+
+- **override rate** — how often a red gate was walked through with
+  `VISE_NODE_GATE_OVERRIDE=1`. The stored `node_gate_state` counter cannot
+  produce this: it advances identically whether the gate was fixed or bypassed.
+  A high rate is a bug report about the gate, not about whoever set the
+  variable.
+- **verified rate** — `passed` is not `verified`. Every validator skip-passes
+  when its tool is unconfigured, so a workflow whose checks are mostly
+  `unverified` is ceremony, and the report names any validator that has never
+  once verified anything on this machine.
+
+Reads only, and an absent log is an empty report rather than an error.
 
 ## Configuration
 
@@ -137,6 +163,51 @@ Environment variables (all optional):
 | `VISE_TEST_CMD` / `VISE_LINT_CMD` | Command the `tests_pass` / `lint_pass` node-gate validators run. Set these when auto-detection picks the wrong runner, or when the repo's linter isn't on PATH — `lint_pass` then reports `lint skipped … set VISE_LINT_CMD to lint this repo` instead of passing unchecked |
 | `VISE_QUALITY_PROFILE` | Override path to the `.vise/quality.yaml` file the `quality_check` node-gate validator reads (`checks: {name: [cmd, ...]}`). Defaults to `<project_dir>/.vise/quality.yaml` |
 | `VISE_OPENSPEC_ROOT` | Override the `openspec/` directory the `openspec` node-gate validator reads. Defaults to `<project_dir>/openspec`. Set it when planning artifacts live outside the code tree |
+
+## Node-gate validators
+
+A workflow node declares `validators:`; the gate runs them all and is
+**pass-all binary** — one red validator holds the transition. The registry:
+
+| `type` | Checks | Fail-open when |
+|---|---|---|
+| `tests_pass` | the project's test suite | no runner detected (set `VISE_TEST_CMD`) |
+| `lint_pass` | the project's linter | linter not on PATH (set `VISE_LINT_CMD`) |
+| `command_exit` | an arbitrary `cmd:` exits 0 | **never** — fails closed on a missing binary |
+| `files_exist` | declared `paths:` are present | never |
+| `capability` | a resolved capability tool returns ok | capability unbound |
+| `lsp_clean` | per-language diagnostics on changed files | no checker for that language |
+| `quality_check` | a `check:` name from `.vise/quality.yaml` | no profile, key absent, or binary missing |
+| `openspec` | `openspec/` planning artifacts | only the `validated` level; the four structural ones fail closed |
+| `no_new_deps` | no dependency manifest gained entries | not a git repo, no manifest, unresolvable base |
+| `diff_scope` | the diff stays inside declared `allow:` globs | not a git repo, or nothing changed |
+
+A fail-open pass reports `outcome: "unverified"` and `source: "asserted"` — it
+never reads as clean, and `goal_complete` will not grade it as verified.
+
+`no_new_deps` and `diff_scope` turn two rules that were previously only prose
+into something a gate can read. Neither bans anything:
+
+```yaml
+- id: "implement"
+  validators:
+    # ponytail requires a stated reason for a new dependency. Naming it here
+    # IS the statement; anything else added to a manifest or lockfile blocks
+    # and the evidence names the package.
+    - type: no_new_deps
+      allow: ["httpx"]
+      weight: 0.3
+    # The orchestration skill's hard rule — partition scope by file ownership
+    # before dispatching a wave. Empty `allow` FAILS CLOSED: a scope gate that
+    # permits everything when misconfigured is worse than no gate.
+    - type: diff_scope
+      allow: ["src/api/**", "tests/api/**"]
+      weight: 0.3
+```
+
+Both diff against `base:` (default `HEAD`, i.e. uncommitted work) and
+`diff_scope` also sees untracked files, since a brand-new file outside the
+partition is exactly the case worth catching.
 
 ## LSP servers
 

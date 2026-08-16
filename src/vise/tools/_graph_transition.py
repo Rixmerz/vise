@@ -129,13 +129,41 @@ def register_graph_transition_tools(mcp):
             getattr(current_node, "validators", None) or getattr(current_node, "recipe", None)
         ):
             node_gate = await _run_node_validators(current_node, resolved_dir, state)
+
+            # Emit for EVERY check, on a green gate as much as a red one. The
+            # interesting failure is a node that passed having verified nothing
+            # — outcome="unverified" across the board — and restricting this to
+            # the blocked branch would be blind to exactly that case.
+            from vise.engines.telemetry import record_event
+            for chk in (node_gate or {}).get("checks") or []:
+                record_event(
+                    "validator_outcome",
+                    node=current_node_id,
+                    validator=chk.get("name"),
+                    passed=chk.get("passed"),
+                    outcome=chk.get("outcome"),
+                    source=chk.get("source"),
+                )
+
             if node_gate and not node_gate["passed"]:
                 # attempt tracking; env escape hatch
                 st = state.node_gate_state.setdefault(current_node_id, {"attempts": 0})
                 st["attempts"] += 1
                 save_graph_state(resolved_dir, state)
                 import os
-                if os.environ.get("VISE_NODE_GATE_OVERRIDE") != "1":
+
+                # `attempts` advances identically whether the gate was fixed or
+                # bypassed, so it cannot answer "is anyone routing around this?".
+                # These two kinds can, and they are the reason this log exists.
+                overridden = os.environ.get("VISE_NODE_GATE_OVERRIDE") == "1"
+                record_event(
+                    "node_gate_overridden" if overridden else "node_gate_blocked",
+                    node=current_node_id,
+                    attempts=st["attempts"],
+                    failed=[f.get("name") for f in (node_gate.get("failed") or [])],
+                )
+
+                if not overridden:
                     return {
                         "error": True,
                         "node_gate_blocked": True,

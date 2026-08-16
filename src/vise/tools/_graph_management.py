@@ -248,6 +248,12 @@ def register_graph_management_tools(mcp):
         initialize_graph_state(resolved_dir, graph, graph_name)
         start_node = graph.get_start_node()
 
+        # Which workflows are actually reached is otherwise unknowable. vise
+        # shipped `sprint-e2e` with no route to it for months, and the only way
+        # anyone found out was reading the routing table against the directory.
+        from vise.engines.telemetry import record_event
+        record_event("workflow_activated", graph=graph_name, node=start_node.id if start_node else None)
+
         # A "refresh project metadata + pattern catalog" step used to run here.
         # Both engines never shipped in this package, so activation printed two
         # `refresh failed (non-fatal)` warnings blaming subsystems that do not

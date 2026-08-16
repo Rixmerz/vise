@@ -373,3 +373,26 @@ def test_scan_node_is_not_gated_on_scanner_exit_codes():
         "every traverse, so a SAST that found a real finding would block the "
         "move to triage — the one phase that exists to process it."
     )
+
+
+# ---------------------------------------------------------------------------
+# A validator nobody can find is a validator nobody uses
+# ---------------------------------------------------------------------------
+
+def test_every_validator_in_the_registry_is_documented():
+    """The same orphan failure as swift-rules, one layer down.
+
+    A workflow author picks validators from the README table — the registry
+    itself is not a document anyone reads. `files_exist` is used by zero bundled
+    workflows and that is fine by design; being undiscoverable is not.
+    """
+    from vise.engines.validators import _REGISTRY
+
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    undocumented = sorted(
+        name for name in _REGISTRY if f"`{name}`" not in readme
+    )
+    assert not undocumented, (
+        f"validators in the registry but absent from README: {undocumented}. "
+        "A workflow author has no way to discover them."
+    )

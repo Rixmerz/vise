@@ -10,6 +10,46 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Added
 
+- **`vise insights` — vise can finally produce evidence about itself.** It
+  gates other repos on evidence and recorded none of its own: nothing said which
+  workflow ran, which gate blocked, or whether anyone was setting
+  `VISE_NODE_GATE_OVERRIDE=1` and walking through. `node_gate_state` counts
+  failed attempts, but that counter advances identically whether the gate was
+  fixed or bypassed, so the one question worth asking about a gate was
+  unanswerable. `gates.jsonl` now records `workflow_activated`,
+  `node_gate_blocked`, `node_gate_overridden`, and `validator_outcome` — the
+  last on green gates too, because a node that passes having verified nothing
+  never produces a blocked event and is the case most worth catching. Two
+  numbers carry the report: the **override rate** (a gate routed around is not a
+  gate) and the **verified rate** (`passed` is not `verified`; it names any
+  validator that has never once verified anything on this machine). Every write
+  is best-effort — a telemetry call that can break a session is worse than no
+  telemetry.
+- **`shapes` on an experience entry — the repeat count that could not be
+  counted.** `agent-autoheal` decides anecdote-vs-pattern on whether the same
+  failure shape appears twice for one agent, had nowhere to store that, and so
+  encoded incidents as `;;`-separated segments inside `description` — which
+  merges by keeping the **longest** string. A shorter follow-up was discarded
+  while the write still reported success, and a tally in prose was the worst
+  case of all: `x1` → `x2` measures the same, so the increment never won. The
+  cold path's trigger could not be incremented through the store that held it.
+  `shapes: dict[str, int]` merges additively; `experience_record` takes a
+  `shape` and returns `shape_count`. The skill drops its whole
+  storage-workaround section.
+- **`no_new_deps` and `diff_scope` validators.** Two rules that existed only as
+  prose. `ponytail` requires a stated reason for a new dependency and nothing
+  measured whether one appeared; `skills/orchestration` requires a wave to
+  partition scope by file ownership and nothing measured that either. Neither
+  validator bans anything — naming a package in `allow:` *is* the stated reason,
+  and `diff_scope` passes for any file inside the declared partition. Both
+  fail-open (`unverified`, never a block) with no git, no manifest, or an
+  unresolvable base; `diff_scope` with an empty `allow` fails **closed**, since
+  a scope gate that permits everything when misconfigured is worse than no gate.
+  `diff_scope` also reads untracked files — a brand-new file outside the
+  partition is the case worth catching and `git diff` never sees it.
+- **README documents the validator registry**, with a test that a new validator
+  cannot ship undiscoverable — the same orphan failure as `swift-rules`, one
+  layer down.
 - **`engineering-baseline` — the general rules every agent now carries, and the
   precedence rule that settles conflicts.** vise shipped twelve per-language
   rules skills and no language-agnostic ones: nothing on errors, secrets,

@@ -123,6 +123,7 @@ def register_experience(mcp):
                     "severity": entry.severity,
                     "confidence": round(entry.confidence, 3),
                     "occurrences": entry.occurrences,
+                    "shapes": dict(entry.shapes),
                     "resolution": entry.resolution or None,
                     "scope": entry.scope,
                     "last_seen": entry.last_seen,
@@ -142,6 +143,7 @@ def register_experience(mcp):
         description: str,
         severity: str = "medium",
         resolution: str = "",
+        shape: str = "",
         scope: str = "project",
         project_dir: str | None = None,
         session_id: str | None = None
@@ -163,6 +165,14 @@ def register_experience(mcp):
             description: Human-readable description of the experience
             severity: low|medium|high|critical (default medium)
             resolution: How the issue was resolved (if applicable)
+            shape: Optional short slug naming the KIND of incident, e.g.
+                "agent:debugger/no-repro" or "missing-null-guard". Repeats of
+                the same slug are counted additively in the entry's ``shapes``
+                map, which is what a caller thresholds on ("the same shape
+                twice is a pattern, once is an anecdote"). Counting by writing
+                a tally into ``description`` does not work: descriptions merge
+                by keeping the longest, so ``x1`` -> ``x2`` is the same length
+                and the bump is silently discarded.
             scope: "global" (cross-project) or "project" (default project)
             project_dir: Project directory (optional after set_session)
             session_id: Optional session ID
@@ -198,6 +208,7 @@ def register_experience(mcp):
             project_origin=project_name,
             resolution=resolution,
             scope=scope,
+            shapes={shape: 1} if shape else {},
         )
 
         if scope == "project":
@@ -216,6 +227,8 @@ def register_experience(mcp):
             "domain": recorded.domain,
             "confidence": round(recorded.confidence, 3),
             "occurrences": recorded.occurrences,
+            "shapes": dict(recorded.shapes),
+            "shape_count": recorded.shapes.get(shape, 0) if shape else 0,
             "scope": recorded.scope,
             "is_new": recorded.occurrences == 1,
             "session_id": sid,
@@ -274,6 +287,7 @@ def register_experience(mcp):
                     "severity": e.severity,
                     "confidence": round(e.confidence, 3),
                     "occurrences": e.occurrences,
+                    "shapes": dict(e.shapes),
                     "scope": e.scope,
                     "resolution": e.resolution[:100] if e.resolution else None,
                     "last_seen": e.last_seen,
