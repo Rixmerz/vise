@@ -35,10 +35,42 @@ from pathlib import Path
 
 THROTTLE_SECONDS = 30.0
 MAX_FILES_IN_SUMMARY = 15
-_READ_ONLY_BASH = {
-    "ls", "cat", "grep", "rg", "find", "pwd", "echo",
-    "head", "tail", "wc", "git", "docker",
+
+# "Read-only" here means read-only *with respect to the working tree*, which is
+# the only thing a snapshot captures. `git config --global` writes a file and
+# still belongs in the read-only set; `git stash` does not.
+#
+# The previous version of this set classified by the first token alone and
+# listed `git`, `find` and `docker` as read-only wholesale. They are not:
+# `git reset --hard`, `git clean -fdx`, `find . -delete` and
+# `docker run -v $PWD:/w` all destroy the working tree, and the recorder that
+# calls itself a black-box recorder skipped every one of them.
+_ALWAYS_READ_ONLY = {
+    "ls", "cat", "grep", "rg", "pwd", "echo", "head", "tail", "wc",
+    "which", "whoami", "stat", "file", "du", "df", "tree", "diff", "date",
 }
+
+_READ_ONLY_GIT = {
+    "status", "log", "diff", "show", "blame", "rev-parse", "ls-files",
+    "ls-tree", "describe", "branch", "remote", "tag", "shortlog", "cat-file",
+    "reflog", "grep", "config", "fetch", "whatchanged", "name-rev",
+}
+
+_READ_ONLY_DOCKER = {
+    "ps", "images", "logs", "inspect", "version", "info", "top", "port",
+    "stats", "history",
+}
+
+# `find` walks by default and only writes when given an action.
+_FIND_WRITE_ACTIONS = {
+    "-delete", "-exec", "-execdir", "-ok", "-okdir",
+    "-fprint", "-fprintf", "-fls",
+}
+
+# Anything that chains one command to another. A command is only skipped when
+# *every* segment is read-only — `ls && rm -rf build` used to be classified by
+# its first token and skipped wholesale.
+_CHAIN = ("&&", "||", ";", "|", "&")
 
 
 def _project_dir() -> Path:
@@ -58,6 +90,38 @@ def _read_input() -> dict:
         return {}
 
 
+def _segment_is_read_only(tokens: list[str]) -> bool:
+    """Is one command segment guaranteed not to touch the working tree?
+
+    Unknown commands are treated as writers. Being wrong in that direction
+    costs one throttled snapshot; being wrong the other way costs the user's
+    work, which is what this hook exists to prevent.
+    """
+    if not tokens:
+        return True
+    cmd = tokens[0]
+    args = [t for t in tokens[1:] if not t.startswith("-")]
+
+    if cmd == "git":
+        return bool(args) and args[0] in _READ_ONLY_GIT
+    if cmd == "docker":
+        return bool(args) and args[0] in _READ_ONLY_DOCKER
+    if cmd == "find":
+        return not any(t in _FIND_WRITE_ACTIONS for t in tokens[1:])
+    return cmd in _ALWAYS_READ_ONLY
+
+
+def _is_read_only_command(cmd: str) -> bool:
+    """Whether a whole Bash invocation leaves the working tree alone."""
+    segments: list[list[str]] = [[]]
+    for token in cmd.split():
+        if token in _CHAIN:
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return all(_segment_is_read_only(seg) for seg in segments)
+
+
 def _should_skip(payload: dict) -> bool:
     tool = payload.get("tool_name", "")
     if tool in ("Edit", "Write"):
@@ -66,8 +130,7 @@ def _should_skip(payload: dict) -> bool:
         cmd = (payload.get("tool_input", {}) or {}).get("command", "")
         if not isinstance(cmd, str) or not cmd.strip():
             return True
-        first = cmd.strip().split()[0]
-        return first in _READ_ONLY_BASH
+        return _is_read_only_command(cmd)
     return True
 
 
