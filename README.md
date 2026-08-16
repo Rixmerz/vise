@@ -155,7 +155,7 @@ Environment variables (all optional):
 | `VISE_GOAL_GATE_OVERRIDE` | One-shot bypass of the goal gate |
 | `VISE_GOAL_GATE_MAX_ATTEMPTS` / `VISE_GOAL_GATE_PLATEAU_WINDOW` | Gate retry/plateau tuning |
 | `VISE_WORKFLOW_SUGGEST` | Toggle the workflow suggester hook |
-| `VISE_NODE_GATE_OVERRIDE` | One-shot bypass of a node validator gate |
+| `VISE_NODE_GATE_OVERRIDE` | One-shot bypass of a red node gate. Honoured by **both** the node gate and a `validators_green` edge — guarding only the first made it a no-op on `feature-dev`'s `spec` phase, whose exit edge is exactly that. Each gate it actually gets you past is recorded once; `vise insights` reports the rate |
 | `VISE_SNAPSHOT_ON_EDIT` | Enable per-edit snapshot capture (off by default; phase-transition snapshots always fire) |
 | `VISE_LOOP_COST_CAP` | Cost cap for loop recipes |
 | `VISE_EMBED_MODEL` / `VISE_EMBED_IDLE_TIMEOUT` / `VISE_EMBED_CACHE_DIR` / `VISE_EMBED_THREADS` | fastembed model, idle unload, model cache location, and worker threads (default 2) |

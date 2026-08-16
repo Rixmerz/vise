@@ -124,6 +124,14 @@ def register_graph_transition_tools(mcp):
         # it instead of executing every validator a second time.
         node_gate: dict | None = None
 
+        # The documented escape hatch, read once. Both gates below consult it:
+        # bypassing only the node gate left a `validators_green` edge rejecting
+        # the traverse anyway, which made the hatch a no-op on `feature-dev`'s
+        # `spec` phase — the one place agents actually reach for it.
+        import os
+
+        gate_override = os.environ.get("VISE_NODE_GATE_OVERRIDE") == "1"
+
         # Node validation gate: block exit if declared validators / recipe fail
         if current_node and (
             getattr(current_node, "validators", None) or getattr(current_node, "recipe", None)
@@ -150,20 +158,25 @@ def register_graph_transition_tools(mcp):
                 st = state.node_gate_state.setdefault(current_node_id, {"attempts": 0})
                 st["attempts"] += 1
                 save_graph_state(resolved_dir, state)
-                import os
 
                 # `attempts` advances identically whether the gate was fixed or
                 # bypassed, so it cannot answer "is anyone routing around this?".
                 # These two kinds can, and they are the reason this log exists.
-                overridden = os.environ.get("VISE_NODE_GATE_OVERRIDE") == "1"
-                record_event(
-                    "node_gate_overridden" if overridden else "node_gate_blocked",
-                    node=current_node_id,
-                    attempts=st["attempts"],
-                    failed=[f.get("name") for f in (node_gate.get("failed") or [])],
-                )
-
-                if not overridden:
+                #
+                # A BLOCK is recorded here because it is final — the return
+                # below ends the traverse. An OVERRIDE is NOT recorded here: at
+                # this point it is only an intent, and a `validators_green` edge
+                # further down may still reject it. Logging it now counted a
+                # bypass that never happened, and one user retrying four times
+                # showed up as four routed-around gates. It is recorded where it
+                # actually takes effect instead.
+                if not gate_override:
+                    record_event(
+                        "node_gate_blocked",
+                        node=current_node_id,
+                        attempts=st["attempts"],
+                        failed=[f.get("name") for f in (node_gate.get("failed") or [])],
+                    )
                     return {
                         "error": True,
                         "node_gate_blocked": True,
@@ -177,6 +190,18 @@ def register_graph_transition_tools(mcp):
                         "attempts": st["attempts"],
                         "project_dir": resolved_dir,
                     }
+
+        # One record per traverse that a red gate did NOT stop. Emitted after
+        # BOTH gates have had their say, so an override rejected downstream is
+        # never counted as a gate someone got around — that inflated the rate
+        # by one per retry.
+        if gate_override and node_gate is not None and not node_gate["passed"]:
+            record_event(
+                "node_gate_overridden",
+                node=current_node_id,
+                edge=edge_id,
+                failed=[f.get("name") for f in (node_gate.get("failed") or [])],
+            )
 
         # validators_green edge: eligible only when ALL source-node validators pass.
         # Fail-closed: a source node with no validators is NOT eligible.
@@ -207,18 +232,28 @@ def register_graph_transition_tools(mcp):
             )
             if vg_result is None or not vg_result["passed"]:
                 failed_count = vg_result["failed_count"] if vg_result else 0
-                return {
-                    "error": True,
-                    "validators_green_blocked": True,
-                    "session_id": sid,
-                    "message": (
-                        f"Edge '{edge_id}' (validators_green) is not eligible: "
-                        f"{failed_count} validator(s) failed at '{current_node_id}'. "
-                        f"Fix the failing validators and re-traverse."
-                    ),
-                    "gate_details": vg_result,
-                    "project_dir": resolved_dir,
-                }
+                # The override has to work HERE too, or it does not work at all
+                # on the gate people actually hit. `feature-dev`'s `spec` node
+                # exits by a validators_green edge, so bypassing only the node
+                # gate above left the traverse rejected anyway — the documented
+                # escape hatch ("VISE_NODE_GATE_OVERRIDE=1 to bypass", printed
+                # by the node gate's own message) silently did nothing on the
+                # phase where it is most often reached for.
+                if not gate_override:
+                    return {
+                        "error": True,
+                        "validators_green_blocked": True,
+                        "session_id": sid,
+                        "message": (
+                            f"Edge '{edge_id}' (validators_green) is not eligible: "
+                            f"{failed_count} validator(s) failed at '{current_node_id}'. "
+                            f"Fix the failing validators and re-traverse "
+                            f"(or VISE_NODE_GATE_OVERRIDE=1 to bypass)."
+                        ),
+                        "gate_details": vg_result,
+                        "project_dir": resolved_dir,
+                    }
+
 
         # Capture current HEAD SHA before transition (for 1C impact preview and entry tracking)
         entry_commit_sha: str | None = None

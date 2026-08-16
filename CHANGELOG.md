@@ -8,6 +8,29 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`VISE_NODE_GATE_OVERRIDE=1` did nothing on the gate people actually hit.**
+  It bypassed the node gate and then the `validators_green` edge check rejected
+  the traverse anyway, from a second gate that never consulted the variable.
+  `feature-dev`'s `spec` phase exits by a validators_green edge, so the escape
+  hatch — advertised in the node gate's own message, *"or
+  VISE_NODE_GATE_OVERRIDE=1 to bypass"* — was inert exactly where an agent
+  reaches for it, and the traverse kept failing with a different error, so the
+  agent retried the same edge in a loop. Found by driving `feature-dev` end to
+  end against a real repo, not by reading the code.
+
+  The override is now read once and consulted by both gates, and the
+  validators_green rejection names it too.
+
+- **The override rate counted intents, not bypasses.** `node_gate_overridden`
+  was emitted at the node gate, before the validators_green edge had its say —
+  so four retries of one blocked edge logged four routed-around gates for zero
+  actual bypasses. It is now emitted once, after both gates, only when the
+  traverse really proceeds. The number `vise insights` reports means what it
+  says again.
+
+
 ### Added
 
 - **`vise insights` — vise can finally produce evidence about itself.** It
