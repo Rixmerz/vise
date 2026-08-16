@@ -90,3 +90,43 @@ def test_the_enforcement_hooks_are_actually_wired() -> None:
 
     assert "graph_enforcer.py" in _scripts_for("PreToolUse")
     assert "goal_gate.py" in _scripts_for("Stop")
+
+
+# ---------------------------------------------------------------------------
+# La documentación cuenta hooks. Los conteos escritos a mano derivan.
+# ---------------------------------------------------------------------------
+#
+# CLAUDE.md decía "the 8 hook registrations". Ocho no era nada: ni los eventos
+# (6), ni las entradas por matcher (10), ni los comandos (12), ni los scripts
+# distintos (10). Había sido cierto alguna vez y nadie lo volvió a mirar.
+#
+# Es exactamente el problema que CLAUDE.md nombra en "Assets are asserted, not
+# trusted" — solo que la regla se aplicaba a `agents/`, `skills/` y los
+# workflows, y no a las afirmaciones sobre el cableado.
+
+CLAUDE_MD = REPO / "CLAUDE.md"
+README = REPO / "README.md"
+
+
+def _wired_scripts() -> set[str]:
+    return {m for c in _commands() for m in _HOOK_SCRIPT.findall(c)}
+
+
+def test_claude_md_states_the_real_registration_counts() -> None:
+    config = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))["hooks"]
+    commands = len(_commands())
+    scripts = len(_wired_scripts())
+    events = len(config)
+
+    claimed = CLAUDE_MD.read_text(encoding="utf-8")
+    expected = f"{commands} hook registrations across {scripts} scripts, {events} events"
+    assert expected in claimed, (
+        f"CLAUDE.md no dice la verdad sobre hooks.json — debería decir {expected!r}"
+    )
+
+
+def test_the_readme_table_names_every_wired_hook() -> None:
+    """Un hook cableado y no documentado es un efecto que nadie espera."""
+    readme = README.read_text(encoding="utf-8")
+    missing = sorted(s for s in _wired_scripts() if s not in readme)
+    assert not missing, f"cableados en hooks.json pero ausentes del README: {missing}"

@@ -93,6 +93,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 | UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
+| PreToolUse | `Bash` | `snapshot_trigger.py --pre` | Captures **before** a shell command that would touch the working tree, so a `git reset --hard` is survivable — **opt-in**, gated in the shell so it costs ~1 ms when off |
 | PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) — **opt-in**, no-ops unless `VISE_SNAPSHOT_ON_EDIT` is truthy |
 | PostToolUse | `Edit\|Write\|MultiEdit` | `edit_feedback.py` | Runs a fast ruff-only pass on the edited Python file and prints a concise findings summary to stderr — feedback only, never blocks |
 | PostToolUse | `Bash` | `experience_recorder.py` | Records learnings from commit `Why:` messages |

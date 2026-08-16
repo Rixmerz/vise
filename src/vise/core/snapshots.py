@@ -149,11 +149,22 @@ def _ensure_state_dir_gitignored(project: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create(project: Path, *, label: str = "", phase: str = "") -> Snapshot | None:
+def create(
+    project: Path, *, label: str = "", phase: str = "", dedup: bool = False
+) -> Snapshot | None:
     """Create a snapshot of the current working tree (tracked + untracked).
 
     Returns None if the directory isn't a git repo. Never modifies user-visible
     refs: branches, tags, HEAD, and working index are all untouched.
+
+    With ``dedup=True``, a tree identical to the most recent snapshot's returns
+    that snapshot instead of writing a second ref and journal line. Callers
+    that fire on an *event* rather than on a change need this: the pre-Bash
+    hook captures before every destructive command, and a run of them with no
+    edits in between describes one state, not five. It is off by default
+    because an explicit `snapshot_create` is a deliberate checkpoint — handing
+    back an older snapshot under a label the user did not choose would be a
+    surprise, and the caller asked for a marker, not for storage economy.
     """
     if not _is_git_repo(project):
         return None
@@ -192,6 +203,11 @@ def create(project: Path, *, label: str = "", phase: str = "") -> Snapshot | Non
             capture_output=True,
             text=True,
         ).stdout.strip()
+
+        if dedup:
+            existing = list_all(project)
+            if existing and existing[-1].tree == tree:
+                return existing[-1]
 
         # Orphan commit (no parent), metadata in message body
         parent = _resolve_head(project)
