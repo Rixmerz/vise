@@ -227,3 +227,59 @@ def test_both_are_reachable_from_a_graph_node():
     assert [v.name for v in built] == ["no_new_deps", "diff_scope"]
     assert built[0].allow == ["httpx"]
     assert built[1].weight == 0.5
+
+
+# ---------------------------------------------------------------------------
+# vise's own state must never count as the agent's work
+# ---------------------------------------------------------------------------
+
+def test_vise_state_files_do_not_block_a_clean_tree(repo: Path):
+    """The integration bug: diff_scope blocked having done nothing at all.
+
+    `graph_activate` writes `.claude/workflow/graph.yaml` into the project. In
+    any repo that had not gitignored it — vise's own .gitignore has the line,
+    but a consumer's may not — that untracked file counted as work outside the
+    partition, so the very first traverse after activating a workflow was
+    blocked by a file vise itself had just written.
+
+    Caught by driving a real graph, not by the unit tests above: they build a
+    bare git repo with no vise state, so the case could not arise.
+    """
+    (repo / ".claude" / "workflow").mkdir(parents=True)
+    (repo / ".claude" / "workflow" / "graph.yaml").write_text("nodes: []\n")
+
+    rec = DiffScopeValidator(allow=("src/*",)).run(_goal(repo))
+    assert rec.passed, rec.evidence
+    assert rec.outcome == "unverified", (
+        "nothing of the agent's changed, so this is 'nothing to check', not "
+        "'checked and clean'"
+    )
+
+
+def test_vise_state_is_excluded_but_real_work_is_still_judged(repo: Path):
+    """Excluding vise's files must not smuggle the agent's past the gate."""
+    (repo / ".claude" / "workflow").mkdir(parents=True)
+    (repo / ".claude" / "workflow" / "graph.yaml").write_text("nodes: []\n")
+    (repo / "sneaky.py").write_text("print('hi')\n")
+
+    rec = DiffScopeValidator(allow=("src/*",)).run(_goal(repo))
+    assert not rec.passed
+    assert "sneaky.py" in rec.evidence
+    assert "graph.yaml" not in rec.evidence, (
+        "vise's own state leaked into the report and would read as a finding"
+    )
+
+
+def test_user_authored_workflows_are_still_in_scope(repo: Path):
+    """`.claude/workflows/` (plural) is the user's, not vise's.
+
+    A graph the user wrote and dropped outside the declared partition is
+    exactly what this validator is for; excluding the whole `.claude/` tree
+    would have been the lazy fix and would have hidden it.
+    """
+    (repo / ".claude" / "workflows").mkdir(parents=True)
+    (repo / ".claude" / "workflows" / "mine-graph.yaml").write_text("nodes: []\n")
+
+    rec = DiffScopeValidator(allow=("src/*",)).run(_goal(repo))
+    assert not rec.passed
+    assert "mine-graph.yaml" in rec.evidence
