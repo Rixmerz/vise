@@ -115,8 +115,34 @@ src/vise/
 ├── hooks/         # Claude Code hook entry points (see table above)
 ├── assets/        # bundled workflows (9), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
-└── cli/           # `vise` CLI (graph/experience management offline)
+└── cli/           # `vise` CLI (graph/experience/insights, offline)
 ```
+
+### `vise insights` — what the gates actually did
+
+vise gates other repos on evidence, so it keeps some about itself. Every red
+gate, every override, and every validator outcome is appended to
+`gates.jsonl` alongside the workflow activations, and this command reads it
+back:
+
+```bash
+vise insights          # human summary
+vise insights --json   # machine-readable
+```
+
+Two numbers there are worth more than the rest:
+
+- **override rate** — how often a red gate was walked through with
+  `VISE_NODE_GATE_OVERRIDE=1`. The stored `node_gate_state` counter cannot
+  produce this: it advances identically whether the gate was fixed or bypassed.
+  A high rate is a bug report about the gate, not about whoever set the
+  variable.
+- **verified rate** — `passed` is not `verified`. Every validator skip-passes
+  when its tool is unconfigured, so a workflow whose checks are mostly
+  `unverified` is ceremony, and the report names any validator that has never
+  once verified anything on this machine.
+
+Reads only, and an absent log is an empty report rather than an error.
 
 ## Configuration
 

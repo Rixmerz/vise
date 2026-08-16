@@ -173,15 +173,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  warning: {summary['error']}", file=sys.stderr)
         print(f"  legacy tree left in place at {summary['legacy_dir']} (not deleted)")
         return 0
-    if args[0] in ("graph", "experience"):
+    if args[0] in ("graph", "experience", "insights"):
         import argparse
 
-        from vise.cli import experience_cmd, graph_cmd
+        from vise.cli import experience_cmd, graph_cmd, insights_cmd
 
         parser = argparse.ArgumentParser(prog="vise")
         sub = parser.add_subparsers(dest="command")
         graph_cmd.add_parser(sub)
         experience_cmd.add_parser(sub)
+        insights_cmd.add_parser(sub)
         ns = parser.parse_args(args)
         func = getattr(ns, "func", None)
         if func is None:

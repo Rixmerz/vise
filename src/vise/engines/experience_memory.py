@@ -50,6 +50,18 @@ class ExperienceEntry:
     resolution: str = ""
     related_files: list[str] = field(default_factory=list)
     scope: str = "global"             # global|project
+    # Structured repeat counting: shape slug -> times seen. `occurrences` counts
+    # records merged onto this entry; `shapes` counts repeats of one FAILURE
+    # SHAPE, which is a different question and the one callers actually ask.
+    #
+    # It exists because the alternative was worse. agent-autoheal needed "how
+    # many times did agent X fail this way", had no field for it, and encoded
+    # incidents as `;;`-separated segments inside `description` — where the
+    # merge below keeps only the LONGEST string, so a shorter (or same-length)
+    # follow-up was discarded while still reporting success. Bumping a counter
+    # in prose was the worst case: `x1` -> `x2` is the same length, so the
+    # increment was silently dropped every time.
+    shapes: dict[str, int] = field(default_factory=dict)
     # FSRS recall fields — added 2026-06-17; migrated on load from old records
     stability: float = 0.0            # FSRS stability in days (0.0 = unset, migrated on load)
     last_reviewed: str = ""           # ISO timestamp of last recall event (empty = never recalled)
@@ -422,7 +434,15 @@ class ExperienceMemoryStore:
                 existing.occurrences += 1
                 existing.last_seen = now
                 existing.confidence = update_confidence(existing.confidence, existing.occurrences)
-                # Update description if new one is longer/better
+                # Shapes merge ADDITIVELY — this is the one field on the entry
+                # that must never lose a repeat, because the counts are what a
+                # caller thresholds on ("the same shape twice = a pattern").
+                for shape, n in (entry.shapes or {}).items():
+                    existing.shapes[shape] = existing.shapes.get(shape, 0) + n
+                # Update description if new one is longer/better. Arbitrary, and
+                # deliberately left that way: with `shapes` carrying the counted
+                # data, description is prose again rather than a datastore, so
+                # which of two prose blurbs survives no longer loses information.
                 if len(entry.description) > len(existing.description):
                     existing.description = entry.description
                 if entry.resolution and not existing.resolution:
