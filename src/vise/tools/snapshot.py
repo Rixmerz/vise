@@ -91,8 +91,10 @@ def register_snapshot(mcp: "FastMCP") -> None:
         """Preview or apply a restore from a snapshot.
 
         When dry_run=True (default), returns the diff that would be applied.
-        Pass dry_run=False to actually overwrite the working tree. This does
-        not auto-commit — the user decides whether to stage/commit the result.
+        Pass dry_run=False to actually overwrite the working tree. The index
+        is left untouched, so nothing is staged and nothing is committed —
+        the user decides what to do with the restored files. Files created
+        after the snapshot are left in place.
         """
         project = _resolve(project_dir)
         try:
