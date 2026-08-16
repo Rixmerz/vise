@@ -25,8 +25,29 @@ extension-keyed index silently drops these cross-extension matches.
 
 Parent-dir bucketing is correct: load the target's parent-dir bucket (which
 contains ALL patterns whose parent dir matches, regardless of extension) plus
-the root "." bucket (patterns like "*.ts" that match anywhere).  This gives
-~150 candidates per query vs 3169 for a full scan, with exact same results.
+every ANCESTOR bucket up to the root "." bucket.  This gives a handful of
+buckets per query instead of a 3169-entry scan.
+
+Why the ancestors and not just the immediate parent
+---------------------------------------------------
+A `*` in a glob spans `/`, so a pattern anchored at an ancestor directory can
+still fullmatch the target: `src/vise/*` matches `src/vise/cli/run_cmd.py`
+with path_score = 1.0, the maximum.  Its parent dir is `src/vise`, so loading
+only `src/vise/cli` dropped it — and dropping it dropped the *best* candidate,
+not a marginal one.  Every pattern that can fullmatch a target is anchored at
+some ancestor of that target, so walking the ancestor chain is exact, and the
+chain is bounded by path depth.
+
+Two buckets escape that reasoning and are therefore always loaded:
+
+  _nopattern  entries with no `file_pattern` at all.  They still score on
+              keywords, domain and confidence, so the full scan surfaces them;
+              the index used to write this bucket and then never read it.
+  _wildcard   patterns whose *parent* contains a `*` (`src/*/cli/*.py`).  Their
+              parent is not a literal directory, so no ancestor key can name
+              them.  The recorder does not currently emit these, which is
+              exactly why they need somewhere to go: a hole nobody fills is a
+              hole nobody notices.
 
 Rebuild concurrency safety:
   meta.lock prevents duplicate spawns (TTL = 30 s).
@@ -51,10 +72,15 @@ _DETAIL_FIELDS = frozenset({"description", "resolution", "occurrences"})
 
 LOCK_TTL = 30.0
 
-# Bump when the score/detail field split changes shape — forces existing
-# indexes (built under the old schema) to rebuild instead of being read stale.
-# Mirrored in experience_injector.SCHEMA_VERSION.
-SCHEMA_VERSION = 2
+# Bump when the score/detail field split OR the bucketing changes — forces
+# existing indexes (built under the old schema) to rebuild instead of being
+# read stale. Mirrored in experience_injector.SCHEMA_VERSION.
+SCHEMA_VERSION = 3
+
+# Buckets that no ancestor key can name, so the reader always loads them.
+# Mirrored in experience_injector.
+NOPATTERN_KEY = "P__nopattern"
+WILDCARD_KEY = "P__wildcard"
 
 
 def _store_path() -> Path:
@@ -68,6 +94,22 @@ def _index_dir() -> Path:
 def parent_to_key(parent: str) -> str:
     """Encode a parent-dir path into a safe filename key."""
     return "P_" + parent.replace("/", "_").replace(".", "DOT")
+
+
+def bucket_key(pattern: str) -> str:
+    """Which bucket file an entry's *pattern* belongs in.
+
+    Not the same question as `parent_to_key`: the entry still records its true
+    `_parent` for the 0.7 same-directory fallback, but a pattern whose parent
+    is not a literal directory cannot be found by walking a target's ancestors,
+    so it is filed where the reader always looks.
+    """
+    if not pattern:
+        return NOPATTERN_KEY
+    parent = str(Path(pattern).parent)
+    if "*" in parent:
+        return WILDCARD_KEY
+    return parent_to_key(parent)
 
 
 def _write_atomic(path: Path, data: object, pid: int) -> None:
@@ -107,7 +149,7 @@ def build(store: Path, idx_dir: Path) -> None:
     for e in entries:
         pattern = e.get("file_pattern", "")
         parent = str(Path(pattern).parent) if pattern else "_nopattern"
-        key = parent_to_key(parent)
+        key = bucket_key(pattern)
 
         score_entry = {k: e[k] for k in _SCORE_FIELDS if k in e}
         score_entry["_parent"] = parent  # pre-baked for O(1) parent comparison

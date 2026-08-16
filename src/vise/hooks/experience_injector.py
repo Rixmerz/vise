@@ -35,7 +35,6 @@ Index layout: ~/.local/share/vise/experience_index/
                            strictly parallel to the score file (same i = same entry)
 
 Parent-dir key:  "/" → "_",  "." → "DOT"   e.g. "src/vise/cli" → "P_src_vise_cli"
-Root patterns (parent=".") are written to score/P_DOT.json and always loaded.
 
 Why parent-dir (not extension-keyed)
 -------------------------------------
@@ -43,7 +42,13 @@ The scoring formula has a parent-directory fallback: if a glob pattern does not
 fullmatch the target but shares the same parent dir, path_score = 0.7.  This
 means "src/vise/cli/*.py" scores well against "src/vise/cli/run_cmd.ts".
 An extension-keyed index silently misses these cross-extension matches.
-Parent-dir bucketing is both correct and smaller (~150 candidates vs 3169).
+
+Which buckets a query loads — see `_bucket_keys`.  Not just the immediate
+parent: a `*` spans `/`, so a pattern anchored at an ancestor can fullmatch the
+target outright, and loading only the immediate parent dropped exactly those.
+Measured on a 3169-entry store, the ancestor chain plus the two always-loaded
+buckets selects 561 candidates (17.7%) and the hook runs at p50 31 ms — inside
+the 60 ms budget, with the full-scan result restored.
 
 Rebuild concurrency safety:
   meta.lock prevents duplicate spawns (TTL = 30 s).
@@ -61,7 +66,7 @@ import json
 import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from vise.hooks import _xdg
 
@@ -133,8 +138,12 @@ def _fast_glob_match(pattern: str, target: str) -> bool:
 # ---------------------------------------------------------------------------
 
 # Mirrors experience_index_builder.SCHEMA_VERSION — bump both together when
-# the score/detail field split changes shape.
-SCHEMA_VERSION = 2
+# the score/detail field split or the bucketing changes shape.
+SCHEMA_VERSION = 3
+
+# Mirrors experience_index_builder — buckets no ancestor key can name.
+NOPATTERN_KEY = "P__nopattern"
+WILDCARD_KEY = "P__wildcard"
 
 
 def _index_dir() -> Path:
@@ -190,14 +199,36 @@ def _spawn_rebuild(idx_dir: Path) -> None:
         pass
 
 
+def _bucket_keys(target_parent: str) -> list[str]:
+    """Every bucket that can hold a pattern relevant to *target_parent*.
+
+    A `*` in a glob spans `/`, so `src/vise/*` fullmatches
+    `src/vise/cli/run_cmd.py` at path_score 1.0 while living in the `src/vise`
+    bucket. Loading only the immediate parent dropped that entry — and it is
+    the highest-scoring kind there is, not a marginal one. Any pattern able to
+    fullmatch a target is anchored at one of the target's ancestors, so the
+    ancestor chain is the exact answer, and it is short: path depth, not store
+    size.
+
+    `P_DOT` is appended unconditionally rather than relied on as the chain's
+    last link, because an absolute target's chain ends at `/`, and `*.py`
+    still matches `/home/user/x.py`.
+    """
+    chain = PurePosixPath(target_parent)
+    keys = [_parent_key(str(p)) for p in (chain, *chain.parents)]
+    for extra in ("P_DOT", NOPATTERN_KEY, WILDCARD_KEY):
+        if extra not in keys:
+            keys.append(extra)
+    return keys
+
+
 def _load_index_candidates(
     idx_dir: Path, target_parent: str
 ) -> tuple[list[dict], list[dict]]:
     """Load (score_entries, detail_entries) for *target_parent* from the index.
 
-    Loads the target's parent-dir bucket plus the root "." bucket (P_DOT),
-    which contains patterns like "*.ts" that can match any path.
-    score[i] and detail[i] are strictly parallel within each bucket.
+    score[i] and detail[i] are strictly parallel within each bucket, and the
+    buckets are disjoint, so concatenating them preserves that.
     """
     score_dir = idx_dir / "score"
     detail_dir = idx_dir / "detail"
@@ -205,11 +236,7 @@ def _load_index_candidates(
     score_flat: list[dict] = []
     detail_flat: list[dict] = []
 
-    keys = [_parent_key(target_parent)]
-    if target_parent != ".":
-        keys.append("P_DOT")
-
-    for key in keys:
+    for key in _bucket_keys(target_parent):
         sp = score_dir / f"{key}.json"
         dp = detail_dir / f"{key}.json"
         if not sp.exists():

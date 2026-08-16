@@ -413,9 +413,14 @@ class TestContractPreservation:
 
     Known intentional difference: entries in unrelated parent directories that
     pass the 0.10 threshold purely via domain+confidence weights (with no path
-    relevance) are NOT returned by the indexed path.  The index only loads the
-    target's parent-dir bucket and the root "." bucket.  This is a deliberate
-    improvement — such entries have no path relevance and are noise.
+    relevance) are NOT returned by the indexed path.  The index loads the
+    target's ancestor chain plus the always-loaded buckets (see
+    injector._bucket_keys), so a sibling directory never enters.  This is a
+    deliberate improvement — such entries have no path relevance and are noise.
+
+    It is a narrow exception and does not cover an entry whose pattern
+    *fullmatches* the target: that is maximal path relevance, and dropping it
+    was the bug test_experience_index_parity.py exists for.
     Fixture entries are designed to avoid this edge case so the test validates
     the common contract.  See TestScoreEntry.test_no_match_no_pattern_score_is_conf_only
     for explicit coverage of the conf-only scoring path.
