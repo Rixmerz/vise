@@ -10,6 +10,24 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Fixed
 
+- **`diff_scope` bloqueaba con el árbol completamente limpio.** `graph_activate`
+  escribe `.claude/workflow/graph.yaml` dentro del proyecto, y en cualquier repo
+  que no lo tuviera gitignoreado ese archivo contaba como trabajo fuera de la
+  partición — así que el primer traverse después de activar un workflow lo
+  bloqueaba un archivo que **vise acababa de escribir**. Un gate que falla
+  cuando no hiciste nada es un gate que se apaga.
+
+  El estado propio de vise (`.claude/workflow/`, `.claude/settings.local.json`)
+  queda excluido por path, no por `--exclude-standard`: depender del
+  `.gitignore` del consumidor significa que vise escribe un archivo y después
+  culpa al usuario por él. `.claude/workflows/` (plural) NO está excluido — esos
+  grafos los escribe el usuario, y moverlos fuera del scope declarado es
+  justamente lo que este validator existe para notar.
+
+  Encontrado corriendo los dos validators como node gate de un grafo real; los
+  unit tests no podían verlo porque arman un repo git pelado, sin estado de vise.
+
+
 - **`VISE_NODE_GATE_OVERRIDE=1` did nothing on the gate people actually hit.**
   It bypassed the node gate and then the `validators_green` edge check rejected
   the traverse anyway, from a second gate that never consulted the variable.

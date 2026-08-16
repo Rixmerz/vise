@@ -496,6 +496,33 @@ class NoNewDepsValidator:
         )
 
 
+# vise's own bookkeeping, written into the project by vise itself. It must
+# never count as work the agent did outside its partition: `graph_activate`
+# writes `.claude/workflow/graph.yaml`, so a diff_scope gate blocked on a
+# COMPLETELY CLEAN tree in any repo that had not gitignored it — a gate that
+# fails when you have done nothing is a gate you turn off.
+#
+# Hard-excluded rather than left to `--exclude-standard`, because relying on
+# the consumer's .gitignore means vise writes a file and then blames the user
+# for it. vise's own .gitignore carries `.claude/workflow/`, which is the
+# admission that this is vise's, not theirs.
+#
+# `.claude/workflows/` (plural) is deliberately NOT here — those are graphs the
+# user authored, and moving one outside the declared scope is exactly the kind
+# of thing this validator exists to notice.
+_VISE_STATE_PREFIXES: tuple[str, ...] = (
+    ".claude/workflow/",
+    ".claude/settings.local.json",
+)
+
+
+def _is_vise_state(path: str) -> bool:
+    return any(
+        path == prefix.rstrip("/") or path.startswith(prefix)
+        for prefix in _VISE_STATE_PREFIXES
+    )
+
+
 @dataclass
 class DiffScopeValidator:
     """Fail when the diff touches a file outside the node's declared scope.
@@ -548,6 +575,13 @@ class DiffScopeValidator:
 
         if not changed:
             return _unverified(self.name, self.weight, f"no files changed vs {self.base}")
+
+        changed = [f for f in changed if not _is_vise_state(f)]
+        if not changed:
+            return _unverified(
+                self.name, self.weight,
+                f"no files changed vs {self.base} (excluding vise's own state)",
+            )
 
         outside = sorted({
             f for f in changed
