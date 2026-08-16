@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 import time
 import uuid
@@ -163,6 +164,18 @@ def create(project: Path, *, label: str = "", phase: str = "") -> Snapshot | Non
     env = os.environ.copy()
     env["GIT_INDEX_FILE"] = str(tmp_index)
 
+    # Before staging, not after. `.gitignore` used to be written lazily by
+    # `_journal_path`, which runs *after* `write-tree`, so on the very first
+    # snapshot in a repo the ignore line did not exist yet and `add -A` swept
+    # `.vise/` into the tree — including `tmp.index.lock`, the lock git itself
+    # was holding one directory down at that exact moment. That file then sat
+    # in the snapshot forever, and `restore` wrote it back out.
+    #
+    # An `:(exclude).vise` pathspec would be the more direct expression, but
+    # `git add` exits 1 whenever a pathspec names an ignored path, so it
+    # cannot be combined with the ignore rule it is meant to complement.
+    _ensure_state_dir_gitignored(project)
+
     try:
         # Stage everything (tracked + untracked) in the temp index
         subprocess.run(
@@ -285,16 +298,45 @@ def restore(project: Path, snap_id: str, *, dry_run: bool = True) -> str:
     """Preview (or perform) a restore from the given snapshot.
 
     When dry_run=True (default), returns the diff that would be applied.
-    When dry_run=False, performs `git checkout <tree> -- .` at the workdir
-    root. Will refuse if the index has uncommitted changes unless --force is
-    passed (callers must set dry_run=False AND check cleanliness themselves).
+    When dry_run=False, rewrites the working tree from the snapshot and
+    leaves the user's index exactly as it was — the caller decides what to
+    stage. A plain `git checkout <ref> -- .` does not do that: it writes the
+    index too, so every restored file arrived silently staged, and the next
+    `git commit` the user typed would have swept the whole rollback in
+    alongside whatever they had deliberately staged. Redirecting the write
+    through a throwaway copy of the index keeps the worktree effect and drops
+    the staging side effect.
+
+    Restore is additive: files created after the snapshot are left alone.
+    Rolling back is not the same as discarding work the snapshot never saw.
     """
     ref = _resolve_ref(project, snap_id)
     if ref is None:
         raise RuntimeError(f"unknown snapshot: {snap_id}")
     if dry_run:
         return _git(project, "diff", "HEAD", ref)
-    _git(project, "checkout", ref, "--", ".")
+
+    real_index = Path(_git(project, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+    tmp_index = paths.ensure(paths.project_state_dir(project)) / "restore.index"
+    try:
+        if real_index.exists():
+            shutil.copyfile(real_index, tmp_index)
+        elif tmp_index.exists():
+            tmp_index.unlink()
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = str(tmp_index)
+        result = subprocess.run(
+            ["git", "-C", str(project), "checkout", ref, "--", "."],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"restore failed: {result.stderr.strip()}")
+    finally:
+        with contextlib.suppress(OSError):
+            tmp_index.unlink(missing_ok=True)
     return f"restored workdir from {ref}"
 
 
