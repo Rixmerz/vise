@@ -18,7 +18,7 @@ Treat those files with the same care as the code.
 | `agents/` | 19 bundled subagent charters |
 | `skills/` | 21 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` |
-| `hooks/hooks.json` | 12 hook registrations across 10 scripts, 6 events |
+| `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |
 

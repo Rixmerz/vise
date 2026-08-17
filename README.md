@@ -93,6 +93,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 | UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
+| PreToolUse | `Read\|Grep\|Glob\|Bash` | `codelayer_gate.py` | Redirects source reads to the symbol tools (`read_unit`, `locate`) — **opt-in**, `warn` records what it would deny, `enforce` denies, `off` (default) is inert |
 | PreToolUse | `Bash` | `snapshot_trigger.py --pre` | Captures **before** a shell command that would touch the working tree, so a `git reset --hard` is survivable — **opt-in**, gated in the shell so it costs ~1 ms when off |
 | PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) — **opt-in**, no-ops unless `VISE_SNAPSHOT_ON_EDIT` is truthy |
 | PostToolUse | `Edit\|Write\|MultiEdit` | `edit_feedback.py` | Runs a fast ruff-only pass on the edited Python file and prints a concise findings summary to stderr — feedback only, never blocks |
@@ -158,6 +159,8 @@ Environment variables (all optional):
 | `VISE_WORKFLOW_SUGGEST` | Toggle the workflow suggester hook |
 | `VISE_NODE_GATE_OVERRIDE` | One-shot bypass of a red node gate. Honoured by **both** the node gate and a `validators_green` edge — guarding only the first made it a no-op on `feature-dev`'s `spec` phase, whose exit edge is exactly that. Each gate it actually gets you past is recorded once; `vise insights` reports the rate |
 | `VISE_SNAPSHOT_ON_EDIT` | Enable per-edit snapshot capture (off by default; phase-transition snapshots always fire) |
+| `VISE_CODELAYER` | Read-by-symbol gate: `off` (default, inert), `warn` (records what it would deny, blocks nothing), `enforce` (denies source reads by path). The kill switch is the point — a gate that can lock you out of fixing the gate gets uninstalled the first time it misfires |
+| `VISE_CODELAYER_SCOPE` | Comma-separated path prefixes the gate covers (default `src/`). Configs, tests, docs, migrations and manifests are never gated regardless |
 | `VISE_LOOP_COST_CAP` | Cost cap for loop recipes |
 | `VISE_EMBED_MODEL` / `VISE_EMBED_IDLE_TIMEOUT` / `VISE_EMBED_CACHE_DIR` / `VISE_EMBED_THREADS` | fastembed model, idle unload, model cache location, and worker threads (default 2) |
 | `VISE_TELEMETRY_DIR` / `VISE_USAGE_DIR` | Telemetry/usage output dirs |
