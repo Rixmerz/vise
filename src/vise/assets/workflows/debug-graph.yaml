@@ -56,6 +56,12 @@ nodes:
   # PHASE 2: REPRODUCE THE BUG
   # ---------------------------------------------------------------------------
   - id: "reproduce"
+    validators:
+      # El nodo ya lo pide en prosa: "Confirm that at least one test fails".
+      # Sin esto, la puerta mas fuerte del workflow era una frase que el agente
+      # decia sobre si mismo, y un bug no reproducido pasaba directo a `fix`.
+      - type: "tests_fail"
+        weight: 0.4
     name: "Reproduce the Bug"
     model: sonnet
     mcps_enabled: []
@@ -494,6 +500,12 @@ nodes:
   # PHASE 8: VERIFY FIX
   # ---------------------------------------------------------------------------
   - id: "verify"
+    validators:
+      # CRITERIA del propio nodo: "No new errors/failures were introduced".
+      - type: "tests_pass"
+        weight: 0.4
+      - type: "lint_pass"
+        weight: 0.15
     name: "Verify Fix"
     model: sonnet
     mcps_enabled:

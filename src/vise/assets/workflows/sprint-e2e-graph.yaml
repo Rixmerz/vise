@@ -70,6 +70,10 @@ nodes:
       Signal: say "implementation done" when every dispatched agent returned green.
 
   - id: "e2e"
+    validators:
+      # Signal del nodo: "e2e green" solo despues de que los cuatro flujos pasen.
+      - type: "tests_pass"
+        weight: 0.4
     name: "E2E"
     tools_blocked:
       - "Edit"
@@ -115,6 +119,11 @@ nodes:
       Signal: say "e2e green" only after all four flows pass.
 
   - id: "validate"
+    validators:
+      - type: "tests_pass"
+        weight: 0.4
+      - type: "lint_pass"
+        weight: 0.15
     name: "Validate"
     tools_blocked:
       - "Edit"

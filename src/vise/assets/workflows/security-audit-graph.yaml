@@ -51,6 +51,10 @@ nodes:
       Signal: say "triaged" when classification is done.
 
   - id: "fix-criticals"
+    validators:
+      # Un parche que rompe la suite no es un parche "in place".
+      - type: "tests_pass"
+        weight: 0.4
     name: "Fix Criticals"
     prompt_injection: |
       PHASE: FIX CRITICALS

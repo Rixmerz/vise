@@ -48,6 +48,9 @@ nodes:
       Signal: the gate opens on its own once the deltas validate — no phrase.
 
   - id: "implement"
+    validators:
+      - type: "tests_pass"
+        weight: 0.4
     name: "Implement"
     prompt_injection: |
       PHASE: IMPLEMENT
@@ -60,6 +63,11 @@ nodes:
       Signal: say "migration implemented" when files are written.
 
   - id: "reversibility-check"
+    validators:
+      # Signal del nodo: "reversible" cuando el round-trip ACTUALMENTE corrio
+      # y paso. Eso es una afirmacion mecanica escrita como tal.
+      - type: "tests_pass"
+        weight: 0.4
     name: "Reversibility Check"
     # This node stays advisory ON PURPOSE, unlike release:tests. There is no
     # universal rollback command to hardcode, command_exit fails closed on a

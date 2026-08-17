@@ -173,6 +173,7 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `type` | Checks | Fail-open when |
 |---|---|---|
 | `tests_pass` | the project's test suite | no runner detected (set `VISE_TEST_CMD`) |
+| `tests_fail` | at least one test **fails** — a reproduction | no runner, or the runner never reached the tests |
 | `lint_pass` | the project's linter | linter not on PATH (set `VISE_LINT_CMD`) |
 | `command_exit` | an arbitrary `cmd:` exits 0 | **never** — fails closed on a missing binary |
 | `files_exist` | declared `paths:` are present | never |
@@ -185,6 +186,14 @@ A workflow node declares `validators:`; the gate runs them all and is
 
 A fail-open pass reports `outcome: "unverified"` and `source: "asserted"` — it
 never reads as clean, and `goal_complete` will not grade it as verified.
+
+`tests_fail` is deliberately not the negation of `tests_pass`. `returncode != 0`
+is the naive reading and it is wrong: a broken `conftest.py`, a bad flag or a
+circular import all exit nonzero and look exactly like a reproduction. Only
+pytest's exit 1 — tests ran, some failed — counts; exits 2–5 report
+`unverified`. Turning a crashed runner into "bug reproduced" would open the fix
+phase on evidence that does not exist, which is the worst direction to be wrong
+in a debug workflow.
 
 `no_new_deps` and `diff_scope` turn two rules that were previously only prose
 into something a gate can read. Neither bans anything:
