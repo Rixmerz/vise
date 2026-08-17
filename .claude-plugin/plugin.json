@@ -1,7 +1,7 @@
 {
   "name": "vise",
   "description": "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code",
-  "version": "0.1.0a15",
+  "version": "0.1.0a16",
   "mcpServers": "./.mcp.json",
   "lspServers": {
     "clangd": {
