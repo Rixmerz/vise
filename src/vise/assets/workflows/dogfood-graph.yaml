@@ -52,6 +52,9 @@ nodes:
       Signal: say "filed" when all issues are opened.
 
   - id: "fix"
+    validators:
+      - type: "tests_pass"
+        weight: 0.4
     name: "Fix"
     is_end: true
     prompt_injection: |

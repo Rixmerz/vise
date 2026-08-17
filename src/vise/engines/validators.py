@@ -93,6 +93,12 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", name) or "unnamed"
 
 
+def _last_line(output: str, limit: int = 300) -> str:
+    """The line a test runner puts its summary on, bounded for a gate message."""
+    lines = [ln for ln in (output or "").splitlines() if ln.strip()]
+    return lines[-1][:limit] if lines else ""
+
+
 def _persist_evidence(goal: Goal, validator_name: str, combined_output: str) -> str:
     """Write COMPLETE stdout+stderr to a per-goal evidence log. Returns the
     absolute path written, or "" if persistence failed (non-fatal).
@@ -263,6 +269,105 @@ class TestsPassValidator:
             confidence_contribution=self.weight if passed else 0.0,
             weight=self.weight, evidence=ev, at=_now(),
             source="mechanical", exit_code=r.returncode, full_output_path=log_path,
+        )
+
+
+@dataclass
+class TestsFailValidator:
+    """A reproduction is a test that FAILS. Until then there is nothing to fix.
+
+    `debug-graph.yaml`'s reproduce node already demands this in prose —
+    *"Confirm that at least one test fails"* — and had no way to check it, so
+    the strongest gate in the whole debug workflow was a phrase the agent
+    emitted about itself. An unreproduced bug that proceeds to `fix` is how a
+    debugging session ends up editing code on a hypothesis.
+
+    Deliberately NOT the negation of `tests_pass`:
+
+      - a runner that is missing is unverified, not "reproduced" — inverting a
+        skip into a green would manufacture a reproduction out of a missing
+        binary, which is the worst possible direction to be wrong here;
+      - "no tests collected" is likewise unverified: zero tests is not a
+        failing test;
+      - a crashed runner (import error, config error) is unverified too, and
+        this is the case the naive `returncode != 0` gets wrong — a broken
+        conftest exits nonzero and looks exactly like a reproduction.
+    """
+
+    weight: float = 0.4
+    name: str = "tests_fail"
+    test_cmd: tuple[str, ...] = ("pytest", "-q")
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        cmd = self.test_cmd
+        env_cmd = os.environ.get("VISE_TEST_CMD", "").strip()
+        if env_cmd and cmd == ("pytest", "-q"):
+            import shlex
+            cmd = tuple(shlex.split(env_cmd))
+
+        if not cmd or not shutil.which(cmd[0]):
+            missing = cmd[0] if cmd else "<empty>"
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence=(
+                    f"reproduction not checked: {missing} not on PATH — "
+                    f"set VISE_TEST_CMD to run this repo's suite"
+                ),
+                at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
+            )
+
+        r = subprocess.run(
+            list(cmd), cwd=goal.project_dir,
+            capture_output=True, text=True, check=False, timeout=600,
+        )
+        combined = (r.stdout or "") + (r.stderr or "")
+        log_path = _persist_evidence(goal, self.name, combined)
+
+        # pytest's exit codes separate "tests ran and some failed" (1) from
+        # "the runner never got that far" (2 usage, 3 internal, 4 cmdline,
+        # 5 nothing collected). Only 1 is a reproduction.
+        if cmd[0] == "pytest":
+            if r.returncode == 1:
+                return ValidatorRecord(
+                    name=self.name, passed=True,
+                    confidence_contribution=self.weight, weight=self.weight,
+                    evidence=f"reproduced: {_last_line(combined)}",
+                    at=_now(), source="mechanical", exit_code=r.returncode,
+                    full_output_path=log_path,
+                )
+            if r.returncode == 0:
+                return ValidatorRecord(
+                    name=self.name, passed=False, confidence_contribution=0.0,
+                    weight=self.weight,
+                    evidence="suite is green — nothing reproduced yet",
+                    at=_now(), source="mechanical", exit_code=r.returncode,
+                    full_output_path=log_path,
+                )
+            return ValidatorRecord(
+                name=self.name, passed=True,
+                confidence_contribution=self.weight, weight=self.weight,
+                evidence=(
+                    f"runner exited {r.returncode} without running tests "
+                    f"(collection or config error) — not a reproduction"
+                ),
+                at=_now(), source="mechanical", exit_code=r.returncode,
+                full_output_path=log_path, outcome="unverified",
+            )
+
+        # Unknown runner: nonzero means *something* failed, but this validator
+        # cannot tell a failing test from a broken invocation, and claiming a
+        # reproduction it cannot distinguish is the mistake it exists to avoid.
+        return ValidatorRecord(
+            name=self.name, passed=True,
+            confidence_contribution=self.weight, weight=self.weight,
+            evidence=(
+                f"{cmd[0]} exited {r.returncode}; vise cannot tell a failing "
+                f"test from a broken run for this runner — asserting, not verifying"
+            ),
+            at=_now(), source="asserted", exit_code=r.returncode,
+            full_output_path=log_path, outcome="unverified",
         )
 
 
@@ -1332,6 +1437,7 @@ def _isfloatable(v: Any) -> bool:
 
 _REGISTRY: dict[str, Callable[..., Validator]] = {
     "tests_pass": TestsPassValidator,
+    "tests_fail": TestsFailValidator,
     "lint_pass": LintPassValidator,
     "command_exit": CommandExitValidator,
     "files_exist": FileExistsValidator,
