@@ -396,3 +396,40 @@ def test_every_validator_in_the_registry_is_documented():
         f"validators in the registry but absent from README: {undocumented}. "
         "A workflow author has no way to discover them."
     )
+
+
+# ---------------------------------------------------------------------------
+# Los conteos de assets en CLAUDE.md derivan igual que derivaron los de hooks.
+# ---------------------------------------------------------------------------
+#
+# "the 8 hook registrations" resultó no ser ningún conteo real — ni eventos, ni
+# entradas, ni comandos, ni scripts. Había sido cierto alguna vez. Los conteos
+# de skills, agentes y comandos están expuestos a lo mismo, y son lo primero
+# que lee alguien que llega al repo.
+
+def test_claude_md_counts_the_skills_that_actually_ship():
+    import re
+
+    shipped = len([p for p in (REPO / "skills").iterdir() if (p / "SKILL.md").exists()])
+    claimed = re.search(r"(\d+) bundled skills", (REPO / "CLAUDE.md").read_text(encoding="utf-8"))
+    assert claimed, "CLAUDE.md ya no dice cuántas skills hay"
+    assert int(claimed.group(1)) == shipped, (
+        f"CLAUDE.md dice {claimed.group(1)} skills, hay {shipped}"
+    )
+
+
+def test_claude_md_counts_the_agents_that_actually_ship():
+    import re
+
+    shipped = len(list((REPO / "agents").glob("*.md")))
+    claimed = re.search(r"(\d+) bundled subagent charters", (REPO / "CLAUDE.md").read_text(encoding="utf-8"))
+    assert claimed, "CLAUDE.md ya no dice cuántos agentes hay"
+    assert int(claimed.group(1)) == shipped
+
+
+def test_claude_md_lists_every_command():
+    """Un comando que existe y no está listado es un comando que nadie encuentra."""
+    claude_md = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+    shipped = sorted(p.stem for p in (REPO / "commands").glob("*.md"))
+    missing = [c for c in shipped if f"/{c}" not in claude_md]
+    assert not missing, f"comandos que existen pero CLAUDE.md no nombra: {missing}"
