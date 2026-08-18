@@ -57,3 +57,34 @@ def test_all_four_version_declarations_agree():
 def test_version_is_pep440_parseable():
     # Guards against a typo'd bump landing in all three at once.
     assert re.fullmatch(r"\d+\.\d+\.\d+(?:[ab]|rc)?\d*", vise.__version__), vise.__version__
+
+
+def test_every_shipped_command_is_named_in_the_changelog():
+    """Un comando nuevo sin línea de CHANGELOG es un comando que nadie descubre.
+
+    Y peor: fue así como `/bootstrap` se publicó sin llegar a ningún install.
+    Su commit aterrizó DESPUÉS del release de a16, así que `main` declaraba una
+    versión ya instalada y `claude plugin update` no traía nada — el updater
+    compara la versión declarada, no el commit. El propio docstring de este
+    archivo lo advierte, y aun así pasó.
+
+    Escribir la línea de CHANGELOG obliga a mirar bajo qué versión sale, que es
+    el momento exacto en que se nota que hace falta un bump.
+    """
+    # Anteriores a que este CHANGELOG existiera. No se documentan
+    # retroactivamente: inventar una entrada para una versión que ya salió es
+    # peor que la ausencia, porque convierte el archivo en ficción.
+    PREEXISTING = {"debug", "feature", "status", "quality"}
+
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    shipped = sorted(p.stem for p in (REPO / "commands").glob("*.md"))
+    missing = [
+        c for c in shipped
+        if c not in PREEXISTING and f"/{c}" not in changelog
+    ]
+    assert not missing, (
+        f"comandos sin mención en el CHANGELOG: {missing}. "
+        "Agregá la línea — y al hacerlo, fijate si la versión declarada ya se "
+        "publicó, porque contenido bajo un número ya anunciado no llega a "
+        "ningún install."
+    )
