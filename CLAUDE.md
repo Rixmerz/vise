@@ -17,7 +17,7 @@ Treat those files with the same care as the code.
 | `src/vise/tests/` | the whole suite — asset honesty tests live here too |
 | `agents/` | 19 bundled subagent charters |
 | `skills/` | 22 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, and the 15 `*-rules`) |
-| `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` |
+| `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |

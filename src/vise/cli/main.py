@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] in ("--help", "-h", "help") or not args:
         print("vise — phase-gated workflows, experience memory, git snapshots")
         print(f"version {__version__}")
-        print("usage: vise [version|graph|experience|migrate-state|doctor|help]   (run the MCP server with `vise-mcp`)")
+        print("usage: vise [version|graph|experience|insights|bootstrap|migrate-state|doctor|help]   (run the MCP server with `vise-mcp`)")
         return 0
     if args[0] == "doctor":
         return _cmd_doctor()
@@ -173,16 +173,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  warning: {summary['error']}", file=sys.stderr)
         print(f"  legacy tree left in place at {summary['legacy_dir']} (not deleted)")
         return 0
-    if args[0] in ("graph", "experience", "insights"):
+    if args[0] in ("graph", "experience", "insights", "bootstrap"):
         import argparse
 
-        from vise.cli import experience_cmd, graph_cmd, insights_cmd
+        from vise.cli import bootstrap_cmd, experience_cmd, graph_cmd, insights_cmd
 
         parser = argparse.ArgumentParser(prog="vise")
         sub = parser.add_subparsers(dest="command")
         graph_cmd.add_parser(sub)
         experience_cmd.add_parser(sub)
         insights_cmd.add_parser(sub)
+        bootstrap_cmd.add_parser(sub)
         ns = parser.parse_args(args)
         func = getattr(ns, "func", None)
         if func is None:
