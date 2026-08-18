@@ -183,6 +183,42 @@ A missing server never blocks the dispatch — it downgrades the evidence.
 A wave that only adds new code, touching no existing signature, needs none of
 this. Skip it and dispatch.
 
+## If the repo has a symbol index, brief for it
+
+`livespec` — a separate MCP, not part of vise — exposes the repo as a symbol
+graph. When it is mounted, a builder that reads by symbol instead of by file
+gets the body it needs plus the *signatures* of what that body calls and the
+*definitions* of the types in those signatures, in one call. Measured on a real
+repo: **86% fewer tokens than opening the files an honest reader would open**,
+median 497 tokens per unit.
+
+Check once, with `compute_index_status`. Not mounted, or the index is stale?
+Skip this section entirely and brief normally — nothing here is load-bearing,
+and a brief naming tools the builder does not have is worse than one that says
+nothing.
+
+Mounted? Put these in the brief, because a builder in a fresh window has no way
+to know they exist:
+
+- **`read_unit(qname)`** instead of reading the file. Say which symbols.
+- **`search_similar(code)` before writing any new helper.** This is the one
+  that pays for itself: the duplicate a builder is about to create has a
+  *different name* — that is why it gets written — so neither grep nor the
+  builder's memory of the repo will find it.
+- **`resolve_location(path, line)`** when a stack trace or a failing test
+  points at a line.
+
+Two things to pass on, because they change what the builder should trust:
+`unresolved_types` in a closure is a **real gap** — a type the closure promised
+and did not deliver, to be read before relying on its shape — while
+`external_types` just means a dependency owns it. And if the repo runs the
+CodeLayer gate in `enforce`, reads by path are denied outright; a brief that
+tells a builder to "read `src/foo.py`" sends it into a wall.
+
+The `codelayer` skill has the full picture, including when *not* to decouple.
+It is not preloaded on any agent on purpose: it is dead weight in the repos
+that do not have the index, and it loads on its own description when they do.
+
 ## Hard rules
 
 - **Never two agents writing the same file in one wave.** Partition scope
