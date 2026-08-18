@@ -6,7 +6,65 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a17] — 2026-08-18
+
+### Added
+
+- **`vise bootstrap` y `/bootstrap`** — configurar un repo destino. Instalar el
+  plugin trae agentes, skills, comandos y hooks; lo que no puede traer es la
+  parte que es *sobre ese repo*: qué comando corre los tests acá, qué significa
+  `sast` en un proyecto Go. Eso vive en `.vise/quality.yaml` y en dos variables
+  de entorno, y se escribía a mano — que mayormente significaba no escribirlo,
+  así que las puertas skip-pasaban y el enforcement por el que uno instala vise
+  nunca corría.
+
+  La regla que le da forma: **ligar un check solo cuando su herramienta está**.
+  Un perfil que nombra `pytest` en un repo sin pytest no crea rigor, crea una
+  puerta roja por razones de entorno — y eso enseña a exportar
+  `VISE_NODE_GATE_OVERRIDE=1`. Verifica el módulo, no el intérprete, y exige
+  evidencia de adopción para las herramientas que sin config son ruido puro
+  (mypy, eslint) pero no para las que corren configless (`go vet`,
+  `cargo clippy`).
+
+- **`orchestration` ahora informa a los subagentes sobre la capa de símbolos.**
+  La skill `codelayer` existía y nada la conectaba: ningún agente la precargaba
+  y ningún charter mencionaba `read_unit` ni `search_similar`, así que un
+  builder despachado no tenía forma de saber que esas tools existen. Se chequea
+  una vez con `compute_index_status` y, si livespec está montado, van al brief.
+
+### Fixed
+
+- **`a16` publicó el número sin el contenido.** El commit de `/bootstrap`
+  aterrizó *después* del release, así que `main` declaraba una versión que ya
+  estaba instalada y `claude plugin update` no traía nada — el updater compara
+  la versión declarada, no el commit. Es exactamente lo que advierte el
+  docstring de `test_version_sync.py`, citado en el PR de `a16` y cometido un
+  commit más tarde.
+
 ## [0.1.0a16] — 2026-08-17
+
+### Added
+
+- **CodeLayer, del lado de vise** — `codelayer_gate`, la skill `codelayer`, y
+  los comandos `/codelayer` y `/debt`.
+
+  Un repo bien factorizado le cuesta *más* a un agente que uno mal factorizado:
+  más archivos, más saltos, más contexto quemado. Estructura y navegabilidad
+  tiran en contra, y el agente resuelve la tensión escribiendo código acoplado.
+  El hook redirige las lecturas de fuente a las tools de símbolo de livespec, y
+  su mensaje de denegación trae la llamada de reemplazo ya formada — un deny
+  que solo dice "no" se rodea con `cat`, después con `sed`.
+
+  Tres modos: `off` (default, inerte), `warn` (registra lo que habría negado,
+  no bloquea nada) y `enforce`. Un modo desconocido cae a `off`, así que un
+  typo en la variable no se convierte en una puerta que bloquea. Configs,
+  tests, docs, migraciones y manifiestos nunca se gatean.
+
+  `/codelayer warnings` no reporta un conteo crudo sino un juicio sobre cuáles
+  parecen falsos positivos: "3 de 47 están mal y son todos stubs generados" es
+  lo que decide si conviene enforcar; "47" no dice nada.
+
+  `/debt` maneja el baseline de duplicación de livespec.
 
 ### Fixed
 
