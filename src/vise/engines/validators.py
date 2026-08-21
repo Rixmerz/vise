@@ -200,6 +200,50 @@ class Validator(Protocol):
 
 # --- builtins --------------------------------------------------------------
 
+def _venv_pytest(project_dir: str) -> tuple[str, ...] | None:
+    """The project's own interpreter running pytest, when the project has one.
+
+    A bare ``pytest`` resolves against ``PATH``, which on a machine with a
+    global install is a different interpreter from the one the project's
+    dependencies live in. It then reports failures that do not exist — vise's
+    own CLAUDE.md warns about exactly this, and vise's own gate hit it: a test
+    asserting ``import vise`` succeeds under ``sys.executable`` failed because
+    ``sys.executable`` was ``/usr/bin/python``, which has no vise.
+
+    A gate red for environment reasons teaches people to reach for
+    ``VISE_NODE_GATE_OVERRIDE``, which is the habit gates exist to prevent, so
+    preferring the project's venv is the safer default. ``VISE_TEST_CMD`` and an
+    explicit ``test_cmd`` both still win.
+    """
+    root = Path(project_dir)
+    for interpreter in (
+        root / ".venv" / "bin" / "python",
+        root / "venv" / "bin" / "python",
+        root / ".venv" / "Scripts" / "python.exe",
+    ):
+        try:
+            if interpreter.is_file() and os.access(interpreter, os.X_OK):
+                return (str(interpreter), "-m", "pytest", "-q")
+        except OSError:
+            continue
+    return None
+
+
+def _invokes_pytest(cmd: tuple[str, ...]) -> bool:
+    """True when *cmd* runs pytest, however it was spelled.
+
+    ``cmd[0] == "pytest"`` missed ``python -m pytest`` and
+    ``.venv/bin/pytest``, so pytest's exit 5 — "no tests collected" — stopped
+    being recognised the moment anyone named their runner explicitly, and a
+    repo with no tests yet blocked the gate instead of being waved through.
+    """
+    if not cmd:
+        return False
+    if Path(cmd[0]).name in {"pytest", "pytest.exe"}:
+        return True
+    return "pytest" in cmd[1:3]
+
+
 @dataclass
 class TestsPassValidator:
     weight: float = 0.4
@@ -217,6 +261,8 @@ class TestsPassValidator:
         if env_cmd and cmd == ("pytest", "-q"):
             import shlex
             cmd = tuple(shlex.split(env_cmd))
+        elif cmd == ("pytest", "-q"):
+            cmd = _venv_pytest(goal.project_dir) or cmd
 
         if not cmd or not shutil.which(cmd[0]):
             # Fail-open, same contract as lint_pass / lsp_clean: say why, don't
@@ -248,7 +294,7 @@ class TestsPassValidator:
         # names the escape hatch so a JS/TS repo that happens to have pytest on
         # PATH doesn't read as "verified" when zero tests ran. Scoped to pytest;
         # other runners give exit 5 a different meaning.
-        if cmd[0] == "pytest" and r.returncode == 5:
+        if _invokes_pytest(cmd) and r.returncode == 5:
             combined = (r.stdout or "") + (r.stderr or "")
             log_path = _persist_evidence(goal, self.name, combined)
             return ValidatorRecord(
