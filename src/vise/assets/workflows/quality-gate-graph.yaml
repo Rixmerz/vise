@@ -39,6 +39,30 @@ metadata:
 #      (_run_node_validators once for the node, again for the edge). On the
 #      tier-B node below that is two full e2e runs per attempt.
 
+# The two render gates ship as validator types and are deliberately NOT wired
+# here. They fail closed on a missing browser or an unconfigured target, so
+# wiring them by default would turn `integration` red on every repo that has
+# not opted in. Add them to the `integration` node yourself once you have
+# installed the extra and named what to render:
+#
+#     pip install 'vise[design]' && playwright install chromium
+#
+#     # .vise/quality.yaml
+#     design:
+#       targets: ["http://localhost:3000/"]
+#       breakpoints: [375, 768, 1280]
+#
+#     # this file, under the integration node's validators:
+#     - type: ui_layout
+#       weight: 1.0
+#     - type: ui_contrast
+#       weight: 1.0
+#
+# ui_layout reports overflow, clipping, collision and off-document content per
+# breakpoint. ui_contrast measures computed foreground against the effective
+# background — the nearest ancestor that actually paints one — in the default,
+# hover and focus states, at WCAG 2.2 AA.
+
 nodes:
   - id: "static"
     name: "Static Analysis"
@@ -62,6 +86,13 @@ nodes:
       - type: quality_check
         check: deps
         weight: 0.5
+      # Design-token discipline. No external tool, so unlike the named checks
+      # above this one can never be skipped for being unavailable. Allowances
+      # are a ratchet, set in .vise/quality.yaml under `design.allowances` —
+      # record the number a repo has today and lower it, the way a coverage
+      # floor works. Default is zero of every kind.
+      - type: design_tokens
+        weight: 1.0
     prompt_injection: |
       PHASE: STATIC ANALYSIS
       The cheapest tier — seconds. Nothing slower runs until this is green.

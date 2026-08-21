@@ -13,6 +13,12 @@ That made ``quality-gate-graph``'s own instruction — read the evidence of ever
 check, including the ones that passed — impossible to obey, because no channel
 carried a skip to the agent. The whole skip-pass design rests on the agent
 being able to tell a skip from a verification.
+
+The `static` node now carries both kinds on purpose: five named
+``quality_check`` entries that skip when unbound, and ``design_tokens``, a
+fail-closed type with no external tool that can never skip. The counts below
+pin that mixture — if a future change makes the fail-closed one skippable, one
+of these numbers moves.
 """
 from __future__ import annotations
 
@@ -48,9 +54,13 @@ async def test_all_skipped_is_distinguishable_from_all_verified(
     assert result is not None
     assert result["passed"] is True, "an unbound check must not block the node"
     assert result["failed_count"] == 0
-    # ...and yet nothing was actually checked. That must be visible.
-    assert result["verified_count"] == 0, "nothing ran, so nothing was verified"
-    assert result["skipped_count"] == 5, "all five static checks are unbound here"
+    # ...and yet none of the five NAMED checks actually checked anything. That
+    # must be visible. `design_tokens` is not among them: it is a fail-closed
+    # type with no external tool, so it always really runs — here it verifies
+    # that the fixture repo has no UI source at all. One node carrying both
+    # kinds is exactly the distinction this test protects.
+    assert result["verified_count"] == 1, "only design_tokens really ran"
+    assert result["skipped_count"] == 5, "all five NAMED static checks are unbound here"
 
 
 async def test_every_check_reports_its_name_source_and_evidence(
@@ -94,7 +104,7 @@ async def test_a_real_pass_is_marked_mechanical(
     )
 
     assert result is not None
-    assert result["verified_count"] == 1, "the bound `lint` check really ran"
-    assert result["skipped_count"] == 4, "the other four are still unbound"
+    assert result["verified_count"] == 2, "the bound `lint` check ran, and design_tokens always does"
+    assert result["skipped_count"] == 4, "the other four named checks are still unbound"
     lint = next(c for c in result["checks"] if "lint" in c["evidence"] or c["passed"])
     assert lint["source"] == "mechanical"

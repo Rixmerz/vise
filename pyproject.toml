@@ -32,6 +32,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The render gates (ui_layout, ui_contrast) drive a real browser: contrast
+# against an effective background and per-breakpoint geometry are properties
+# of the rendered document, and no stdlib module renders a page. Kept out of
+# the core install so `pip install vise` never pulls a browser — every module
+# that needs playwright imports it lazily, inside the function that uses it.
+design = ["playwright>=1.40"]
 dev = [
     "bandit>=1.7.0",
     "coverage>=7.0.0",
