@@ -6,6 +6,88 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a18] — 2026-08-21
+
+### Added
+
+- **Three design quality gates**, all of which fail closed. `design_tokens`
+  scans source for colour, font-size, spacing and radius literals written where
+  the project already declares a token, for a declared scale nobody references,
+  and for a UI that declares no `font-family` at all. `ui_layout` renders the
+  page and reports overflow, clipping, collision and off-document content per
+  breakpoint. `ui_contrast` measures computed foreground against the *effective*
+  background — the nearest ancestor that actually paints one — in the default,
+  hover and focus states, at WCAG 2.2 AA.
+
+  They exist because measuring vise's own UI output across three orchestrated
+  projects contradicted the assumed cause. It is not missing taste, and it is
+  not the known AI default look: tokens get declared and then bypassed at the
+  call site. One project runs a CI guard that checks hex literals only, and has
+  18 stray hex in 40,000 lines against 17 arbitrary font sizes — the drift is
+  absent exactly where a check reaches and present everywhere else.
+
+- `designer` agent and the `design-brief` skill: what a UI should look like is
+  decided and written down before it is built, by a role that does not
+  implement it.
+
+- Composition rules in `web-ui-rules`, which was 74 lines of mechanically
+  correct CSS with no aesthetic content at all.
+
+### Behaviour change
+
+- `tests_pass` now prefers `<project>/.venv/bin/python -m pytest -q` over a bare
+  `pytest` when the project has a venv. A bare `pytest` resolves through `PATH`
+  to a different interpreter from the one the project's dependencies live in,
+  and reports failures that do not exist — it blocked this repo's own
+  `implement` node on a test that was not broken. `VISE_TEST_CMD` and an
+  explicit `test_cmd` still win.
+
+- pytest's exit 5 (*no tests collected*) is recognised however the runner was
+  spelled. It was matched by `cmd[0] == "pytest"`, so naming the runner
+  explicitly made a repo with no tests yet block the gate instead of being
+  waved through. Still scoped to pytest: exit 5 means something else to npm and
+  cargo.
+
+- `ponytail` no longer treats visual design as decoration to cut. "Shortest
+  diff" applied to a stylesheet produces browser defaults, and unstyled is not
+  lazy — it is unfinished.
+
+### Fixed
+
+- Six false-positive classes in the colour scanner, five found by auditing real
+  output rather than by reasoning: HTML numeric entities read as hex,
+  values inside comments, `@property { initial-value }`, a local variable named
+  `style` dragging business logic into the UI scan, `href="#fff"`, and hex in
+  free JSX text.
+
+- Translucent background layers are composited instead of taken at face value.
+  The ancestor walk stopped at the first background with any alpha, so a
+  15%-opaque white over a gradient read as white and legible text reported
+  1.0:1. A gradient or image background is now declined rather than guessed —
+  there is no single colour behind a gradient.
+
+### Security
+
+- **CWE-59**, on a gate that is on by default: `Path.is_file()` follows
+  symlinks, so a committed `theme.css` pointing outside the tree was read and
+  its matched fragments reached the persisted evidence. Paths are resolved and
+  checked for containment before any read.
+- **CWE-918**: a `design.targets` entry that is not a URL fell through to
+  `page.set_content`, executing repo-supplied markup in the browser on whatever
+  machine runs the gate. Only `http://`, `https://` and `file://` reach a
+  render, and a refused target fails the gate rather than being dropped.
+- **CWE-400**: files above 2 MB are skipped rather than read whole, and the
+  render gates' declared timeout is now actually passed to every browser call.
+
+### Note
+
+Playwright is an optional extra (`vise[design]`), imported lazily inside the
+functions that need it, so `pip install vise` never pulls a browser. The two
+render gates are deliberately not wired into the bundled `quality-gate` graph:
+they fail closed on an unconfigured target, so wiring them by default would
+turn `integration` red on every repo that never opted in. The graph file
+carries the snippet that turns them on.
+
 ## [0.1.0a17] — 2026-08-18
 
 ### Added
