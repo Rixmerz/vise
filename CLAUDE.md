@@ -13,10 +13,11 @@ Treat those files with the same care as the code.
 | Path | What lives there |
 |---|---|
 | `src/vise/` | the MCP server, engines, hooks, CLI, recipes |
+| `src/vise/engines/` | validators and the logic they gate on — the three design gates live here |
 | `src/vise/assets/workflows/` | the 9 bundled `*-graph.yaml` workflows |
 | `src/vise/tests/` | the whole suite — asset honesty tests live here too |
-| `agents/` | 19 bundled subagent charters |
-| `skills/` | 22 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, and the 15 `*-rules`) |
+| `agents/` | 20 bundled subagent charters |
+| `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
@@ -39,7 +40,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```bash
 .venv/bin/python -m ruff check . --exclude .claude
 .venv/bin/python -m coverage run -m pytest -q
-.venv/bin/python -m coverage report --fail-under=62
+.venv/bin/python -m coverage report --fail-under=68
 ```
 
 The coverage floor is a ratchet: raise it when the real number rises, never
@@ -56,6 +57,16 @@ lower it to make a change pass.
 - Tests go in `src/vise/tests/`, named `test_<subject>.py`. The autouse fixture
   in `conftest.py` redirects `$XDG_DATA_HOME`; never bypass it, or a test will
   clobber a real project's live workflow state.
+
+### Gates fail closed — the other half of the rule
+
+Hooks fail open. **Gates do the opposite.** `QualityCheckValidator` skips when
+its binary is missing (`passed=True`, `source="asserted"`,
+`outcome="unverified"`); `CommandExitValidator` and the three design gates fail
+closed. The distinction is deliberate and `quality-gate-graph.yaml` documents
+why. When adding a validator, decide which side it is on and say so in its
+docstring — a gate that cannot run must never report success, and a hook that
+raises takes the user's session down.
 
 ### Hooks fail open, on purpose
 
@@ -75,6 +86,8 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_orchestration_skill_sync.py` | every workflow the orchestration skill routes to exists, and every bundled workflow is routable |
 | `test_asset_honesty.py` | no workflow names a tool vise does not expose |
 | `test_doc_call_sync.py` / `test_version_sync.py` | README claims and version strings match reality |
+| `test_asset_coverage.py` | every validator in the registry is documented in the README — a workflow author cannot use one they cannot find |
+| `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.

@@ -193,9 +193,23 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `openspec` | `openspec/` planning artifacts | only the `validated` level; the four structural ones fail closed |
 | `no_new_deps` | no dependency manifest gained entries | not a git repo, no manifest, unresolvable base |
 | `diff_scope` | the diff stays inside declared `allow:` globs | not a git repo, or nothing changed |
+| `design_tokens` | colours, sizes, spacing and radii written as literals where the project declares a token | **never** — no external tool, so it always runs |
+| `ui_layout` | rendered overflow, clipping, collision and off-document content, per breakpoint | **never** — fails closed on a missing browser or an unconfigured target |
+| `ui_contrast` | rendered foreground against the *effective* background (nearest painting ancestor), WCAG 2.2 AA | **never** — same as `ui_layout` |
 
 A fail-open pass reports `outcome: "unverified"` and `source: "asserted"` — it
 never reads as clean, and `goal_complete` will not grade it as verified.
+
+The three design gates take the other side of that trade deliberately. Where a
+named `quality_check` skips when its binary is missing, these fail closed with
+evidence naming the remedy, because a gate that could not run must not report
+success. `design_tokens` needs nothing installed. The two render gates need
+`pip install 'vise[design]' && playwright install chromium` plus at least one
+`design.targets` entry in `.vise/quality.yaml`, and they are **not** wired into
+the bundled `quality-gate` graph for that reason — wiring them by default would
+turn `integration` red on every repo that never opted in. The graph file carries
+the snippet that turns them on. Allowances under `design.allowances` are a
+ratchet for `design_tokens`: record what a repo has today, then lower it.
 
 `tests_fail` is deliberately not the negation of `tests_pass`. `returncode != 0`
 is the naive reading and it is wrong: a broken `conftest.py`, a bad flag or a

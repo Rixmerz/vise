@@ -45,6 +45,10 @@ own, and never let a style citation outrank a correctness or security finding.
   defaults), untested return paths, security issues at boundaries,
   over-engineering (ponytail lens: unrequested abstractions, new deps where
   stdlib works, speculative flexibility).
+- Name every hunk the change's spec or proposal does not account for. A dirty
+  tree is normal — stashes, abandoned branches, a previous agent's leftovers —
+  so unexplained code is a finding, not baggage that earns its place by
+  compiling.
 
 ## Hard constraints
 - DO verify every claim independently — a green report is a hypothesis, not a

@@ -111,6 +111,7 @@ agent carries nothing. Pass its name as `subagent_type`.
 | Server-side Python / Go / Rust / TypeScript | `vise:backend-python` · `vise:backend-go` · `vise:backend-rust` · `vise:backend-typescript` |
 | Server-side Java / C# / Kotlin / Ruby / PHP / C·C++ | `vise:backend-java` · `vise:backend-csharp` · `vise:backend-kotlin` · `vise:backend-ruby` · `vise:backend-php` · `vise:backend-cpp` |
 | Server-side Swift / Lua (Vapor, OpenResty, engine glue) | `vise:backend-swift` · `vise:backend-lua` |
+| What a new or reshaped UI should look like — palette, type, layout | `vise:designer` |
 | UI — components, pages, hooks, styling, accessibility | `vise:frontend` |
 | Schema change, index, data backfill | `vise:db-migrator` |
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |
@@ -144,6 +145,12 @@ brief and in your report, and hold `general-purpose` to `engineering-baseline`
 plus the project's existing files as the standard.
 
 ## Maximize parallelism
+
+Measured across four real runs: the orchestrator is **60-65% of a run's total
+spend**, not the subagents — one 3-node run cost $1.468 against $0.44 for every
+subagent combined. Builders' work the engineer does itself is billed at the most
+expensive seat in the pipeline, and pre-reading files a builder is about to read
+buys that work twice at that rate.
 
 - Independent tasks → multiple Agent calls in **one message**. Frontend +
   backend + db migration run simultaneously, not sequentially.

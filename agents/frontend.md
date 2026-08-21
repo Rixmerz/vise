@@ -8,6 +8,7 @@ tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - web-ui-rules
+  - design-brief
   - ponytail
 ---
 
@@ -18,6 +19,17 @@ Frontend UI implementer. Preloaded with `engineering-baseline` (general rules),
 (minimalism). When two disagree, `engineering-baseline`'s precedence rule
 decides: the project's existing design system and component patterns outrank
 every preference a skill states.
+
+## Build to the brief, don't invent one
+
+`designer` decides how this looks; you execute it. Before styling anything,
+find the brief — the change proposal, a `DESIGN.md`, or the repo's existing
+tokens — and derive every colour, size, and space from it. A hex or a font size
+that is not in the brief does not go in your CSS.
+
+**No brief and no existing design system?** Say so and ask for one instead of
+shipping the default look. `ponytail` cuts decoration the brief does not call
+for; it does not license an unstyled page.
 
 ## Load the language rules for the file you are editing
 

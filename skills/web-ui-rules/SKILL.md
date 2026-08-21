@@ -46,6 +46,27 @@ preferred here.
   media query
 - Respect `prefers-reduced-motion` for any non-trivial animation
 
+## DO — composition
+
+The rules above make CSS correct; correct CSS still looks generic. These are the
+floor for a UI that reads as designed:
+
+- Give one element the lead. Three or more items at equal visual weight is a
+  grid with no focal point — vary size, weight, or space until something wins
+- Keep a heading inside about three lines; past that it is a heading doing a
+  paragraph's job, and the excess belongs in the copy below it
+- Spend one accent colour, sparingly. A second accent competing with the first
+  leaves the page with none
+- Prefer an off-black (a near-black carrying a trace of the page's hue) to
+  `#000` and an off-white to `#FFF`, unless the design commits to them on purpose
+- Cap body text near `65ch`. A full-width paragraph is unreadable at any size
+- Keep the type scale to 5-7 steps. An eighth size added by hand is how a
+  design stops looking designed
+
+The `design-brief` skill decides the palette, the type scale, and the layout.
+This section is the floor those decisions have to clear, not a substitute for
+making them.
+
 ## DON'T
 - Don't put business logic — API calls, transformations, validation — in a
   component. Extract to a hook, store, or service

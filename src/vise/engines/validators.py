@@ -1435,6 +1435,304 @@ def _isfloatable(v: Any) -> bool:
 
 # --- registry --------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Design gates — the fail-closed side of the house convention
+# ---------------------------------------------------------------------------
+#
+# `QualityCheckValidator` above SKIPS when its tool is missing: passed=True,
+# source="asserted", outcome="unverified". quality-gate-graph.yaml documents
+# why that matters — "command_exit fails CLOSED on a missing binary, so a live
+# entry hard-blocks every machine that lacks the tool. A named check cannot."
+#
+# These three take the other side. Every unavailable path below returns
+# passed=False, source="mechanical". None of them may ever return
+# passed=True with outcome="unverified": a gate that could not run must not
+# report success. That is the whole reason they exist as their own types
+# instead of as `checks:` entries.
+
+
+def _design_failure(name: str, weight: float, evidence: str) -> ValidatorRecord:
+    """The one shape every unavailable/misconfigured design gate returns."""
+    return ValidatorRecord(
+        name=name, passed=False, confidence_contribution=0.0, weight=weight,
+        evidence=evidence, at=_now(), source="mechanical", exit_code=None,
+        outcome="failed",
+    )
+
+
+def _design_pass(name: str, weight: float, evidence: str) -> ValidatorRecord:
+    return ValidatorRecord(
+        name=name, passed=True, confidence_contribution=weight, weight=weight,
+        evidence=evidence, at=_now(), source="mechanical", exit_code=0,
+        outcome="verified",
+    )
+
+
+@dataclass
+class DesignTokensValidator:
+    """Gate on design-token discipline — values written as literals where the
+    project already declares a token.
+
+    Static, pure Python, no external tool, so unlike every named quality check
+    this one can never be unavailable. Allowances come from
+    ``design.allowances`` in ``.vise/quality.yaml`` and default to zero; they
+    are a ratchet, like a coverage floor.
+
+    A project with no UI source PASSES. Not having a UI is not a violation.
+    """
+
+    weight: float = 1.0
+    name: str = "design_tokens"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            from vise.engines.design_profile import load_design_config
+            from vise.engines.design_tokens import scan
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _design_failure(self.name, self.weight, f"design_tokens unavailable: {exc}")
+
+        try:
+            config = load_design_config(goal.project_dir)
+            report = scan(goal.project_dir, config.allowances)
+        except Exception as exc:  # noqa: BLE001
+            return _design_failure(self.name, self.weight, f"design_tokens raised: {exc}")
+
+        if report.ui_files_scanned == 0:
+            return _design_pass(
+                self.name, self.weight,
+                "no UI source found (no stylesheet or component files) — nothing to judge",
+            )
+
+        over: list[str] = []
+        counts: dict[str, int] = {}
+        for finding in report.findings:
+            counts[finding.kind] = counts.get(finding.kind, 0) + 1
+        for kind, count in sorted(counts.items()):
+            allowed = config.allowance(kind)
+            if count > allowed:
+                over.append(f"{kind}={count} (allowed {allowed})")
+
+        if not over:
+            return _design_pass(self.name, self.weight, report.summary())
+
+        sample = "; ".join(
+            f"{f.path}:{f.line} {f.detail}" if f.line else f"{f.path} {f.detail}"
+            for f in report.findings[:3]
+        )
+        return _design_failure(
+            self.name, self.weight,
+            f"{report.summary()} — over allowance: {', '.join(over)}. {sample}"[:600],
+        )
+
+
+@dataclass
+class _RenderGate:
+    """Shared plumbing for the two gates that need a rendered page.
+
+    Availability is checked BEFORE any browser work, so the unavailable path
+    is a plain function call and stays assertable with no browser installed.
+    """
+
+    weight: float = 1.0
+    name: str = "render_gate"
+    timeout: int = 120
+
+    def _prepare(self, goal: Goal):
+        """Returns (config, error_record). Exactly one of them is None."""
+        from vise.engines.design_profile import load_design_config
+        from vise.engines.render_harness import browser_status
+
+        available, reason = browser_status()
+        if not available:
+            return None, _design_failure(self.name, self.weight, reason)
+
+        config = load_design_config(goal.project_dir)
+        if config.rejected_targets:
+            # Not a warning. A target the harness would have treated as inline
+            # HTML runs whatever it contains inside the browser on this
+            # machine, so an entry that does not name a page is a
+            # misconfiguration the gate refuses rather than skips.
+            return None, _design_failure(
+                self.name, self.weight,
+                f"{self.name}: {len(config.rejected_targets)} entry(ies) in "
+                f"`design.targets` are not loadable pages and were refused — a target "
+                f"must start with http://, https:// or file://. Refused: "
+                f"{', '.join(repr(x)[:60] for x in config.rejected_targets[:3])}",
+            )
+        if not config.targets:
+            return None, _design_failure(
+                self.name, self.weight,
+                f"{self.name} is wired but `design.targets` in .vise/quality.yaml is empty — "
+                "a render gate with nothing to render verifies nothing. Name at least one "
+                "URL or file:// path.",
+            )
+        return config, None
+
+
+@dataclass
+class UiLayoutValidator(_RenderGate):
+    """Gate on rendered layout: overflow, clipping, collision, off-document.
+
+    Fails on any defect of severity "error". Warnings are reported and do not
+    block — a box that escapes its container while still rendering is worth
+    saying and not worth stopping a merge for.
+    """
+
+    name: str = "ui_layout"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            config, failure = self._prepare(goal)
+            if failure is not None:
+                return failure
+
+            from vise.engines.render_harness import extract_breakpoints
+            from vise.engines.ui_checks import check_breakpoints
+            from vise.engines.ui_contract import as_selectors_by_id, derive_candidates
+
+            errors: list[str] = []
+            warns = 0
+            inspected = 0
+            for target in config.targets:
+                # Derive at EVERY configured width and union the results. A set
+                # derived only at the widest one silently excludes whatever is
+                # `display:none` there — a mobile nav, a drawer, a breakpoint-
+                # specific layout — so the element whose overflow only appears
+                # at 375px was never a candidate to begin with, and the gate
+                # reported clean on a page it had not looked at.
+                # ponytail: one derive render per breakpoint. Cheap enough at
+                # three widths; hoist into a single browser session if a repo
+                # ever configures many.
+                merged: dict[str, object] = {}
+                skipped: list[str] = []
+                for width in config.breakpoints:
+                    found, reasons = derive_candidates(
+                        target, breakpoint=width, timeout_ms=self.timeout * 1000
+                    )
+                    skipped.extend(f"@{width}px {r}" for r in reasons)
+                    for candidate in found:
+                        merged.setdefault(candidate.id, candidate)
+                candidates = list(merged.values())
+                inspected += len(candidates)
+                if skipped:
+                    errors.extend(f"{target}: {s}" for s in skipped)
+                snapshots = extract_breakpoints(
+                    target,
+                    as_selectors_by_id(candidates),
+                    list(config.breakpoints),
+                    timeout_ms=self.timeout * 1000,
+                )
+                for defect in check_breakpoints(snapshots):
+                    if defect.severity == "error":
+                        errors.append(f"{target}: {defect.detail}")
+                    else:
+                        warns += 1
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _design_failure(self.name, self.weight, f"{self.name} raised: {exc}")
+
+        summary = (
+            f"{inspected} elements across {len(config.targets)} target(s), "
+            f"{len(config.breakpoints)} breakpoints"
+        )
+        if errors:
+            return _design_failure(
+                self.name, self.weight,
+                f"{summary} — {len(errors)} blocking: {'; '.join(errors[:3])}"[:600],
+            )
+        return _design_pass(self.name, self.weight, f"{summary}, no blocking defects ({warns} warn)")
+
+
+@dataclass
+class UiContrastValidator(_RenderGate):
+    """Gate on rendered contrast, WCAG 2.2 AA.
+
+    Measures computed foreground against the *effective* background — the
+    nearest ancestor that actually paints one — which is the part static
+    analysis cannot reach.
+    """
+
+    name: str = "ui_contrast"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            config, failure = self._prepare(goal)
+            if failure is not None:
+                return failure
+
+            from vise.engines.render_harness import (
+                INTERACTIVE_STATES,
+                extract,
+                extract_states,
+            )
+            from vise.engines.ui_contract import as_selectors_by_id, derive_candidates
+            from vise.engines.ui_contrast import REQUIRED_STYLE_PROPS, check_nodes
+
+            findings: list[str] = []
+            inspected = 0
+            width = max(config.breakpoints)
+            for target in config.targets:
+                candidates, skipped = derive_candidates(
+                    target, breakpoint=width, timeout_ms=self.timeout * 1000
+                )
+                # A truncated or partly-unresolvable candidate set means the
+                # gate inspected less than the page. Reporting "all at or above
+                # WCAG AA" over that is the silent under-reporting this whole
+                # capability exists to remove, so it blocks like any finding.
+                findings.extend(f"{target}: {reason}" for reason in skipped)
+
+                selectors = as_selectors_by_id(candidates)
+                snapshot = extract(
+                    target,
+                    selectors,
+                    breakpoint=width,
+                    extra_style_props=list(REQUIRED_STYLE_PROPS),
+                    timeout_ms=self.timeout * 1000,
+                )
+                findings.extend(
+                    f"{target}: selector for {node_id!r} matched nothing at render time"
+                    for node_id in (snapshot.get("unresolved") or [])
+                )
+                inspected += len(snapshot.get("nodes") or [])
+
+                by_state = {"default": snapshot.get("nodes") or []}
+                # Interactive controls are where hover and focus styles live,
+                # and where they are written by hand without ever being
+                # checked. Restricting the extra renders to them keeps the
+                # cost proportional.
+                interactive = {
+                    c.id: c.selector for c in candidates if c.role == "interactive"
+                }
+                if interactive:
+                    by_state.update(
+                        extract_states(
+                            target,
+                            interactive,
+                            states=INTERACTIVE_STATES,
+                            breakpoint=width,
+                            extra_style_props=list(REQUIRED_STYLE_PROPS),
+                            timeout_ms=self.timeout * 1000,
+                        )
+                    )
+
+                for state, nodes in by_state.items():
+                    for f in check_nodes(nodes, state=state):
+                        findings.append(
+                            f"{target} {f.node_id} [{f.state}]: {f.ratio}:1 needs "
+                            f"{f.required}:1 ({f.foreground} on {f.background} "
+                            f"from {f.background_from})"
+                        )
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _design_failure(self.name, self.weight, f"{self.name} raised: {exc}")
+
+        summary = f"{inspected} elements across {len(config.targets)} target(s)"
+        if findings:
+            return _design_failure(
+                self.name, self.weight,
+                f"{summary} — {len(findings)} below threshold: {'; '.join(findings[:3])}"[:600],
+            )
+        return _design_pass(self.name, self.weight, f"{summary}, all at or above WCAG AA")
+
 _REGISTRY: dict[str, Callable[..., Validator]] = {
     "tests_pass": TestsPassValidator,
     "tests_fail": TestsFailValidator,
@@ -1447,6 +1745,9 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "openspec": OpenSpecValidator,
     "no_new_deps": NoNewDepsValidator,
     "diff_scope": DiffScopeValidator,
+    "design_tokens": DesignTokensValidator,
+    "ui_layout": UiLayoutValidator,
+    "ui_contrast": UiContrastValidator,
 }
 
 
