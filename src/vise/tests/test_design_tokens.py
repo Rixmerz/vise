@@ -289,3 +289,23 @@ def test_non_git_repo_still_scans(tmp_path: Path) -> None:
 
     assert report.ui_files_scanned == 1
     assert any(f.kind == "raw_color" for f in report.findings)
+
+
+def test_stylesheet_named_tokens_is_parsed_as_css(tmp_path: Path) -> None:
+    """A `.css` file is never treated as a JS token-config module.
+
+    `_CONFIG_FILE_RE` matches the filename `tokens.css`, and the config path
+    parses a `fontSize: {...}` object literal — nothing a stylesheet contains.
+    The shortcut therefore skipped the CSS declaration parser outright, and the
+    most obvious filename a design system has reported zero declared tokens.
+    """
+    body = ":root {\n  --color-brand: #3355ff;\n  --text-sm: 14px;\n}\n"
+    (tmp_path / "tokens.css").write_text(body)
+    named = scan(tmp_path)
+
+    (tmp_path / "tokens.css").unlink()
+    (tmp_path / "palette.css").write_text(body)
+    neutral = scan(tmp_path)
+
+    assert named.tokens_declared == neutral.tokens_declared
+    assert named.tokens_declared > 0
