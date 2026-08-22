@@ -20,11 +20,11 @@ from pathlib import Path
 UI_EXTENSIONS = {
     ".css", ".scss", ".sass", ".less",
     ".html", ".astro", ".vue", ".svelte",
-    ".tsx", ".jsx", ".ts", ".js",
+    ".tsx", ".jsx", ".ts", ".js", ".mjs", ".cjs",
 }
 # Extensions that only count as UI source when the file actually carries
 # styling signal — a .ts constants file with a hex string is not a UI bug.
-_SIGNAL_REQUIRED_EXTENSIONS = {".ts", ".js"}
+_SIGNAL_REQUIRED_EXTENSIONS = {".ts", ".js", ".mjs", ".cjs"}
 
 _SKIP_DIRS = {
     "node_modules", ".git", "dist", "build", ".next", "out", "coverage",

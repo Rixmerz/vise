@@ -309,3 +309,22 @@ def test_stylesheet_named_tokens_is_parsed_as_css(tmp_path: Path) -> None:
 
     assert named.tokens_declared == neutral.tokens_declared
     assert named.tokens_declared > 0
+
+
+def test_tailwind_config_mjs_is_scanned(tmp_path: Path) -> None:
+    """`tailwind.config.mjs`/`.cjs` are collected, not skipped by extension.
+
+    `_CONFIG_EXTENSIONS` named them while `UI_EXTENSIONS` did not collect them,
+    so the two most common modern Tailwind config filenames were never read at
+    all — leaving `declared_type_tokens` empty and `scale_bypassed` unable to
+    fire. Same defect as `tokens.css`: a gate silenced by a filename.
+    """
+    config = "export default { theme: { fontSize: { sm: '14px', lg: '18px' } } }\n"
+    (tmp_path / "tailwind.config.mjs").write_text(config)
+    (tmp_path / "app.css").write_text(
+        "body { font-family: Inter; }\n.a { font-size: 13px; }\n.b { font-size: 15px; }\n"
+    )
+    report = scan(tmp_path)
+
+    assert report.ui_files_scanned == 2
+    assert any(f.kind == "scale_bypassed" for f in report.findings)
