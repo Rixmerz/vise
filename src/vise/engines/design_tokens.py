@@ -20,11 +20,11 @@ from pathlib import Path
 UI_EXTENSIONS = {
     ".css", ".scss", ".sass", ".less",
     ".html", ".astro", ".vue", ".svelte",
-    ".tsx", ".jsx", ".ts", ".js",
+    ".tsx", ".jsx", ".ts", ".js", ".mjs", ".cjs",
 }
 # Extensions that only count as UI source when the file actually carries
 # styling signal — a .ts constants file with a hex string is not a UI bug.
-_SIGNAL_REQUIRED_EXTENSIONS = {".ts", ".js"}
+_SIGNAL_REQUIRED_EXTENSIONS = {".ts", ".js", ".mjs", ".cjs"}
 
 _SKIP_DIRS = {
     "node_modules", ".git", "dist", "build", ".next", "out", "coverage",
@@ -44,6 +44,13 @@ _STYLING_SIGNAL_RE = re.compile(r"className\s*=|style\s*=\s*[{\"']|\.css['\"]|st
 # A file whose whole purpose is declaring tokens (tailwind config, a theme or
 # tokens module) — colours/sizes here are declarations, never call-site findings.
 _CONFIG_FILE_RE = re.compile(r"(tailwind\.config\.|theme\.|tokens\.)", re.IGNORECASE)
+# ...but only for JS/TS modules. `_extract_config_type_tokens` parses a
+# `fontSize: {...}` object literal and understands nothing else, so treating a
+# stylesheet as config skipped the CSS declaration parser entirely: a file named
+# `tokens.css` reported `tokens_declared=0` while an identical `palette.css`
+# counted them, and `scale_bypassed` could never fire on the most obvious
+# filename a design system has. Stylesheets are always parsed as stylesheets.
+_CONFIG_EXTENSIONS = {".ts", ".js", ".mjs", ".cjs", ".tsx", ".jsx"}
 
 _TOKEN_DECL_RE = re.compile(r"(--[\w-]+)\s*:\s*([^;]+);")
 # `@property --name { ...; initial-value: X; }` is the other CSS syntax that
@@ -347,7 +354,9 @@ def scan(project_dir: str | Path, allowances: dict[str, int] | None = None) -> R
         if text is None:
             continue
         suffix = path.suffix.lower()
-        is_config = bool(_CONFIG_FILE_RE.search(path.name))
+        is_config = (
+            suffix in _CONFIG_EXTENSIONS and bool(_CONFIG_FILE_RE.search(path.name))
+        )
         if suffix in _SIGNAL_REQUIRED_EXTENSIONS and not is_config:
             if not _STYLING_SIGNAL_RE.search(text):
                 continue
