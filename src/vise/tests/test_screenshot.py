@@ -119,6 +119,70 @@ def test_cli_exits_nonzero_when_browser_unavailable(
     assert not (tmp_path / "out.png").exists()
 
 
+@requires_browser
+def test_cli_main_writes_a_real_png_on_success(tmp_path: Path) -> None:
+    from vise.cli.main import main
+
+    page = tmp_path / "page.html"
+    page.write_text(_HTML, encoding="utf-8")
+    out = tmp_path / "shots" / "out.png"
+
+    rc = main(["shot", f"file://{page}", "--out", str(out)])
+
+    assert rc == 0
+    assert out.exists()
+    assert out.read_bytes().startswith(_PNG_MAGIC)
+
+
+def test_failed_capture_removes_a_stale_file_at_out_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reason = (
+        "playwright is not installed; run: pip install 'vise[design]'. "
+        "Full setup: pip install 'vise[design]' && playwright install chromium"
+    )
+    monkeypatch.setattr(
+        "vise.engines.render_harness.browser_status", lambda: (False, reason)
+    )
+    out = tmp_path / "out.png"
+    out.write_bytes(b"stale png bytes from a previous capture")
+
+    with pytest.raises(BrowserUnavailable):
+        screenshot("https://example.com", out)
+
+    assert not out.exists()
+
+
+@requires_browser
+def test_failed_network_capture_removes_a_stale_file_at_out_path(
+    tmp_path: Path,
+) -> None:
+    from playwright.sync_api import Error as PlaywrightError
+
+    out = tmp_path / "out.png"
+    out.write_bytes(b"stale png bytes from a previous capture")
+
+    with pytest.raises(PlaywrightError):
+        screenshot("http://127.0.0.1:1/", out, timeout_ms=1000)
+
+    assert not out.exists()
+
+
+@requires_browser
+def test_failed_capture_leaves_no_empty_directory_for_a_nested_out_path(
+    tmp_path: Path,
+) -> None:
+    from playwright.sync_api import Error as PlaywrightError
+
+    out = tmp_path / "does" / "not" / "exist" / "out.png"
+
+    with pytest.raises(PlaywrightError):
+        screenshot("http://127.0.0.1:1/", out, timeout_ms=1000)
+
+    assert not out.exists()
+    assert not out.parent.exists()
+
+
 def test_the_real_unavailable_message_names_both_install_steps() -> None:
     """The remedy string the code actually produces, not one a test wrote.
 
@@ -136,3 +200,35 @@ def test_the_real_unavailable_message_names_both_install_steps() -> None:
 
     assert "pip install 'vise[design]'" in message
     assert "playwright install chromium" in message
+
+
+def test_a_symlink_destination_is_refused_and_its_target_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--out`` pointing at a symlink must not reach the file it points to.
+
+    ``Path.resolve()`` follows the final component, and this function both
+    writes to that path and unlinks it on failure — so a committed
+    ``shots/out.png -> ~/.ssh/id_rsa`` was written through on success and
+    DELETED on a capture that merely failed to load a page. Reproduced before
+    the fix: the symlink survived and its target's contents were gone. CWE-59,
+    the same link-following class already fixed once in
+    ``design_tokens._within_project``.
+    """
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not clobber me")
+    link = tmp_path / "out.png"
+    link.symlink_to(secret)
+
+    called: list[str] = []
+    monkeypatch.setattr(
+        "vise.engines.render_harness.browser_status",
+        lambda: (called.append("probed"), (True, "chromium is available"))[1],
+    )
+
+    with pytest.raises(ValueError, match="symlink"):
+        screenshot("https://example.com", link)
+
+    assert secret.read_text() == "do not clobber me"
+    assert link.is_symlink()
+    assert not called, "the refusal must happen before any browser work"

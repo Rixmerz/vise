@@ -199,11 +199,15 @@ def _is_url(target: str) -> bool:
 
 
 def _require_browser() -> None:
+    # `reason` is already the whole remedy — browser_status() ran it through
+    # render_harness._unavailable_message(), which names the interpreter and
+    # both install steps. Appending another "Full setup: ..." here duplicated
+    # it verbatim; every render_harness caller hits this same trap, which is
+    # why the fix belongs in one place rather than four (root-cause, not
+    # patched per call site).
     available, reason = browser_status()
     if not available:
-        raise BrowserUnavailable(
-            f"{reason} Full setup: pip install 'vise[design]' && playwright install chromium"
-        )
+        raise BrowserUnavailable(reason)
 
 
 @dataclass(frozen=True, slots=True)

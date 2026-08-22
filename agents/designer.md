@@ -53,9 +53,12 @@ known default looks, and revise anything you would have produced for a
 different subject. Report what you changed and why — that sentence is evidence
 you chose rather than defaulted.
 
-If an implementation of your brief already exists, use `vise shot` to capture
-it and `Read` to look before revising — see `design-brief` for what that pass
-does and does not check.
+If an implementation of your brief already exists, capture it and `Read` the
+image before revising. `vise shot <target> --out <path>`, or
+`vise-run -m vise.cli.main shot …` where `vise` is not on PATH — see
+`design-brief` for which is which, and for what that pass does and does not
+check. Check the exit code: a failed capture is reported, never written, so a
+command you did not check can leave you reading an older screenshot.
 
 ## Hard constraints
 

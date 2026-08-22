@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -230,8 +232,12 @@ DEFAULT_STYLE_PROPS: tuple[str, ...] = (
     "background-color",
 )
 
-_INSTALL_PIP = "pip install 'vise[design]'"
-_INSTALL_CHROMIUM = "playwright install chromium"
+# Named after the interpreter actually running this process (sys.executable),
+# not a bare "pip"/"playwright" the reader would run in whatever venv their
+# shell happens to have active — which, for a plugin install, is never the
+# interpreter that will execute the capture (see render_harness's callers).
+_INSTALL_PIP = f"{sys.executable} -m pip install 'vise[design]'"
+_INSTALL_CHROMIUM = f"{sys.executable} -m playwright install chromium"
 _BOTH_COMMANDS = f"{_INSTALL_PIP} && {_INSTALL_CHROMIUM}"
 
 _URL_RE = re.compile(r"^(https?|file)://", re.IGNORECASE)
@@ -548,34 +554,100 @@ def screenshot(
     behavioural need for that path, so it is refused rather than accepted and
     trusted (CWE-918, same allowlist as ``design_profile._TARGET_RE``). The
     refusal happens before any browser launch. Raises ``BrowserUnavailable``
-    if Playwright/Chromium is missing; never leaves a partial file behind.
+    if Playwright/Chromium is missing.
+
+    Guarantees, not hopes: on any failure (navigation error, missing browser,
+    a raised exception mid-capture) ``out_path`` does not exist afterwards.
+    A previous capture sitting there is REMOVED rather than left, because the
+    caller is told to capture and then read that path: a stale image is a
+    plausible lie, while a missing file is an unambiguous signal. No empty
+    directory is created on the way there either. The PNG bytes are
+    captured into memory first; only once they exist does this function touch
+    the filesystem, writing them to a temp file next to ``out_path`` and
+    ``Path.replace()``-ing it into place, which is atomic within one
+    filesystem. A crash between those two steps leaves the temp file, which is
+    cleaned up before the exception propagates.
     """
     if not _SCREENSHOT_TARGET_RE.match(target.strip()):
         raise ValueError(
             f"screenshot target must start with http://, https://, or file:// — got {target!r}"
         )
 
-    available, reason = browser_status()
-    if not available:
-        # `reason` is already the whole remedy — browser_status() ran it
-        # through _unavailable_message. Wrapping it again printed the
-        # "Full setup:" line twice.
-        raise BrowserUnavailable(reason)
+    # NOT Path.resolve() — that follows a symlink at the final component, and
+    # this function both writes to that path and, on failure, unlinks it. A
+    # committed `shots/out.png -> ~/.ssh/id_rsa` would be written through and
+    # then DELETED by a capture that merely failed to load a page. CWE-59, the
+    # same link-following class already fixed once in
+    # design_tokens._within_project. The parent is resolved (that is what makes
+    # the path absolute and normalises `..`); the final component never is.
+    destination = Path(out_path).expanduser()
+    resolved = destination.parent.resolve() / destination.name
+    if resolved.is_symlink():
+        raise ValueError(
+            f"refusing to write through a symlink: {resolved} — "
+            "point --out at a real path"
+        )
 
-    from playwright.sync_api import sync_playwright
+    # A failed capture must not leave a PREVIOUS capture at the path the caller
+    # is about to read. Leaving it looks like success: the designer is told to
+    # capture and then Read the file, so one that misses the exit code reads
+    # last week's screenshot and revises its brief against a UI that no longer
+    # exists. A missing file is an unambiguous signal; a stale image is a
+    # plausible lie, and this repo's thesis is that something which could not
+    # do the work must never look like it did.
+    #
+    # This covers EVERY failure, not just a navigation error. An earlier
+    # version raised BrowserUnavailable before this point and wrapped only
+    # goto/screenshot, so a missing browser or a failed chromium launch left
+    # the stale file sitting there — while the docstring promised otherwise.
+    # The danger is identical whichever way the capture failed, so the
+    # guarantee has to be too.
+    #
+    # Losing the old image is the cost, and it is the right one: passing
+    # --out <path> is a request to replace what is there.
+    stale = resolved.exists()
 
-    resolved = Path(out_path).resolve()
-    resolved.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        available, reason = browser_status()
+        if not available:
+            # `reason` is already the whole remedy — browser_status() ran it
+            # through _unavailable_message. Wrapping it again printed the
+            # "Full setup:" line twice.
+            raise BrowserUnavailable(reason)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(viewport={"width": int(width), "height": int(height)})
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
             try:
-                page.goto(target, wait_until=wait_until, timeout=timeout_ms)
-                page.screenshot(path=str(resolved), full_page=full_page)
+                page = browser.new_page(
+                    viewport={"width": int(width), "height": int(height)}
+                )
+                try:
+                    page.goto(target, wait_until=wait_until, timeout=timeout_ms)
+                    png_bytes = page.screenshot(full_page=full_page)
+                finally:
+                    page.close()
             finally:
-                page.close()
-        finally:
-            browser.close()
+                browser.close()
+    except BaseException:
+        if stale:
+            resolved.unlink(missing_ok=True)
+        raise
+
+    # Only now that the capture succeeded do we touch the filesystem — a
+    # failure above never gets far enough to create even an empty directory.
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=resolved.parent, prefix=f".{resolved.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(png_bytes)
+        Path(tmp_name).replace(resolved)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        if stale:
+            resolved.unlink(missing_ok=True)
+        raise
     return resolved
