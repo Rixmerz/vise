@@ -141,8 +141,19 @@ def _configured(project: Path, tool: str) -> bool:
 
 
 # Language-agnostic, bound whenever the binary is there.
+#
+# `secrets` leads with the venv form for the same reason the Python block does:
+# detect-secrets is a Python package, so on a repo that followed vise's own
+# setup it lives in `.venv/bin` and never reaches PATH. Probing PATH alone
+# reported "no detect-secrets" against a repo that had it installed and
+# working — under-detection is worse than the false bind above, because the
+# user reads it as a gap and knowingly accepts a hole that is not there.
 _UNIVERSAL: dict[str, list[list[str]]] = {
-    "secrets": [["detect-secrets", "scan"], ["gitleaks", "detect", "--no-banner"]],
+    "secrets": [
+        [".venv/bin/python", "-m", "detect_secrets", "scan"],
+        ["detect-secrets", "scan"],
+        ["gitleaks", "detect", "--no-banner"],
+    ],
     "spec": [["openspec", "validate", "--all", "--strict"]],
 }
 

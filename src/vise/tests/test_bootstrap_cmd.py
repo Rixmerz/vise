@@ -17,10 +17,12 @@ para prevenir.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from vise.cli import bootstrap_cmd
 from vise.cli.bootstrap_cmd import _tool_name, detect, render
 
 
@@ -275,3 +277,29 @@ def test_the_usage_line_lists_it():
     with redirect_stdout(buf):
         main(["help"])
     assert "bootstrap" in buf.getvalue()
+
+
+def test_secrets_binds_to_a_venv_detect_secrets(tmp_path: Path, monkeypatch) -> None:
+    """detect-secrets installed only in the venv still binds `secrets`.
+
+    It is a Python package, so on a repo that followed vise's own setup it
+    lives in `.venv/bin` and never reaches PATH. Probing PATH alone reported
+    "no detect-secrets" against a repo that had it working — and an unbound
+    check reads to the user as a gap to accept knowingly, so under-detection
+    talks them into accepting a hole that is not there.
+
+    PATH is emptied and module resolution stubbed, so the only thing under
+    test is that a venv-form candidate exists for `secrets` and is preferred.
+    """
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(bootstrap_cmd, "_module_importable", lambda _i, _m: True)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("")
+
+    found = detect(tmp_path)
+
+    assert found["bound"]["secrets"] == [
+        ".venv/bin/python", "-m", "detect_secrets", "scan",
+    ]
