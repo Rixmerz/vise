@@ -6,6 +6,56 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a19] — 2026-08-21
+
+A patch release, and every fix in it is the same defect: **a gate that reported
+nothing because of a name.** Two silenced by the name of a file under scan, one
+by where a tool was installed. None of them failed loudly — each returned a
+clean or complete-looking answer, which is the shape a gate must never have.
+
+### Fixed
+
+- **`design_tokens` treated a stylesheet named `tokens.css` as a token-config
+  module.** `_CONFIG_FILE_RE` matches on filename alone, so the file took the
+  config path — which parses a JavaScript `fontSize: {...}` object literal and
+  understands nothing else — and returned before the CSS declaration parser ran.
+  Identical content gave `tokens_declared=0` in `tokens.css` and `1` in
+  `palette.css`, so `scale_bypassed` could never fire in a repo whose token file
+  carries the most obvious name a design system has. The shortcut now applies
+  only to JS/TS modules; stylesheets are always parsed as stylesheets.
+
+- **`tailwind.config.mjs` and `.cjs` were never read.** `_CONFIG_EXTENSIONS`
+  named both, but `UI_EXTENSIONS` never collected them — a dead line that read
+  as support it did not deliver. The two most common modern Tailwind config
+  filenames were skipped entirely, leaving `declared_type_tokens` empty and
+  `scale_bypassed` unable to fire there either. Both extensions now sit in
+  `UI_EXTENSIONS` and in `_SIGNAL_REQUIRED_EXTENSIONS`, so a stray `.mjs`
+  carrying a hex still needs styling signal before it counts as UI source.
+
+- **`vise bootstrap` did not detect a venv-installed `detect-secrets`.** It
+  probed PATH only, but detect-secrets is a Python package: on a repo that
+  followed vise's own setup instructions it lives in `.venv/bin` and never
+  reaches PATH. Detection reported "no detect-secrets" against repos that had
+  it installed and working. This direction of error is the worse one — an
+  unbound check is presented to the user as a real gap to close *or accept
+  knowingly*, so under-detection talks them into accepting a hole that does not
+  exist. `secrets` now leads with the venv form, matching the ordering the
+  Python block already used for `unit`, `lint` and `types`.
+
+### Behaviour change
+
+The first two fixes **raise strictness**. A repo with a `theme.css` or
+`tokens.scss` carrying call-site literals now emits findings from that file
+where the early return suppressed them, and a Tailwind `.mjs` config can now
+make `scale_bypassed` fire. These are true positives, but a gate that was green
+on 0.1.0a18 can turn red on upgrade with no change to the code it grades.
+Record what the repo has today under `design.allowances` and ratchet it down —
+that is what the allowance block is for.
+
+### Changed
+
+- The coverage floor rises 68 → 69, following the real number.
+
 ## [0.1.0a18] — 2026-08-21
 
 ### Added
