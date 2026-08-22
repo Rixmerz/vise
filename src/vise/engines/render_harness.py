@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -235,6 +236,11 @@ _BOTH_COMMANDS = f"{_INSTALL_PIP} && {_INSTALL_CHROMIUM}"
 
 _URL_RE = re.compile(r"^(https?|file)://", re.IGNORECASE)
 
+# Same allowlist and same CWE-918 rationale as design_profile._TARGET_RE:
+# a non-matching string is treated as inline HTML by extract()/set_content,
+# so screenshot() must refuse it before any browser launches.
+_SCREENSHOT_TARGET_RE = re.compile(r"^(?:https?|file)://\S", re.IGNORECASE)
+
 
 class BrowserUnavailable(RuntimeError):
     """Raised when Playwright or its Chromium build is missing.
@@ -397,7 +403,10 @@ def extract_states(
     """
     available, reason = browser_status()
     if not available:
-        raise BrowserUnavailable(_unavailable_message(reason))
+        # `reason` is already the whole remedy — browser_status() ran it
+        # through _unavailable_message. Wrapping it again printed the
+        # "Full setup:" line twice.
+        raise BrowserUnavailable(reason)
 
     style_props = _resolve_style_props(extra_style_props)
     from playwright.sync_api import sync_playwright
@@ -463,7 +472,10 @@ def extract(
     """
     available, reason = browser_status()
     if not available:
-        raise BrowserUnavailable(_unavailable_message(reason))
+        # `reason` is already the whole remedy — browser_status() ran it
+        # through _unavailable_message. Wrapping it again printed the
+        # "Full setup:" line twice.
+        raise BrowserUnavailable(reason)
 
     from playwright.sync_api import sync_playwright
 
@@ -493,7 +505,10 @@ def extract_breakpoints(
     """
     available, reason = browser_status()
     if not available:
-        raise BrowserUnavailable(_unavailable_message(reason))
+        # `reason` is already the whole remedy — browser_status() ran it
+        # through _unavailable_message. Wrapping it again printed the
+        # "Full setup:" line twice.
+        raise BrowserUnavailable(reason)
 
     from playwright.sync_api import sync_playwright
 
@@ -514,3 +529,53 @@ def extract_breakpoints(
         finally:
             browser.close()
     return out
+
+
+def screenshot(
+    target: str,
+    out_path: str | Path,
+    *,
+    width: int = 1280,
+    height: int = 800,
+    full_page: bool = True,
+    wait_until: str = "networkidle",
+    timeout_ms: int = 15000,
+) -> Path:
+    """Render ``target`` and save a PNG to ``out_path``.
+
+    ``target`` MUST be a URL (http/https/file) — unlike ``extract()``, this
+    never treats a non-matching string as inline HTML: screenshot() has no
+    behavioural need for that path, so it is refused rather than accepted and
+    trusted (CWE-918, same allowlist as ``design_profile._TARGET_RE``). The
+    refusal happens before any browser launch. Raises ``BrowserUnavailable``
+    if Playwright/Chromium is missing; never leaves a partial file behind.
+    """
+    if not _SCREENSHOT_TARGET_RE.match(target.strip()):
+        raise ValueError(
+            f"screenshot target must start with http://, https://, or file:// — got {target!r}"
+        )
+
+    available, reason = browser_status()
+    if not available:
+        # `reason` is already the whole remedy — browser_status() ran it
+        # through _unavailable_message. Wrapping it again printed the
+        # "Full setup:" line twice.
+        raise BrowserUnavailable(reason)
+
+    from playwright.sync_api import sync_playwright
+
+    resolved = Path(out_path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(viewport={"width": int(width), "height": int(height)})
+            try:
+                page.goto(target, wait_until=wait_until, timeout=timeout_ms)
+                page.screenshot(path=str(resolved), full_page=full_page)
+            finally:
+                page.close()
+        finally:
+            browser.close()
+    return resolved

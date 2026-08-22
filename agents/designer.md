@@ -53,6 +53,10 @@ known default looks, and revise anything you would have produced for a
 different subject. Report what you changed and why — that sentence is evidence
 you chose rather than defaulted.
 
+If an implementation of your brief already exists, use `vise shot` to capture
+it and `Read` to look before revising — see `design-brief` for what that pass
+does and does not check.
+
 ## Hard constraints
 
 - DON'T write or edit components, stylesheets, or templates. The brief is your

@@ -58,8 +58,14 @@ def test_unknown_type_still_fails_closed(tmp_path: Path) -> None:
 
 
 def test_ui_layout_without_playwright_fails_closed_and_names_both_install_steps(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Simulates "no Playwright" via browser_status — this machine has it installed."""
+    monkeypatch.setattr(
+        "vise.engines.render_harness.browser_status",
+        lambda: (False, "playwright is not installed; run: pip install 'vise[design]'. "
+                         "Full setup: pip install 'vise[design]' && playwright install chromium"),
+    )
     validator = build_validators([{"type": "ui_layout"}])[0]
 
     record = validator.run(_goal(tmp_path))
@@ -70,8 +76,14 @@ def test_ui_layout_without_playwright_fails_closed_and_names_both_install_steps(
 
 
 def test_ui_contrast_without_playwright_fails_closed_and_names_both_install_steps(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Simulates "no Playwright" via browser_status — this machine has it installed."""
+    monkeypatch.setattr(
+        "vise.engines.render_harness.browser_status",
+        lambda: (False, "playwright is not installed; run: pip install 'vise[design]'. "
+                         "Full setup: pip install 'vise[design]' && playwright install chromium"),
+    )
     validator = build_validators([{"type": "ui_contrast"}])[0]
 
     record = validator.run(_goal(tmp_path))
