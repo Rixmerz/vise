@@ -52,3 +52,24 @@ def _isolated_xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         pass
 
     return xdg_data_home
+
+
+@pytest.fixture(autouse=True)
+def _clear_ambient_test_and_lint_cmd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralise $VISE_TEST_CMD / $VISE_LINT_CMD for every test.
+
+    ``vise bootstrap`` tells users to put these in their shell/settings so
+    ``tests_pass``/``tests_fail``/``lint_pass`` run the right command in THEIR
+    repo. Anyone who follows that advice and then runs vise's own suite from
+    that shell hands every test an ambient override it never asked for —
+    ``TestsFailValidator`` picks up ``VISE_TEST_CMD``, resolves a runner that
+    isn't pytest, and asserts "unverified" instead of the mechanical pass/fail
+    the test is checking. A contributor doing exactly what vise's docs tell
+    them to do gets a red suite they did not cause.
+
+    Clearing it here does not stop a test from setting its own value — a test
+    that wants a specific ``VISE_TEST_CMD``/``VISE_LINT_CMD`` still calls
+    ``monkeypatch.setenv`` itself, same as it always did.
+    """
+    monkeypatch.delenv("VISE_TEST_CMD", raising=False)
+    monkeypatch.delenv("VISE_LINT_CMD", raising=False)

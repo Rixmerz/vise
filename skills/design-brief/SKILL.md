@@ -48,6 +48,23 @@ job, and what does the reader see first?
 this for a completely different subject? If yes, it is a default, not a
 decision. Revise it and say what you changed and why.
 
+If an implementation already exists to audit, look at it before revising the
+brief from memory. `vise shot <target> --out <path> [--width N] [--height N]
+[--viewport]` captures a PNG of a running page — `<target>` must be a
+`http://`, `https://`, or `file://` URL. Full page by default;
+`--viewport` captures just the viewport. Read the PNG and check it against
+what the brief specified: is the signature element where the wireframe put
+it, does the palette read as written, did the layout survive contact with
+real content. This is looking, not measuring — it catches "the brief said one
+signature element and the render has three," not "contrast fails" or "this
+overflows at 375px." Those are `ui_contrast` and `ui_layout`, and a screenshot
+at one viewport is not a substitute for either; a designer who eyeballs a PNG
+and calls it accessible has formed an opinion, not run a check. The command
+needs `pip install 'vise[design]'` and `playwright install chromium` — if
+either is missing it exits non-zero with the remedy printed. When that
+happens, say in the brief that the visual pass did not run rather than
+skipping it silently.
+
 Current AI-generated design converges on a small number of looks. If your plan
 landed on one of these without the brief asking for it, you did not choose it —
 you defaulted to it:

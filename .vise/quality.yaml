@@ -24,7 +24,7 @@ checks:
   # stale .coverage happened to be on disk — a green threshold measured against
   # an unrelated run from hours earlier. Same fold as the CI step.
   unit: [".venv/bin/python", "-m", "coverage", "run", "-m", "pytest", "-q"]
-  coverage: [".venv/bin/python", "-m", "coverage", "report", "--fail-under=69"]
+  coverage: [".venv/bin/python", "-m", "coverage", "report", "--fail-under=71"]
 
   # dead_code is ruff's F401/F841, already inside the `lint` run above — listed
   # separately so a node gating on dead_code alone gets a real answer instead
