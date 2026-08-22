@@ -6,6 +6,92 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a20] — 2026-08-22
+
+### Added
+
+- **The `designer` can look at what it designed.** `vise shot <target> --out
+  <path> [--width N] [--height N] [--viewport]` renders a page to a PNG using
+  the browser the render gates already drive. The designer runs it with `Bash`
+  and reads the image with `Read`, which renders images.
+
+  The gap it closes was measured, not assumed: an implementation of a designer
+  brief shipped 9px of horizontal scroll at 375px, and `ui_layout` caught it.
+  The designer did not, because it had no way to look. The one that decides
+  could not see; the one that sees could not decide.
+
+  Two constraints shaped the approach. **Claude Chrome is not reachable from a
+  subagent** — the `designer` charter grants `Read, Write, Glob, Grep, Bash,
+  Skill`, and no `mcp__claude-in-chrome__*` tool exists there at all, so
+  building toward that framing would have shipped a capability the agent could
+  never invoke. And **nothing new is installed**: `render_harness` already
+  drives Playwright, which is already the `vise[design]` extra.
+
+  The capture inherits the scheme allowlist (`http`/`https`/`file`), enforced
+  before any browser launch. The harness treats a non-URL target as inline HTML
+  and calls `set_content` on it, so accepting a bare string would have
+  re-opened the CWE-918 finding already fixed in `design_profile._TARGET_RE`.
+
+  A screenshot shows one viewport. It does not measure contrast and does not
+  find an overflow at another breakpoint — `ui_contrast` and `ui_layout` do
+  that, and `skills/design-brief` says so plainly.
+
+### Fixed
+
+- **Setting `VISE_TEST_CMD` broke vise's own test suite.** `vise bootstrap`
+  instructs users to put it in their settings; six tests then read that ambient
+  value instead of controlling it, so a contributor who followed vise's own
+  documented setup got a red suite they did not cause. An autouse fixture now
+  clears `VISE_TEST_CMD`/`VISE_LINT_CMD` for every test, the way the existing
+  fixture isolates `$XDG_DATA_HOME`. A test that wants a specific command still
+  sets it itself.
+
+- **Two design-gate tests established "Playwright is missing" by hoping the
+  machine lacked it.** They now simulate absence explicitly, so they exercise
+  the fail-closed branch they are named after regardless of what is installed.
+
+- **The unavailable-browser remedy string was never asserted against the code
+  that produces it.** With every unavailable-path test injecting its own
+  message, `_unavailable_message` could have dropped the `playwright install
+  chromium` half and the suite would have stayed green while users hit a dead
+  end one install short of a working browser.
+
+### Fixed — found by review of the above, before it shipped
+
+The first cut of `vise shot` passed its own tests and was wrong in four ways
+an adversarial review caught. They are listed because each is the same shape:
+a thing that looked like it worked.
+
+- **The command did not exist for a plugin user.** The assets told the designer
+  to run `vise shot`, but the plugin ships only `bin/vise-run` and puts no
+  `vise` on PATH, so the designer got `command not found` — which prints no
+  remedy, and was therefore the one failure the skill's own honesty clause did
+  not cover. The assets now name `vise-run -m vise.cli.main shot` for that
+  install, and the remedy names the interpreter that actually needs the extra
+  rather than assuming the project venv.
+
+- **A failed capture left the previous screenshot in place.** The designer is
+  told to capture and then read the path, so one that missed the exit code read
+  last week's image and revised its brief against a UI that no longer existed.
+  Any failure now leaves the destination absent: a missing file is an
+  unambiguous signal, a stale image is a plausible lie.
+
+- **`--out` pointing at a symlink was followed.** `Path.resolve()` resolves the
+  final component, so a committed `shots/out.png -> ~/.ssh/id_rsa` was written
+  through on success and deleted on failure. Symlink destinations are now
+  refused before any browser work. CWE-59.
+
+- **A dev server that was not running answered with a 55-line traceback.** The
+  most likely user mistake now gets one line naming the target that could not
+  be loaded.
+
+Also fixed one file over: `ui_contract._require_browser` appended a second
+`Full setup:` to a reason that already carried one.
+
+### Changed
+
+- The coverage floor rises 69 → 71, following the real number.
+
 ## [0.1.0a19] — 2026-08-21
 
 A patch release, and every fix in it is the same defect: **a gate that reported

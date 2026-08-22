@@ -60,10 +60,19 @@ signature element and the render has three," not "contrast fails" or "this
 overflows at 375px." Those are `ui_contrast` and `ui_layout`, and a screenshot
 at one viewport is not a substitute for either; a designer who eyeballs a PNG
 and calls it accessible has formed an opinion, not run a check. The command
-needs `pip install 'vise[design]'` and `playwright install chromium` — if
-either is missing it exits non-zero with the remedy printed. When that
-happens, say in the brief that the visual pass did not run rather than
-skipping it silently.
+needs a browser, so it exits non-zero with the remedy printed when Playwright
+or Chromium is missing.
+
+`vise` is only on PATH when the project installed vise into its own
+environment. Under a plugin install it is not, and the command answers with
+`command not found` — which prints no remedy at all, so it is the one failure
+the paragraph above will not warn you about. There the invocation is
+`vise-run -m vise.cli.main shot …`, and the browser has to be installed into
+the interpreter `vise-run` launches, not into the project venv. Read the
+remedy the command prints: it names that interpreter.
+
+Whichever way it fails, say in the brief that the visual pass did not run.
+A brief that is silent about it reads as a brief that looked.
 
 Current AI-generated design converges on a small number of looks. If your plan
 landed on one of these without the brief asking for it, you did not choose it —
