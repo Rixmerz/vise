@@ -1,0 +1,490 @@
+"""The dispatch loop — see docs/scheduler.md.
+
+The planner said what would happen. This makes it happen: it walks a DAG node's
+tasks, dispatches the ones that are ready and admissible, collects results, puts
+each through the honesty gates, and decides retry / escalate / replan / stop.
+
+Three boundaries it does not cross, all of them from docs/agent-runtime.md:
+
+  - It never traverses a graph edge. When every task reaches a terminal state,
+    ``is_dag_complete`` goes true and the node's own gate decides the phase. The
+    scheduler reports; the gate decides.
+  - It never grades a worker's claim. ``honesty`` does, and ``recovery`` decides
+    what the outcome means.
+  - It never widens a budget, an ownership claim, or a tool set.
+
+Concurrency is threads, not processes or asyncio, because a worker is I/O-bound
+by construction: the Claude adapter shells out and waits. Threads keep the loop
+readable and let a worker use ordinary blocking subprocess calls.
+"""
+from __future__ import annotations
+
+import time
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, Callable, Iterable, Sequence
+
+from vise.runtime import ownership as _own
+from vise.runtime.artifacts import ArtifactStore
+from vise.runtime.contracts import (
+    Criticality,
+    RunSpec,
+    TaskBrief,
+    TaskBudget,
+    TaskResult,
+    TaskState,
+    Verdict,
+)
+from vise.runtime.honesty import GateOutcome
+from vise.runtime.recovery import (
+    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_MAX_REPLANS,
+    Recovery,
+    classify_from_text,
+    decide,
+)
+from vise.runtime.registry import AgentRegistry
+from vise.runtime.routing import TOP, ModelRouter, tier_of
+from vise.runtime.state import RunState, utcnow
+from vise.runtime.worker import Worker, execute
+
+#: How long a collection wait blocks before the loop re-checks the run's
+#: ceilings. Not a poll interval for work — completions wake the wait
+#: immediately — but the bound on how long a wall-clock ceiling can be overshot
+#: while every worker happens to be busy.
+WAIT_SLICE_S = 0.5
+
+
+def new_run_id() -> str:
+    return f"run-{uuid.uuid4().hex[:12]}"
+
+
+@dataclass
+class SchedulerConfig:
+    """Policy the loop reads. Every field is a decision someone should be able
+    to argue with, which is why none of them are literals in the loop body."""
+
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    max_replans: int = DEFAULT_MAX_REPLANS
+    #: Called with (state, tasks) when a failure says the plan was wrong.
+    #: Returns a new task list, or None to stop for a person. Absent by
+    #: default: inventing a new plan is a model's job, and a scheduler that
+    #: silently reshuffles the graph is worse than one that stops and says so.
+    replanner: Callable[[RunState, Sequence[Any]], Sequence[Any] | None] | None = None
+    #: Consulted before each dispatch. True stops the run. The hook a caller
+    #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
+    should_cancel: Callable[[], bool] | None = None
+
+
+class Scheduler:
+    """Runs one DAG node's tasks to a terminal state."""
+
+    def __init__(
+        self,
+        *,
+        worker: Worker,
+        registry: AgentRegistry | None = None,
+        router: ModelRouter | None = None,
+        artifacts: ArtifactStore | None = None,
+        state_root: Path | str | None = None,
+        config: SchedulerConfig | None = None,
+    ) -> None:
+        self.worker = worker
+        self.registry = registry if registry is not None else AgentRegistry.bundled()
+        self.router = router or ModelRouter()
+        self.artifacts = artifacts
+        self.state_root = Path(state_root) if state_root else None
+        self.config = config or SchedulerConfig()
+
+    # --- the loop --------------------------------------------------------
+
+    def run(self, spec: RunSpec, tasks: Sequence[Any]) -> RunState:
+        """Dispatch until every task is terminal, parked, or the run stops."""
+        by_id = {t.id: t for t in tasks}
+        state = RunState.for_tasks(spec, by_id)
+        state.emit("run_started", goal=spec.goal, tasks=len(by_id))
+        max_parallel = max(1, spec.budget.max_parallel or 1)
+        started = time.monotonic()
+
+        with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+            pending: dict[Future[tuple[TaskResult, GateOutcome]], str] = {}
+            while not state.is_done():
+                if self._cancelled(state):
+                    break
+                if self._over_wall_clock(state, started):
+                    break
+
+                dispatched = self._dispatch_ready(state, by_id, pool, pending, started)
+
+                if not pending:
+                    if not dispatched:
+                        # Nothing running and nothing startable. Either the
+                        # remaining tasks depend on something that failed, or a
+                        # cycle survived planning. Either way, waiting cannot help.
+                        self._block_stalled(state, by_id)
+                    if state.is_done() or not dispatched:
+                        break
+                    continue
+
+                done, _ = wait(list(pending), timeout=WAIT_SLICE_S, return_when=FIRST_COMPLETED)
+                for future in done:
+                    task_id = pending.pop(future)
+                    replan = self._collect(state, by_id, task_id, future)
+                    if replan:
+                        by_id = self._replan(state, by_id, tasks)
+
+        self._finalise(state)
+        self._persist(state)
+        return state
+
+    # --- dispatch --------------------------------------------------------
+
+    def _dispatch_ready(
+        self,
+        state: RunState,
+        by_id: dict[str, Any],
+        pool: ThreadPoolExecutor,
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], str],
+        started: float,
+    ) -> bool:
+        """Start every task that is ready and admissible. True if any started."""
+        started_any = False
+        completed = state.completed_ids()
+        for task_id in self._ready(state, by_id, completed):
+            if len(pending) >= max(1, state.spec.budget.max_parallel or 1):
+                break
+            task = by_id[task_id]
+            claim_conflict = self._ownership_conflict(state, by_id, task)
+            if claim_conflict:
+                state.emit("deferred", task=task_id, reason=f"ownership held by {claim_conflict}")
+                continue
+
+            built = self._brief(state, task)
+            if built is None:
+                continue
+            brief, agent_id, estimate = built
+
+            admission = state.ledger.admit(
+                estimate,
+                in_flight=len(pending),
+                elapsed_s=time.monotonic() - started,
+            )
+            if not admission:
+                state.emit("not_admitted", task=task_id, reason=admission.reason,
+                           stop=admission.stop)
+                if admission.stop:
+                    state.stop_for_human(admission.reason)
+                    return started_any
+                break
+
+            attempt_number = state.record(task_id).attempt_count + 1
+            state.ledger.reserve(task_id, estimate)
+            state.start(task_id, agent_id=agent_id, model=brief.model, effort=brief.effort)
+            state.emit("dispatched", task=task_id, model=brief.model, effort=brief.effort,
+                       agent=agent_id, attempt=attempt_number)
+            future = pool.submit(
+                execute, brief, self.worker, project_dir=state.spec.project_dir
+            )
+            pending[future] = task_id
+            started_any = True
+        return started_any
+
+    def _ready(
+        self, state: RunState, by_id: dict[str, Any], completed: set[str]
+    ) -> list[str]:
+        """Dependency-satisfied, not terminal, not running. Order is the node's."""
+        out = []
+        for task_id, task in by_id.items():
+            record = state.record(task_id)
+            if record.state not in (TaskState.PENDING, TaskState.READY):
+                continue
+            if all(dep in completed for dep in getattr(task, "dependencies", ())):
+                out.append(task_id)
+        return out
+
+    def _ownership_conflict(
+        self, state: RunState, by_id: dict[str, Any], task: Any
+    ) -> str | None:
+        """The id of an in-flight task whose claims intersect this one's."""
+        if not getattr(task, "writes", True):
+            return None
+        for other_id in state.in_flight():
+            other = by_id.get(other_id)
+            if other is None or not getattr(other, "writes", True):
+                continue
+            if _own.conflicts(
+                getattr(task, "ownership", ()), getattr(other, "ownership", ())
+            ):
+                return other_id
+        return None
+
+    # --- briefing --------------------------------------------------------
+
+    def _route(self, state: RunState, task: Any):
+        role = getattr(task, "role", None) or ""
+        resolution = self.registry.resolve(
+            role,
+            writes=True if getattr(task, "writes", True) else None,
+            capability=_capability_of(task),
+        ) if role else None
+        agent = resolution.agent if resolution else None
+        return agent, self.router.route(
+            task,
+            agent=agent,
+            attempts=state.record(task.id).attempts,
+            budget_remaining_usd=state.ledger.remaining_usd(),
+        )
+
+    def _brief(self, state: RunState, task: Any) -> tuple[TaskBrief, str, float] | None:
+        """Assemble the brief, or park the task when nobody can run it.
+
+        Returns the brief, the agent id it was built for, and the routed cost
+        estimate. The agent id travels beside the brief rather than inside it:
+        the worker does not need to know which charter selected it, and a field
+        it does not need is a field it can contradict.
+        """
+        role = getattr(task, "role", None) or ""
+        if not role:
+            state.set_state(task.id, TaskState.BLOCKED,
+                            "task declares no role — nothing can be routed to it")
+            state.emit("unroutable", task=task.id, reason="no role")
+            return None
+        agent, decision = self._route(state, task)
+        if agent is None:
+            state.set_state(task.id, TaskState.BLOCKED,
+                            f"no agent resolves role '{role}'")
+            state.emit("unroutable", task=task.id, reason=f"role {role}")
+            return None
+        if not decision.affordable:
+            state.emit("not_admitted", task=task.id,
+                       reason=decision.reasons[-1] if decision.reasons else "budget", stop=True)
+            state.stop_for_human(f"task '{task.id}' does not fit the remaining budget")
+            return None
+
+        record = state.record(task.id)
+        inputs = ()
+        if self.artifacts is not None:
+            inputs = self.artifacts.inputs_for(getattr(task, "dependencies", ()) or ())
+        return TaskBrief(
+            run_id=state.spec.run_id,
+            task_id=task.id,
+            name=getattr(task, "name", task.id),
+            role=role,
+            prompt=getattr(task, "prompt", "") or "",
+            criticality=_criticality(task),
+            ownership=tuple(getattr(task, "ownership", ()) or ()),
+            acceptance=tuple(getattr(task, "acceptance", ()) or ()),
+            inputs=inputs,
+            attempts=tuple(record.attempts),
+            tools_blocked=tuple(getattr(task, "tools_blocked", ()) or ()),
+            mcps_enabled=tuple(getattr(task, "mcps_enabled", ("*",)) or ("*",)),
+            model=decision.model,
+            effort=decision.effort,
+            budget=TaskBudget(
+                max_cost_usd=float(getattr(task, "max_cost", 0.0) or 0.0),
+                max_turns=int(getattr(task, "max_turns", 0) or 0),
+                timeout_s=int(getattr(task, "timeout_s", 0) or 0),
+            ),
+            writes=bool(getattr(task, "writes", True)),
+            context=self._context_for(state, task),
+        ), agent.id, decision.estimated_cost_usd
+
+    def _context_for(self, state: RunState, task: Any) -> tuple[str, ...]:
+        """Hook for the context resolver. Empty until one is wired in."""
+        return ()
+
+    # --- collection ------------------------------------------------------
+
+    def _collect(
+        self,
+        state: RunState,
+        by_id: dict[str, Any],
+        task_id: str,
+        future: Future[tuple[TaskResult, GateOutcome]],
+    ) -> bool:
+        """Fold one finished attempt in and act on it. True when a replan is due."""
+        try:
+            result, outcome = future.result()
+        except Exception as exc:  # noqa: BLE001 - a worker crash is a task failure
+            # A worker that raises has failed the task, not the run. Recording it
+            # as an environment failure is the honest reading: the work was never
+            # evaluated, so it retries at the same rung rather than paying more
+            # to re-crash.
+            result = TaskResult(
+                task_id=task_id,
+                verdict=Verdict.INCONCLUSIVE,
+                summary=f"worker raised {type(exc).__name__}: {exc}",
+                model=state.record(task_id).model,
+                effort=state.record(task_id).effort,
+            )
+            outcome = GateOutcome(True, (), result)
+
+        result = self._classify(result)
+        record = state.finish(task_id, result)
+        if self.artifacts is not None and result.artifacts:
+            self.artifacts.put_all(result.artifacts)
+
+        # The rung that just failed, read off the record — not the rung the
+        # router would pick next. Routing after the failure is recorded returns
+        # the *escalated* tier, so asking it "are we at the top" answers one
+        # attempt early and replans a task that still had opus to try.
+        used_tier = tier_of(record.model, record.effort)
+        move = decide(
+            result,
+            record.attempts,
+            gates_accepted=outcome.accepted,
+            at_top_rung=used_tier is not None and used_tier >= TOP,
+            replans_used=state.replans,
+            max_attempts=self.config.max_attempts,
+            max_replans=self.config.max_replans,
+        )
+        state.set_state(task_id, move.state, move.reason)
+        state.emit(
+            "collected",
+            task=task_id,
+            verdict=result.verdict.value,
+            gates_accepted=outcome.accepted,
+            refusals=list(outcome.refusals),
+            action=move.action.value,
+            reason=move.reason,
+            cost_usd=round(result.usage.cost_usd, 4),
+        )
+        self._persist(state)
+
+        if move.action is Recovery.HUMAN:
+            state.stop_for_human(f"{task_id}: {move.reason}")
+        return move.action is Recovery.REPLAN
+
+    def _classify(self, result: TaskResult) -> TaskResult:
+        """Fill in a missing classification from the failure's own output."""
+        if result.verdict is Verdict.PASS or result.classification is not None:
+            return result
+        guessed = classify_from_text(f"{result.summary}\n{result.evidence}\n{result.checks}")
+        if guessed is None:
+            return result
+        return replace(result, classification=guessed)
+
+    # --- replanning ------------------------------------------------------
+
+    def _replan(
+        self, state: RunState, by_id: dict[str, Any], original: Sequence[Any]
+    ) -> dict[str, Any]:
+        if self.config.replanner is None:
+            state.stop_for_human(
+                "a failure says the plan is wrong and no replanner is configured"
+            )
+            state.emit("replan_unavailable")
+            return by_id
+        replacement = self.config.replanner(state, original)
+        if not replacement:
+            state.stop_for_human("the replanner declined to produce a new plan")
+            state.emit("replan_declined")
+            return by_id
+        state.replans += 1
+        state.emit("replanned", tasks=len(replacement), replans=state.replans)
+        new_by_id = {t.id: t for t in replacement}
+        # Succeeded work survives a replan. Redoing a task that passed and was
+        # verified is paying twice for the same answer.
+        for task_id in new_by_id:
+            if task_id not in state.tasks:
+                state.record(task_id)
+        for task_id, record in list(state.tasks.items()):
+            if task_id not in new_by_id and record.state is not TaskState.SUCCEEDED:
+                record.state = TaskState.CANCELLED
+                record.note = "dropped by a replan"
+            elif record.state in (TaskState.BLOCKED, TaskState.FAILED):
+                record.state = TaskState.PENDING
+        return new_by_id
+
+    # --- stopping --------------------------------------------------------
+
+    def _cancelled(self, state: RunState) -> bool:
+        if self.config.should_cancel is None or not self.config.should_cancel():
+            return False
+        state.cancel("cancelled by the caller")
+        state.emit("cancelled", reason="caller")
+        return True
+
+    def _over_wall_clock(self, state: RunState, started: float) -> bool:
+        ceiling = state.spec.budget.max_wall_time_s
+        if not ceiling:
+            return False
+        elapsed = time.monotonic() - started
+        if elapsed < ceiling:
+            return False
+        state.stop_for_human(f"{elapsed:.0f}s elapsed, ceiling is {ceiling:.0f}s")
+        state.emit("wall_clock_exhausted", elapsed_s=round(elapsed, 1))
+        return True
+
+    def _block_stalled(self, state: RunState, by_id: dict[str, Any]) -> None:
+        """Nothing running, nothing startable — say which dependency did it."""
+        completed = state.completed_ids()
+        for record in state.unfinished():
+            task = by_id.get(record.task_id)
+            if task is None:
+                continue
+            if record.state is TaskState.BLOCKED and record.note:
+                # Already blocked for a stated reason — "unroutable", say. A
+                # generic stall message would overwrite the specific one, which
+                # is the only useful half.
+                continue
+            missing = [d for d in getattr(task, "dependencies", ()) if d not in completed]
+            reason = (
+                f"blocked on {', '.join(missing)}" if missing
+                else "no dependency satisfies it and nothing is running"
+            )
+            state.set_state(record.task_id, TaskState.BLOCKED, reason)
+            state.emit("stalled", task=record.task_id, reason=reason)
+
+    def _finalise(self, state: RunState) -> None:
+        if not state.finished_at:
+            state.finished_at = utcnow()
+        state.emit(
+            "run_finished",
+            succeeded=state.succeeded(),
+            cost_usd=round(state.ledger.spent.cost_usd, 4),
+        )
+
+    def _persist(self, state: RunState) -> None:
+        if self.state_root is not None:
+            state.save(self.state_root)
+
+
+def _criticality(task: Any) -> Criticality:
+    raw = str(getattr(task, "criticality", Criticality.ROUTINE.value))
+    try:
+        return Criticality(raw)
+    except ValueError:
+        return Criticality.ROUTINE
+
+
+_CAPABILITY_WORDS = frozenset({
+    "python", "typescript", "go", "rust", "java", "kotlin", "swift", "ruby",
+    "php", "csharp", "cpp", "lua",
+})
+
+
+def _capability_of(task: Any) -> str | None:
+    haystack = f"{getattr(task, 'id', '')} {getattr(task, 'name', '')}".lower()
+    for word in haystack.replace("/", " ").replace("-", " ").replace("_", " ").split():
+        if word in _CAPABILITY_WORDS:
+            return word
+    return None
+
+
+def run_tasks(
+    tasks: Iterable[Any],
+    *,
+    worker: Worker,
+    goal: str = "",
+    project_dir: str = ".",
+    spec: RunSpec | None = None,
+    **kwargs: Any,
+) -> RunState:
+    """Convenience entry point: build a spec, run the tasks, return the state."""
+    tasks = list(tasks)
+    spec = spec or RunSpec(run_id=new_run_id(), goal=goal, project_dir=project_dir)
+    return Scheduler(worker=worker, **kwargs).run(spec, tasks)

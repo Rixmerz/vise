@@ -46,9 +46,30 @@ class BudgetLedger:
     spent: Usage = field(default_factory=Usage)
     workers_started: int = 0
     by_task: dict[str, Usage] = field(default_factory=dict)
+    #: Estimated cost of tasks that have started and not yet reported. Checking
+    #: admission against settled spend alone lets four opus tasks start against
+    #: a budget for one: nothing has been billed yet, so everything fits. A
+    #: ceiling that only binds after the money is gone is not a ceiling.
+    reserved: dict[str, float] = field(default_factory=dict)
+
+    def reserve(self, task_id: str, estimated_cost_usd: float) -> None:
+        """Commit a task's estimate for as long as it is in flight."""
+        self.reserved[task_id] = estimated_cost_usd
+
+    def release(self, task_id: str) -> None:
+        self.reserved.pop(task_id, None)
+
+    def committed_usd(self) -> float:
+        """Settled spend plus everything currently in flight."""
+        return self.spent.cost_usd + sum(self.reserved.values())
 
     def spend(self, task_id: str, usage: Usage) -> None:
-        """Record one attempt's consumption. Attempts accumulate per task."""
+        """Record one attempt's consumption. Attempts accumulate per task.
+
+        Settling releases the reservation: the estimate has been replaced by
+        what the attempt actually cost, and holding both would double-count.
+        """
+        self.release(task_id)
         self.spent = self.spent + usage
         self.by_task[task_id] = self.by_task.get(task_id, Usage()) + usage
 
@@ -56,10 +77,11 @@ class BudgetLedger:
         self.workers_started += 1
 
     def remaining_usd(self) -> float | None:
-        """Budget left, or None when no cost ceiling was set."""
+        """Budget left after settled spend and in-flight reservations, or None
+        when no cost ceiling was set."""
         if not self.budget.max_cost_usd:
             return None
-        return max(0.0, self.budget.max_cost_usd - self.spent.cost_usd)
+        return max(0.0, self.budget.max_cost_usd - self.committed_usd())
 
     def exhausted(self) -> bool:
         remaining = self.remaining_usd()
@@ -119,6 +141,7 @@ class BudgetLedger:
         return {
             "budget": self.budget.to_dict(),
             "spent": self.spent.to_dict(),
+            "reserved_usd": round(sum(self.reserved.values()), 4),
             "remaining_usd": self.remaining_usd(),
             "workers_started": self.workers_started,
             "by_task": {k: v.to_dict() for k, v in sorted(self.by_task.items())},
