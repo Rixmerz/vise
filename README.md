@@ -16,6 +16,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 - **Declarative quality gates** — a workflow node gates on a check *name* (`lint`, `unit`, `sast`, `coverage`, …); `.vise/quality.yaml` says what that name runs in *this* repo, so one workflow ships to a Python repo and a Go repo unchanged. An unbound check **skip-passes** with evidence naming the next step and a record marked `source="asserted"` — nothing ran, so `goal_complete` will not grade it as verified. The bundled `quality-gate` workflow tiers them static → tests → security → integration; mutation testing and fuzzing stay deliberately out of band, since a full mutation run as a gate stalls every traversal and fuzzing has no completion condition to wait on.
 - **Mandatory OpenSpec gate** — [OpenSpec](https://github.com/Fission-AI/OpenSpec) spec-driven planning is enforced, not suggested. `feature-dev` and `migration` both carry a `spec` phase whose exit edge is `validators_green`, so neither can reach its implement phase until a well-formed change proposal exists on disk, and neither can reach commit/apply until every box in that change's `tasks.md` is ticked. The four structural levels of the `openspec` validator (`structure`, `change`, `deltas`, `tasks_complete`) read `openspec/` with stdlib string work and **fail closed** — no Node CLI involved, so a red gate always means the plan is missing, never that a machine is. The fifth (`validated`) shells out to `openspec validate --strict` and skip-passes when the CLI is absent: less depth, same coverage.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
+- **Agent runtime (planning only, so far)** — a DAG node's tasks can declare who runs them, what they may write, and what being wrong costs; `vise runtime plan` derives the waves, resolves each task to a bundled agent, routes a model with the reasons attached, and prices the whole thing before anything runs. Nothing dispatches yet — the scheduler and the Claude adapter are specified in `docs/` and not written, deliberately, because a scheduler built against contracts that turn out to be wrong is a rewrite. Additive: a workflow that declares none of it behaves exactly as before.
 
 The MCP surface exposes **49 tools**: `graph_*` (27), `goal_*` (7), `experience_*` (5), `snapshot_*` (4), `recipe_*` (3), `capability_*` (2), `vise_version`. Counted from the registry, not by hand — `test_asset_honesty.py` holds the authoritative list.
 
@@ -115,10 +116,57 @@ src/vise/
 ├── tools/         # MCP tool surfaces (graph, experience, goal, snapshot,
 │                  # recipes, bootstrap)
 ├── hooks/         # Claude Code hook entry points (see table above)
+├── runtime/       # agent execution plane — contracts, registry, model router,
+│                  # ownership, budget, artifacts, planner (see docs/)
 ├── assets/        # bundled workflows (9), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
-└── cli/           # `vise` CLI (graph/experience/insights, offline)
+└── cli/           # `vise` CLI (graph/experience/insights/runtime, offline)
 ```
+
+### The agent runtime
+
+The control plane above decides *what process* a change follows. `runtime/`
+decides *who does the work*: which agent takes a task, on which model, at what
+effort, in what order, within which budget, and when to stop and ask a person.
+
+It is additive and it does not execute anything yet. A workflow that declares no
+runtime metadata parses and traverses exactly as it did before — every field is
+optional with a default that reproduces today's behaviour — and the planner
+plans without dispatching. Four documents specify it:
+
+| Doc | Covers |
+|---|---|
+| [`docs/agent-runtime.md`](docs/agent-runtime.md) | the two planes, and why there is no second workflow engine |
+| [`docs/scheduler.md`](docs/scheduler.md) | waves, admission, ownership, retry vs escalate vs replan, human gates |
+| [`docs/model-routing.md`](docs/model-routing.md) | the routing inputs, the defaults, and the measurements behind them |
+| [`docs/worker-contract.md`](docs/worker-contract.md) | the brief a worker gets, the result it owes, and the four honesty gates |
+
+A DAG node's tasks can now carry `role`, `ownership`, `criticality`,
+`complexity`, `writes`, `model`, `effort`, `acceptance` and per-task budget
+ceilings. `vise runtime plan` reads them back:
+
+```sh
+vise runtime plan path/to/oauth-graph.yaml --max-cost 12
+```
+
+```
+wave 2  (2 task(s), ~$2.05)
+  backend-python-auth      backend-python       sonnet/high
+      · role backend starts at sonnet/medium
+      · criticality elevated adds a rung
+  frontend-login           frontend             sonnet/medium
+      · role frontend starts at sonnet/medium
+```
+
+`migrate-users` above lands in its own wave rather than beside `backend-python-auth`,
+because both claim `src/auth/**` — two agents writing one path produce a diff
+neither of them wrote. `vise runtime agents` lists what the registry can route
+to, and names the roles that are ambiguous: twelve agents take `backend`, so a
+task that does not name a language is reported as unroutable rather than sent to
+whichever charter sorts first.
+
+Exit code is non-zero when the plan has problems, so a plan with an unroutable
+task cannot be scripted past.
 
 ### `vise insights` — what the gates actually did
 

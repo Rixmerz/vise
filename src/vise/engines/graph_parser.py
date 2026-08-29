@@ -16,6 +16,14 @@ class GraphParseError(Exception):
     pass
 
 
+# Agent-runtime enums. Kept here rather than imported from vise.runtime so the
+# parser stays importable with no runtime dependency — a workflow file is data,
+# and parsing one must not pull in an execution plane.
+_VALID_CRITICALITY = frozenset({"routine", "elevated", "critical"})
+_VALID_COMPLEXITY = frozenset({"trivial", "low", "medium", "high"})
+_VALID_EFFORT = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+
 def parse_yaml_simple(content: str) -> dict:
     """Simple YAML parser for graph files.
 
@@ -394,6 +402,33 @@ def parse_graph_yaml(content: str) -> Graph:
                 t_mcps = task_data.get('mcps_enabled', ['*'])
                 if isinstance(t_mcps, str):
                     t_mcps = [t_mcps]
+                t_ownership = task_data.get('ownership', [])
+                if isinstance(t_ownership, str):
+                    t_ownership = [t_ownership]
+                t_acceptance = task_data.get('acceptance', [])
+                if isinstance(t_acceptance, str):
+                    t_acceptance = [t_acceptance]
+                # Fail closed on the runtime enums. A typo'd criticality that
+                # silently fell back to 'routine' would route a security-critical
+                # task to the cheapest model and look like it worked.
+                criticality = str(task_data.get('criticality', 'routine'))
+                if criticality not in _VALID_CRITICALITY:
+                    raise GraphParseError(
+                        f"Node '{node_id}' task '{task_id}' has invalid criticality "
+                        f"'{criticality}'; must be one of {sorted(_VALID_CRITICALITY)}"
+                    )
+                complexity = str(task_data.get('complexity', 'medium'))
+                if complexity not in _VALID_COMPLEXITY:
+                    raise GraphParseError(
+                        f"Node '{node_id}' task '{task_id}' has invalid complexity "
+                        f"'{complexity}'; must be one of {sorted(_VALID_COMPLEXITY)}"
+                    )
+                effort = task_data.get('effort')
+                if effort is not None and str(effort) not in _VALID_EFFORT:
+                    raise GraphParseError(
+                        f"Node '{node_id}' task '{task_id}' has invalid effort "
+                        f"'{effort}'; must be one of {sorted(_VALID_EFFORT)}"
+                    )
                 tasks.append(Task(
                     id=str(task_id),
                     name=str(task_data.get('name', task_id)),
@@ -401,6 +436,17 @@ def parse_graph_yaml(content: str) -> Graph:
                     dependencies=deps,
                     tools_blocked=t_tools_blocked,
                     mcps_enabled=t_mcps,
+                    role=(str(task_data['role']) if task_data.get('role') else None),
+                    ownership=[str(o) for o in t_ownership],
+                    criticality=criticality,
+                    complexity=complexity,
+                    writes=bool(task_data.get('writes', True)),
+                    model=(str(task_data['model']) if task_data.get('model') else None),
+                    effort=(str(effort) if effort else None),
+                    acceptance=[str(a) for a in t_acceptance],
+                    max_cost=float(task_data.get('max_cost', 0) or 0),
+                    max_turns=int(task_data.get('max_turns', 0) or 0),
+                    timeout_s=int(task_data.get('timeout_s', 0) or 0),
                 ))
 
         advisor_reason = node_data.get('advisor_reason') or node_data.get('reason')

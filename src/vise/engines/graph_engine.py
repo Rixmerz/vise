@@ -66,7 +66,33 @@ class EdgeCondition:
 
 @dataclass
 class Task:
-    """A task within a DAG node. Lightweight sub-unit of work with dependencies."""
+    """A task within a DAG node. Lightweight sub-unit of work with dependencies.
+
+    The fields below the divider are the agent runtime's (docs/agent-runtime.md).
+    They live here rather than in a parallel structure on purpose: a second task
+    type with its own ids and its own dependency edges would be a second workflow
+    engine, and the two would disagree within a release. Every one of them is
+    optional and defaults to today's behaviour — a workflow that declares none of
+    them parses and traverses exactly as it did before the runtime existed.
+
+    Attributes:
+        role: Which kind of agent does this ('backend', 'test', 'review', ...).
+            None means the runtime cannot route it and must not plan it.
+        ownership: Glob patterns this task may write. Empty means "everything",
+            which the scheduler treats as "runs alone" — see runtime/ownership.py.
+        criticality: 'routine' | 'elevated' | 'critical'. 'critical' pins the
+            model router to its top tier regardless of the work type.
+        complexity: 'trivial' | 'low' | 'medium' | 'high'. Raises the floor the
+            router starts from; never lowers a pinned model.
+        writes: Whether this task modifies the working tree. A read-only task
+            never conflicts on ownership.
+        model / effort: Pins. A task that names them keeps them; the router
+            records the pin as its reason rather than overriding it.
+        acceptance: The criteria a verifier judges the result against. A task
+            with none can be marked done but never verified.
+        max_cost / max_turns / timeout_s: Per-task budget ceilings. 0 means
+            "inherit the run's ceiling", never "unlimited".
+    """
     id: str
     name: str
     prompt: str | None = None
@@ -74,6 +100,18 @@ class Task:
     outputs: dict[str, str] = field(default_factory=dict)
     tools_blocked: list[str] = field(default_factory=list)
     mcps_enabled: list[str] = field(default_factory=lambda: ["*"])
+    # --- agent runtime -----------------------------------------------------
+    role: str | None = None
+    ownership: list[str] = field(default_factory=list)
+    criticality: str = "routine"
+    complexity: str = "medium"
+    writes: bool = True
+    model: str | None = None
+    effort: str | None = None
+    acceptance: list[str] = field(default_factory=list)
+    max_cost: float = 0.0
+    max_turns: int = 0
+    timeout_s: int = 0
 
 
 @dataclass

@@ -6,6 +6,70 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Added
+
+- **An agent execution plane — specified, contracted, and planning; not yet
+  dispatching.** vise decided *what process* a change follows and never *who
+  does the work*: one session walked every phase serially, at one effort, with
+  one context that grew until it was compacted. `src/vise/runtime/` is the
+  plane that answers the second question, and `docs/agent-runtime.md`,
+  `docs/scheduler.md`, `docs/model-routing.md` and `docs/worker-contract.md`
+  specify the whole of it, including the parts this release does not implement.
+
+  **There is no second workflow engine, deliberately.** `Node.node_type ==
+  "dag"` already held tasks with dependencies, and `compute_ready_tasks`
+  already computed which were unblocked. A parallel task graph with its own ids
+  and its own edges would be a second engine with the same job, and the two
+  would disagree within a release. So the runtime metadata lands as optional
+  fields on the `Task` that exists — `role`, `ownership`, `criticality`,
+  `complexity`, `writes`, `model`, `effort`, `acceptance`, `max_cost`,
+  `max_turns`, `timeout_s` — each defaulting to today's behaviour. The nine
+  bundled workflows declare none of them and parse byte-identically.
+
+  Eight modules, all offline and deterministic: `contracts` (the data),
+  `registry` (reads the 20 shipped charters rather than restating them),
+  `routing` (model and effort, with the argument attached), `ownership` (which
+  tasks may run together), `budget` (when the run stops), `artifacts` (what one
+  worker hands the next), `honesty` (the four gates a claimed pass must
+  survive), `planner` (waves, admission, cost).
+
+- **`vise runtime plan` and `vise runtime agents`.** Read-only, offline. `plan`
+  derives a DAG node's waves, resolves each task to an agent, routes a model
+  with its reasons, and prices the run before anything starts — exiting non-zero
+  when the plan has problems, so an unroutable task cannot be scripted past.
+  `agents` lists what the registry can route to and names the roles that are
+  ambiguous.
+
+- **Four honesty gates, three of them ported from mini-vise.** A worker's
+  `pass` is a claim, not a result. A testing role must quote a command and its
+  real output; an implementing role must quote the repo's existing checks; a
+  pass claiming edits must move `git status --porcelain` plus `HEAD`; and a
+  pass may not have written outside its declared ownership. These fail closed —
+  the inverse of vise's hook contract — with one precise exception: an
+  *unknowable* tree hash produces no finding, because a gate that cannot compute
+  its input and reports a violation anyway commits the error it exists to catch.
+
+  The tree-hash rule is the only mechanical honesty check in either codebase.
+  Every other one asks another model, which means every other one can be talked
+  out of its finding.
+
+### Notes
+
+- **Ambiguity is reported, not broken alphabetically.** Twelve bundled agents
+  take the `backend` role and differ only by language. A task that names none is
+  reported unroutable rather than sent to whichever charter sorts first — which
+  would have put a Python task on the C++ charter and made the plan read as
+  though someone chose that.
+
+- **Model routing defaults are measured, not guessed.** The orchestrator-effort
+  and implementer-model sweeps behind the table in `docs/model-routing.md` were
+  run in mini-vise against test oracles written independently of the pipeline.
+  The short version: implementers stay on sonnet, because the one gap opus
+  closed was a reviewer-charter problem that costs nothing to fix directly and
+  2× per run to fix by paying for a bigger implementer.
+
 ## [0.1.0a20] — 2026-08-22
 
 ### Added
