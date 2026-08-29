@@ -92,6 +92,11 @@ class Task:
             with none can be marked done but never verified.
         max_cost / max_turns / timeout_s: Per-task budget ceilings. 0 means
             "inherit the run's ceiling", never "unlimited".
+        requires_human: Park the run before dispatching this task. For the work
+            where continuing is cheap and being wrong is expensive — a
+            destructive migration, a breaking public API change, a
+            security-critical fix. That asymmetry, not a confidence threshold,
+            is the test for setting it.
     """
     id: str
     name: str
@@ -112,6 +117,7 @@ class Task:
     max_cost: float = 0.0
     max_turns: int = 0
     timeout_s: int = 0
+    requires_human: bool = False
 
 
 @dataclass

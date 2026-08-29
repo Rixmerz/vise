@@ -290,6 +290,17 @@ class Scheduler:
             if len(pending) >= max(1, state.spec.budget.max_parallel or 1):
                 break
             task = by_id[task_id]
+            if getattr(task, "requires_human", False):
+                # Checked before anything else, including budget: the point of
+                # this flag is that the work should not start, and finding out
+                # only because the money ran out would be an accident.
+                reason = (
+                    f"task '{task_id}' is declared requires_human — it will not "
+                    f"start without a person"
+                )
+                state.emit("human_gate", task=task_id, reason=reason)
+                state.stop_for_human(reason)
+                return started_any
             claim_conflict = self._ownership_conflict(state, by_id, task)
             if claim_conflict:
                 state.emit("deferred", task=task_id, reason=f"ownership held by {claim_conflict}")
@@ -891,6 +902,11 @@ class Scheduler:
 
     def _block_stalled(self, state: RunState, by_id: dict[str, Any]) -> None:
         """Nothing running, nothing startable — say which dependency did it."""
+        if state.human_gate or state.cancelled:
+            # The run stopped for a reason that is already on the record. A
+            # generic "nothing satisfies it" would overwrite that reason with a
+            # description of its consequence.
+            return
         completed = state.completed_ids()
         for record in state.unfinished():
             task = by_id.get(record.task_id)

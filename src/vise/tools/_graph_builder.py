@@ -144,6 +144,8 @@ def _generate_graph_yaml(builder: dict) -> str:
                         lines.append(f'        {key}: "{task[key]}"')
                 if task.get("writes") is False:
                     lines.append("        writes: false")
+                if task.get("requires_human"):
+                    lines.append("        requires_human: true")
                 for key in ("ownership", "acceptance"):
                     if task.get(key):
                         lines.append(f"        {key}:")
@@ -262,7 +264,8 @@ def register_graph_builder_tools(mcp):
                 (docs/agent-runtime.md): "role", "ownership": list[str],
                 "criticality": routine|elevated|critical, "complexity":
                 trivial|low|medium|high, "writes": bool, "model", "effort",
-                "acceptance": list[str], "max_cost", "max_turns", "timeout_s".
+                "acceptance": list[str], "max_cost", "max_turns", "timeout_s",
+                "requires_human": bool.
                 Omit them all and the node behaves exactly as before.
             validators: Optional list of validator dicts declared on this node.
                 Each dict: {"type": str, "weight"?: float, ...}.

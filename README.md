@@ -203,6 +203,11 @@ Four rules the run enforces that are easy to state and easy to skip:
   in-flight estimates are reserved, so four opus tasks cannot start against a
   budget for one.
 
+A task can also declare `requires_human: true` and the run parks before it
+starts — for the work where continuing is cheap and being wrong is expensive: a
+destructive migration, a breaking public API change, a security-critical fix.
+That asymmetry, not a confidence threshold, is the test for setting it.
+
 Three passes sit above the worker, each answering a question it cannot answer
 about itself: a **debugger** classifies a failure that named no kind (the
 classification decides retry vs escalate vs replan, so letting the failing

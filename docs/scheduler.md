@@ -212,7 +212,13 @@ failure.
 
 ## Human gates
 
-The scheduler stops and reports `WAITING_HUMAN` — it does not choose — when:
+A task may also declare `requires_human: true`, and the scheduler parks before
+dispatching it. That check runs before the budget check, because the point of
+the flag is that the work should not start, and finding out only because the
+money ran out would be an accident.
+
+Otherwise the scheduler stops and reports `WAITING_HUMAN` — it does not choose —
+when:
 
 - the run's budget is exhausted,
 - a task's blast radius crosses into a destructive migration or a breaking public

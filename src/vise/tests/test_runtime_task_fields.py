@@ -163,3 +163,27 @@ def test_the_bundled_workflows_still_parse():
     for path in graphs:
         graph = parse_graph_yaml(path.read_text(encoding="utf-8"))
         assert graph.nodes, path.name
+
+
+def test_requires_human_survives_the_parser_and_the_builder():
+    yaml_text = PLAIN_YAML.replace(
+        '        name: "One"', '        name: "One"\n        requires_human: true'
+    )
+    assert _tasks(yaml_text)["t1"].requires_human is True
+
+    builder = {
+        "metadata": {"name": "b", "version": "1.0"},
+        "nodes": [{
+            "id": "implement", "name": "Implement", "node_type": "dag",
+            "is_start": True, "is_end": True,
+            "tasks": [{"id": "t1", "name": "One", "requires_human": True}],
+        }],
+        "edges": [],
+    }
+    rendered = _generate_graph_yaml(builder)
+    assert "requires_human: true" in rendered
+    assert _tasks(rendered)["t1"].requires_human is True
+
+
+def test_a_task_that_declares_nothing_does_not_require_a_human():
+    assert _tasks(PLAIN_YAML)["t1"].requires_human is False

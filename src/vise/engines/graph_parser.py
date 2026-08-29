@@ -447,6 +447,7 @@ def parse_graph_yaml(content: str) -> Graph:
                     max_cost=float(task_data.get('max_cost', 0) or 0),
                     max_turns=int(task_data.get('max_turns', 0) or 0),
                     timeout_s=int(task_data.get('timeout_s', 0) or 0),
+                    requires_human=bool(task_data.get('requires_human', False)),
                 ))
 
         advisor_reason = node_data.get('advisor_reason') or node_data.get('reason')

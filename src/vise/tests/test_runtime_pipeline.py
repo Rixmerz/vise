@@ -333,3 +333,42 @@ def test_rollback_respects_its_switch(tmp_path, flag):
         config=SchedulerConfig(isolate=True, verify=False, max_attempts=2, rollback=flag),
     ).run(spec, [_task()])
     assert any(e["kind"] == "rolled_back" for e in state.events) is flag
+
+
+# --- declared human gates -------------------------------------------------
+
+
+def test_a_task_declared_requires_human_never_starts():
+    """A destructive migration, a breaking API change, a security-critical fix:
+    continuing is cheap and being wrong is expensive."""
+    from vise.runtime.contracts import TaskState
+
+    worker = MockWorker()
+    state = _run([_task(requires_human=True)], worker)
+    assert state.human_gate
+    assert not worker.briefs, "nothing was dispatched"
+    assert state.tasks["backend-python-a"].state is TaskState.WAITING_HUMAN
+
+
+def test_the_human_gate_is_checked_before_the_budget():
+    """Finding out only because the money ran out would be an accident."""
+    state = _run(
+        [_task(requires_human=True)], MockWorker(),
+        spec=RunSpec(run_id="r", goal="g", project_dir="/nonexistent-not-a-repo",
+                     budget=RunBudget(max_cost_usd=0.01)),
+    )
+    assert "requires_human" in state.human_gate
+
+
+def test_peers_of_a_gated_task_are_parked_too():
+    tasks = [_task(requires_human=True),
+             _task(id="backend-python-b", ownership=["src/b/**"])]
+    state = _run(tasks, MockWorker())
+    assert state.is_done()
+    assert not state.succeeded()
+
+
+def test_an_ordinary_task_is_not_gated():
+    state = _run([_task()], MockWorker())
+    assert state.succeeded()
+    assert not state.human_gate

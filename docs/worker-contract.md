@@ -109,8 +109,14 @@ reaching it takes a **verifier** — a different agent, given a different input:
 
 ```
 verifier input:  acceptance criteria + task + diff + evidence
-verifier output: { verdict, confidence, evidence }
+verifier output: { verdict, reasons, unmet, evidence }
 ```
+
+**No confidence number, deliberately.** A model's stated confidence is not
+evidence about that model's output, and a runtime that routes on it has made
+itself a consumer of exactly the signal it exists to check. What replaces it is
+`unmet`: which criteria were not met, named individually, so a reader can
+disagree with the specific claim rather than with a decimal.
 
 The verifier never sees the worker's reasoning, only its output. That is the
 whole point: a reviewer who reads the argument for why the code is right is

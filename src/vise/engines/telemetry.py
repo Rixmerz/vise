@@ -94,6 +94,7 @@ _VALID_RUN_EVENTS = frozenset({
     "reviewed",
     "review_failed",
     "review_unavailable",
+    "human_gate",
     "wall_clock_exhausted",
     "cancelled",
     "run_finished",

@@ -116,6 +116,16 @@ you may already depend on, it says so under **Behaviour change**.
   than breaking it alphabetically, so "try a different agent" would mean picking
   the one it already refused to pick by coincidence.
 
+- **`requires_human: true` on a task** parks the run before it starts, checked
+  before the budget — the point of the flag is that the work should not begin,
+  and finding out only because the money ran out would be an accident.
+
+- **The verifier reports no confidence number, deliberately.** A model's stated
+  confidence is not evidence about that model's output, and a runtime that
+  routes on it has made itself a consumer of exactly the signal it exists to
+  check. `unmet` replaces it: which criteria were not met, named individually,
+  so a reader can disagree with the claim rather than with a decimal.
+
 ### Notes
 
 - **Four bugs found by writing the tests, each fixed with the test that caught
