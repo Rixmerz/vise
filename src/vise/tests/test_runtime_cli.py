@@ -127,3 +127,129 @@ def test_agents_reports_an_empty_directory(tmp_path, capsys):
 def test_runtime_with_no_subcommand_exits_with_usage(capsys):
     with pytest.raises(SystemExit):
         main(["runtime"])
+
+
+# --- run, status, explain, budget, cancel --------------------------------
+
+RUNNABLE = """
+metadata:
+  name: "runnable"
+  version: "1.0"
+nodes:
+  - id: "implement"
+    name: "Implement"
+    node_type: "dag"
+    is_start: true
+    is_end: true
+    tasks:
+      - id: "backend-python-auth"
+        name: "JWT middleware"
+        role: "backend"
+        ownership:
+          - "src/auth/**"
+edges: []
+"""
+
+
+def test_run_prints_the_plan_and_dispatches_nothing_without_yes(tmp_path, capsys):
+    """The moment to refuse a four-dollar run is before it starts."""
+    assert main(["runtime", "run", _write(tmp_path, RUNNABLE),
+                 "--state-dir", str(tmp_path / "state")]) == 0
+    out = capsys.readouterr().out
+    assert "Re-run with --yes" in out
+    assert not (tmp_path / "state" / "runs").exists()
+
+
+def test_run_refuses_a_plan_with_problems(tmp_path, capsys):
+    assert main(["runtime", "run", _write(tmp_path, BROKEN),
+                 "--state-dir", str(tmp_path / "state")]) == 1
+    assert "refusing to run a plan with problems" in capsys.readouterr().err
+
+
+def _seeded_run(tmp_path):
+    """A finished run on disk, produced by the scheduler with a mock worker."""
+    from vise.engines.graph_engine import Task
+    from vise.runtime.contracts import RunBudget, RunSpec
+    from vise.runtime.scheduler import Scheduler
+    from vise.runtime.worker import MockWorker
+
+    root = tmp_path / "state"
+    spec = RunSpec(run_id="run-abc", goal="ship oauth",
+                   project_dir=str(tmp_path), budget=RunBudget(max_cost_usd=10))
+    # `backend-python-auth`, not `auth`: twelve bundled agents take the backend
+    # role, so a task that names no language is unroutable by design. Naming one
+    # is how a real workflow reaches an agent.
+    tasks = [Task(id="backend-python-auth", name="auth", role="backend",
+                  ownership=["src/auth/**"])]
+    Scheduler(worker=MockWorker(), state_root=root).run(spec, tasks)
+    return root
+
+
+def test_status_reads_a_finished_run_back(tmp_path, capsys):
+    root = _seeded_run(tmp_path)
+    assert main(["runtime", "status", "run-abc", "--state-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "ship oauth" in out and "backend-python-auth" in out and "succeeded" in out
+    assert "backend-python" in out, "the status line names the agent that ran it"
+
+
+def test_status_with_no_run_id_lists_recent_runs(tmp_path, capsys):
+    root = _seeded_run(tmp_path)
+    assert main(["runtime", "status", "--state-dir", str(root)]) == 0
+    assert "run-abc" in capsys.readouterr().out
+
+
+def test_status_says_so_when_nothing_has_run(tmp_path, capsys):
+    assert main(["runtime", "status", "--state-dir", str(tmp_path)]) == 0
+    assert "no runs recorded" in capsys.readouterr().out
+
+
+def test_explain_narrates_every_scheduler_decision(tmp_path, capsys):
+    root = _seeded_run(tmp_path)
+    assert main(["runtime", "explain", "run-abc", "--state-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    for kind in ("run_started", "dispatched", "collected", "run_finished"):
+        assert kind in out
+
+
+def test_explain_emits_json(tmp_path, capsys):
+    import json as _json
+
+    root = _seeded_run(tmp_path)
+    main(["runtime", "explain", "run-abc", "--state-dir", str(root), "--json"])
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["run_id"] == "run-abc"
+    assert payload["events"]
+
+
+def test_budget_reports_per_task_and_names_unset_ceilings(tmp_path, capsys):
+    root = _seeded_run(tmp_path)
+    assert main(["runtime", "budget", "run-abc", "--state-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "per task" in out
+    assert "unset ceilings" in out, "an unset ceiling is reported, not called unlimited"
+
+
+def test_reading_an_unknown_run_exits_two(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["runtime", "explain", "nope", "--state-dir", str(tmp_path)])
+    assert exc.value.code == 2
+    assert "no run 'nope'" in capsys.readouterr().err
+
+
+def test_cancel_writes_a_sentinel_a_running_scheduler_reads(tmp_path, capsys):
+    from vise.engines.graph_engine import Task
+    from vise.runtime.contracts import RunSpec
+    from vise.runtime.scheduler import Scheduler
+    from vise.runtime.state import cancel_requested
+    from vise.runtime.worker import MockWorker
+
+    root = tmp_path / "state"
+    assert main(["runtime", "cancel", "run-xyz", "--state-dir", str(root)]) == 0
+    assert cancel_requested(root, "run-xyz")
+
+    spec = RunSpec(run_id="run-xyz", goal="g", project_dir=str(tmp_path))
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"])]
+    state = Scheduler(worker=MockWorker(), state_root=root).run(spec, tasks)
+    assert state.cancelled
+    assert "vise runtime cancel" in state.cancel_reason

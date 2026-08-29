@@ -31,6 +31,7 @@ from vise.runtime import ownership as _own
 from vise.runtime.artifacts import ArtifactStore
 from vise.runtime.context import ContextResolver
 from vise.runtime.contracts import (
+    TERMINAL_STATES,
     Criticality,
     FailureKind,
     RunSpec,
@@ -50,7 +51,7 @@ from vise.runtime.recovery import (
 )
 from vise.runtime.registry import AgentRegistry
 from vise.runtime.routing import TOP, ModelRouter, tier_of
-from vise.runtime.state import RunState, utcnow
+from vise.runtime.state import RunState, cancel_requested, utcnow
 from vise.runtime.verify import (
     Verification,
     parse_verification,
@@ -404,7 +405,7 @@ class Scheduler:
             max_attempts=self.config.max_attempts,
             max_replans=self.config.max_replans,
         )
-        state.set_state(task_id, move.state, move.reason)
+        self._apply(state, task_id, move.state, move.reason)
         state.emit(
             "collected",
             task=task_id,
@@ -489,13 +490,13 @@ class Scheduler:
         )
 
         if verification.verdict is Verdict.PASS:
-            state.set_state(task_id, TaskState.SUCCEEDED, "verified against its criteria")
+            self._apply(state, task_id, TaskState.SUCCEEDED, "verified against its criteria")
             self._persist(state)
             return False
 
         if verification.verdict is Verdict.INCONCLUSIVE:
-            state.set_state(
-                task_id, TaskState.BLOCKED,
+            self._apply(
+                state, task_id, TaskState.BLOCKED,
                 "the verifier could not evaluate this — "
                 + (verification.reasons[0] if verification.reasons else "no reason given"),
             )
@@ -523,7 +524,7 @@ class Scheduler:
             max_attempts=self.config.max_attempts,
             max_replans=self.config.max_replans,
         )
-        state.set_state(task_id, move.state, move.reason)
+        self._apply(state, task_id, move.state, move.reason)
         state.emit("collected", task=task_id, verdict="fail", gates_accepted=True,
                    refusals=[], action=move.action.value, reason=move.reason,
                    cost_usd=0.0)
@@ -576,11 +577,20 @@ class Scheduler:
     # --- stopping --------------------------------------------------------
 
     def _cancelled(self, state: RunState) -> bool:
-        if self.config.should_cancel is None or not self.config.should_cancel():
-            return False
-        state.cancel("cancelled by the caller")
-        state.emit("cancelled", reason="caller")
-        return True
+        """Two ways to stop: an in-process hook, and a sentinel file.
+
+        The file exists because the person cancelling is usually not in this
+        process — they are at another terminal running `vise runtime cancel`.
+        """
+        if self.config.should_cancel is not None and self.config.should_cancel():
+            state.cancel("cancelled by the caller")
+            state.emit("cancelled", reason="caller")
+            return True
+        if self.state_root is not None and cancel_requested(self.state_root, state.spec.run_id):
+            state.cancel("cancelled by `vise runtime cancel`")
+            state.emit("cancelled", reason="sentinel")
+            return True
+        return False
 
     def _over_wall_clock(self, state: RunState, started: float) -> bool:
         ceiling = state.spec.budget.max_wall_time_s
@@ -613,7 +623,43 @@ class Scheduler:
             state.set_state(record.task_id, TaskState.BLOCKED, reason)
             state.emit("stalled", task=record.task_id, reason=reason)
 
+    def _apply(
+        self, state: RunState, task_id: str, new_state: TaskState, reason: str
+    ) -> None:
+        """Set a task's state, unless the run has already stopped.
+
+        A task collected after the run stopped must not walk back out of the
+        state the stop put it in. Recovery's answer is still "retry", but there
+        is nothing left to retry into: writing PENDING there leaves a run that
+        reports itself done with a task waiting to start, which is the one
+        inconsistency every reader of the state file would trust.
+        """
+        if state.cancelled or state.human_gate:
+            parked = TaskState.CANCELLED if state.cancelled else TaskState.WAITING_HUMAN
+            if new_state not in TERMINAL_STATES:
+                state.set_state(task_id, parked, f"{reason} (the run had already stopped)")
+                return
+        state.set_state(task_id, new_state, reason)
+
+    def _sweep(self, state: RunState) -> None:
+        """Nothing may still be pending or running once the loop is over.
+
+        The loop can exit with futures in flight — a cancel, a wall-clock
+        ceiling, a budget stop. Their threads are joined by the pool, but their
+        results are never collected, so without this the state file would claim
+        tasks were running inside a run that had finished.
+        """
+        parked = TaskState.CANCELLED if state.cancelled else TaskState.WAITING_HUMAN
+        for record in state.tasks.values():
+            if record.state in (TaskState.PENDING, TaskState.READY, TaskState.RUNNING):
+                was = record.state
+                record.state = parked
+                record.note = record.note or (
+                    f"the run ended while this task was {was.value}"
+                )
+
     def _finalise(self, state: RunState) -> None:
+        self._sweep(state)
         if not state.finished_at:
             state.finished_at = utcnow()
         state.emit(

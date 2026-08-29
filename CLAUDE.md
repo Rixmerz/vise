@@ -40,7 +40,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```bash
 .venv/bin/python -m ruff check . --exclude .claude
 .venv/bin/python -m coverage run -m pytest -q
-.venv/bin/python -m coverage report --fail-under=71
+.venv/bin/python -m coverage report --fail-under=74
 ```
 
 The coverage floor is a ratchet: raise it when the real number rises, never

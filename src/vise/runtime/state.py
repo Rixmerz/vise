@@ -34,6 +34,39 @@ from vise.runtime.contracts import (
 )
 
 
+def runtime_root() -> Path:
+    """Where run state lives: ``$XDG_DATA_HOME/vise/runtime``.
+
+    Beside telemetry rather than inside the project, because a run outlives the
+    working tree it touched — a `vise runtime explain` after a branch was
+    deleted should still answer.
+    """
+    from vise.core import paths as _paths
+
+    return _paths.data_dir() / "runtime"
+
+
+def cancel_path(root: Path | str, run_id: str) -> Path:
+    """The sentinel a `vise runtime cancel` writes and a running scheduler reads.
+
+    A file rather than a signal or a socket: the scheduler may be in another
+    process, on another terminal, started by another tool, and the one thing all
+    of those share is the state directory they were told to use.
+    """
+    return Path(root) / "runs" / run_id / "cancel"
+
+
+def request_cancel(root: Path | str, run_id: str) -> Path:
+    path = cancel_path(root, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(utcnow(), encoding="utf-8")
+    return path
+
+
+def cancel_requested(root: Path | str, run_id: str) -> bool:
+    return cancel_path(root, run_id).exists()
+
+
 def utcnow() -> str:
     """One clock for the whole runtime, so a state file and its events agree."""
     return datetime.now(timezone.utc).isoformat()
@@ -135,6 +168,15 @@ class RunState:
         self.events.append(event)
         if len(self.events) > self.MAX_EVENTS:
             del self.events[: len(self.events) - self.MAX_EVENTS]
+        # Mirrored to the cross-run log. Best-effort by contract: telemetry that
+        # can break a run is worse than no telemetry, and this file is not the
+        # authoritative record — state.json is.
+        try:
+            from vise.engines.telemetry import record_run_event
+
+            record_run_event(self.spec.run_id, kind, **fields)
+        except Exception:  # noqa: BLE001 - telemetry never breaks a run
+            pass
         return event
 
     @classmethod

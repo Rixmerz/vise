@@ -2,12 +2,14 @@
 
 The scheduler is the part of the runtime that turns "this phase contains five
 tasks" into "run these three now, those two after, and stop if the third one
-fails twice". It does not exist yet — this document specifies it, and
-[`planner.py`](../src/vise/runtime/planner.py) implements the half of it that
-needs no execution: wave computation and admission.
+fails twice". It lives in [`scheduler.py`](../src/vise/runtime/scheduler.py);
+[`planner.py`](../src/vise/runtime/planner.py) is the half that needs no
+execution — wave computation and admission — and is what `vise runtime plan`
+prints.
 
-Writing the spec before the code is the point. A scheduler is the easiest place
-in a system like this to accumulate policy that nobody can state out loud.
+This document was written before either of them, and that ordering is the point.
+A scheduler is the easiest place in a system like this to accumulate policy
+nobody can state out loud.
 
 ## What it schedules
 
@@ -112,6 +114,16 @@ grading its own homework is the failure mode the whole design exists to prevent;
 `worker-contract.md` says why the verifier is a separate agent with a separate
 input.
 
+## Concurrency
+
+Threads, not processes or asyncio, because a worker is I/O-bound by
+construction: the adapter shells out and waits. Threads keep the loop readable
+and let a worker use ordinary blocking subprocess calls.
+
+The pool is sized to `max_parallel`. Admission is re-evaluated on every pass, so
+a task deferred for ownership is retried as soon as the task holding the claim
+finishes — there is no queue to fall to the back of.
+
 ## Retry, escalation, replan
 
 Three different responses to failure, and conflating them is how an orchestrator
@@ -157,6 +169,20 @@ The scheduler stops and reports `WAITING_HUMAN` — it does not choose — when:
 
 Each of these is a case where continuing is cheap and being wrong is expensive.
 That asymmetry, not a confidence threshold, is the test for adding one.
+
+## Cancellation
+
+Two ways, because the person cancelling is usually not in the process doing the
+work. `SchedulerConfig.should_cancel` is the in-process hook — a UI button, a
+signal handler. `vise runtime cancel <run>` writes a sentinel file under the
+run's state directory, which the loop checks before each dispatch. A file rather
+than a signal or a socket: the scheduler may be in another process, on another
+terminal, started by another tool, and the one thing all of those share is the
+state directory they were told to use.
+
+A cancelled run marks its unfinished tasks `CANCELLED` and stops. It does not
+wait for in-flight workers to be killed — it cannot kill them, and pretending
+otherwise would make the state file lie about what was running.
 
 ## What the scheduler must never do
 

@@ -55,7 +55,52 @@ you may already depend on, it says so under **Behaviour change**.
   Every other one asks another model, which means every other one can be talked
   out of its finding.
 
+- **The scheduler, and everything that makes its verdicts mean something.**
+  `runtime/scheduler.py` walks a DAG node's tasks on a thread pool: dispatch
+  what is ready and admissible, collect, gate, and decide retry / escalate /
+  replan / stop. Around it: `state` (the inert record, persisted per run),
+  `recovery` (the pure decision function), `context` (what a worker is shown —
+  and, more importantly, what it is not), `verify` (the second opinion),
+  `adapters/claude_code` (the only module that can spend money).
+
+  `SUCCEEDED` now requires a second agent. Every task declaring acceptance
+  criteria is checked by `vise:verifier`, given the criteria, the diff and the
+  evidence — and deliberately not the implementer's prompt or summary, which are
+  the two artefacts a wrong-but-confident worker produces most convincingly. A
+  verifier that says *inconclusive* blocks the task rather than retrying it:
+  re-running the implementer cannot fix a verifier that would not run.
+
+- **`vise runtime run|status|explain|budget|cancel`**, and eight MCP tools
+  (`agent_list`, `run_plan`, `run_list`, `run_status`, `task_list`,
+  `run_explain`, `run_budget`, `run_cancel`). `run` prints the plan and its cost
+  and stops there unless `--yes` is given. `cancel` writes a sentinel the loop
+  polls, because the person cancelling is usually at another terminal.
+
+  **There is no `run_start` MCP tool, deliberately.** This server runs inside a
+  Claude Code session; a dispatch tool here would have the session spawning
+  sessions through the one component that cannot call another server's tools.
+  Same boundary `recipe_run` holds.
+
+- **Stress, real concurrency, and failure injection.** Forty-task pseudo-random
+  DAGs, a third of attempts failing, workers that always raise. The concurrency
+  test detects genuine temporal overlap rather than dispatch order — and asserts
+  the opposite too, since a scheduler that never overlaps anything passes every
+  ownership test and is worth nothing.
+
+- **Coverage floor raised 71 → 74 (CI 62 → 70).** Measured 75%. Every new
+  runtime module is 89–100%.
+
 ### Notes
+
+- **Four bugs found by writing the tests, each fixed with the test that caught
+  it.** Admission counted settled spend only, so four opus tasks could start
+  against a budget for one — nothing was billed yet, so everything fit; the
+  ledger now reserves an estimate while a task is in flight. `at_top_rung` read
+  the route computed *after* the failure was recorded, which is the escalated
+  tier, so a task was replanned one attempt early while it still had opus to
+  try. The stall pass overwrote a specific block reason with a generic one. And
+  a pinned `haiku` was priced as `sonnet`, because rung 0 is falsy and
+  `tier_of(...) or fallback` fell through.
 
 - **Ambiguity is reported, not broken alphabetically.** Twelve bundled agents
   take the `backend` role and differ only by language. A task that names none is

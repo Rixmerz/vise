@@ -16,9 +16,11 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 - **Declarative quality gates** — a workflow node gates on a check *name* (`lint`, `unit`, `sast`, `coverage`, …); `.vise/quality.yaml` says what that name runs in *this* repo, so one workflow ships to a Python repo and a Go repo unchanged. An unbound check **skip-passes** with evidence naming the next step and a record marked `source="asserted"` — nothing ran, so `goal_complete` will not grade it as verified. The bundled `quality-gate` workflow tiers them static → tests → security → integration; mutation testing and fuzzing stay deliberately out of band, since a full mutation run as a gate stalls every traversal and fuzzing has no completion condition to wait on.
 - **Mandatory OpenSpec gate** — [OpenSpec](https://github.com/Fission-AI/OpenSpec) spec-driven planning is enforced, not suggested. `feature-dev` and `migration` both carry a `spec` phase whose exit edge is `validators_green`, so neither can reach its implement phase until a well-formed change proposal exists on disk, and neither can reach commit/apply until every box in that change's `tasks.md` is ticked. The four structural levels of the `openspec` validator (`structure`, `change`, `deltas`, `tasks_complete`) read `openspec/` with stdlib string work and **fail closed** — no Node CLI involved, so a red gate always means the plan is missing, never that a machine is. The fifth (`validated`) shells out to `openspec validate --strict` and skip-passes when the CLI is absent: less depth, same coverage.
 - **Agent autoheal skill** — bundled skill for recovering stuck agent loops (hot/cold two-path protocol).
-- **Agent runtime (planning only, so far)** — a DAG node's tasks can declare who runs them, what they may write, and what being wrong costs; `vise runtime plan` derives the waves, resolves each task to a bundled agent, routes a model with the reasons attached, and prices the whole thing before anything runs. Nothing dispatches yet — the scheduler and the Claude adapter are specified in `docs/` and not written, deliberately, because a scheduler built against contracts that turn out to be wrong is a rewrite. Additive: a workflow that declares none of it behaves exactly as before.
+- **Agent runtime** — a DAG node's tasks can declare who runs them, what they may write, and what being wrong costs. `vise runtime plan` derives the waves, resolves each task to a bundled agent, routes a model with the reasons attached, and prices the run before it starts; `vise runtime run` dispatches it, in parallel where ownership allows, escalating a failing task one model rung at a time, refusing a `pass` that cannot show its evidence, and stopping for a person when the budget, the ladder, or the plan runs out. A second agent verifies every task that declares acceptance criteria, because a worker grading its own homework is the failure the whole design exists to prevent. `vise runtime explain` reads back every decision. Additive: a workflow that declares none of it behaves exactly as before.
 
-The MCP surface exposes **49 tools**: `graph_*` (27), `goal_*` (7), `experience_*` (5), `snapshot_*` (4), `recipe_*` (3), `capability_*` (2), `vise_version`. Counted from the registry, not by hand — `test_asset_honesty.py` holds the authoritative list.
+The MCP surface exposes **57 tools**: `graph_*` (27), `goal_*` (7), `run_*` (6), `experience_*` (5), `snapshot_*` (4), `recipe_*` (3), `capability_*` (2), `agent_list`, `task_list`, `vise_version`. Counted from the registry, not by hand — `test_asset_honesty.py` holds the authoritative list.
+
+The `run_*` / `agent_list` / `task_list` family is read-only, apart from `run_cancel`, which writes a sentinel. **There is no `run_start`**: this server runs *inside* a Claude Code session, and a tool that dispatched subagents from in here would have the session spawning sessions through the one component that cannot call another server's tools. Dispatch is `vise runtime run`, where the operator is the one spending the money.
 
 ## Install
 
@@ -167,6 +169,39 @@ whichever charter sorts first.
 
 Exit code is non-zero when the plan has problems, so a plan with an unroutable
 task cannot be scripted past.
+
+`vise runtime run` dispatches that plan. It prints the plan first and stops
+there unless `--yes` is given — the moment to refuse a four-dollar run over a
+two-line change is before it starts:
+
+```sh
+vise runtime run path/to/oauth-graph.yaml --max-cost 12 --max-parallel 4 --yes
+vise runtime status                  # where runs stand
+vise runtime explain run-a1b2c3      # every scheduler decision, in order
+vise runtime budget run-a1b2c3       # what it cost, per task
+vise runtime cancel run-a1b2c3       # stop one from another terminal
+```
+
+Four rules the run enforces that are easy to state and easy to skip:
+
+- **A `pass` is a claim, not a result.** A testing role must quote a command and
+  its real output; an implementing role must quote the repo's existing checks; a
+  pass claiming edits must have moved `git status --porcelain` plus `HEAD`; and
+  nothing may be written outside its declared ownership. Changed paths are read
+  from git, never from the model — the party being checked does not supply the
+  evidence.
+- **`SUCCEEDED` needs a second agent.** Every task with acceptance criteria is
+  checked by `vise:verifier`, which is given the criteria, the diff and the
+  evidence — and deliberately *not* the implementer's prompt or summary. A
+  verifier that reads the argument for why the code is right is reviewing the
+  argument.
+- **Retry, escalate and replan are three different moves.** A missing binary
+  retries at the same model; work attempted and wrong climbs one rung; a
+  failure classified as a spec or architecture problem rebuilds the plan instead
+  of asking the same question louder.
+- **The budget stops the run.** It never quietly drops to a cheaper model, and
+  in-flight estimates are reserved, so four opus tasks cannot start against a
+  budget for one.
 
 ### `vise insights` — what the gates actually did
 

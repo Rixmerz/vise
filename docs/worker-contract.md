@@ -1,10 +1,18 @@
 # The worker contract
 
-A worker is whatever executes one task. In M1 that is a mock; later it is a
-Claude Code subagent, and in principle it could be a shell script. The contract
-is the same, and it is deliberately narrow: a worker receives a brief and owes
-back a result. It does not read the graph, does not advance a phase, and does
-not decide whether its own work was good enough.
+A worker is whatever executes one task: a Claude Code subagent
+(`adapters/claude_code.py`), a recording mock, in principle a shell script. The
+contract is the same, and it is deliberately narrow: a worker receives a brief
+and owes back a result. It does not read the graph, does not advance a phase,
+and does not decide whether its own work was good enough.
+
+Two things the adapter does not take the worker's word for. **Changed paths come
+from git**, diffed across the run — the honesty gates check what a task wrote
+against what it was allowed to write, and reading that list from the model's own
+report would let the one party being checked supply the evidence. And **a reply
+with no verdict block is `inconclusive`**, never a pass: any other reading makes
+a model that ignored its instructions indistinguishable from one that
+succeeded.
 
 ## The brief
 

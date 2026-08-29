@@ -24,9 +24,9 @@ jobs:
       # so a separate plain `pytest -q` step doubles CI time for no extra signal.
       # vise ships coverage-gate guidance and gates other repos on it; measure
       # ourselves. Paths live in [tool.coverage.run]. The threshold is a ratchet
-      # meant to move upward — set below the 67% we hold today, because a gate
+      # meant to move upward — set below the 75% we hold today, because a gate
       # nobody meets gets overridden and an override habit is worse than no gate.
       - name: Test + coverage
         run: |
           python -m coverage run -m pytest -q
-          python -m coverage report --fail-under=62
+          python -m coverage report --fail-under=70

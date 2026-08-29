@@ -111,20 +111,35 @@ verdicts, and the phase gate reads them.
 | Artifact store | what a worker hands the next worker | `runtime/artifacts.py` |
 | Worker | how a task is actually executed | `runtime/worker.py` |
 | Planner | which tasks form which wave | `runtime/planner.py` |
-| Scheduler | dispatch, collect, retry, escalate | *not yet — M2* |
+| Scheduler | dispatch, collect, retry, escalate | `runtime/scheduler.py` |
+| Run state | what a run knows about itself | `runtime/state.py` |
+| Recovery | retry vs escalate vs replan | `runtime/recovery.py` |
+| Context | what a worker is shown, and what it is not | `runtime/context.py` |
+| Verification | the second opinion that makes SUCCEEDED mean something | `runtime/verify.py` |
+| Adapter | running a brief as a Claude Code session | `runtime/adapters/claude_code.py` |
 
-## What is deliberately not here yet
+## Testable without spending anything
 
-The scheduler and the Claude adapter. Both were specified before either was
-written, and the order is not an accident: a scheduler built against contracts
-that turn out to be wrong is a rewrite, and a scheduler that can call Claude is
-a thing you cannot test cheaply. Everything in this milestone runs offline,
-deterministically, with no model call and no network — `runtime/worker.py` ships
-a `Worker` protocol and a recording mock, and the planner plans without
-dispatching.
+Exactly one module can spend money — `adapters/claude_code.py` — and its
+subprocess call goes through an injected runner, so argv construction, timeout
+handling, output parsing and cost accounting are all driven in tests by recorded
+fixtures. Everything else runs offline and deterministically against
+`worker.MockWorker`.
 
-That constraint is also the acceptance criterion. If a contract cannot be
-exercised end to end by a mock worker in a unit test, it is underspecified.
+That is the acceptance criterion, not a convenience. A contract that cannot be
+exercised end to end by a mock worker in a unit test is underspecified, and a
+scheduler you can only test by paying for it is one nobody will test.
+
+## Where dispatch is allowed to start
+
+From the CLI (`vise runtime run`), and not from the MCP server. vise's MCP
+server runs *inside* a Claude Code session; a tool that dispatched Claude Code
+subagents from in there would have the session spawning sessions through the one
+component that is not allowed to call another server's tools. It is the same
+boundary `recipe_run` holds: vise advises and Claude Code acts.
+
+So the `run_*` MCP tools read runs and one of them cancels a run. None of them
+starts one. The operator spending the money types the command.
 
 ## Reading a plan
 
