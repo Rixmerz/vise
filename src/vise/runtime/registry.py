@@ -41,6 +41,7 @@ _ROLE_BY_NAME: dict[str, str] = {
     "docs-writer": "docs",
     "db-migrator": "migration",
     "security-auditor": "security",
+    "verifier": "verify",
     "frontend": "frontend",
 }
 

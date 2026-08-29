@@ -29,8 +29,10 @@ from typing import Any, Callable, Iterable, Sequence
 
 from vise.runtime import ownership as _own
 from vise.runtime.artifacts import ArtifactStore
+from vise.runtime.context import ContextResolver
 from vise.runtime.contracts import (
     Criticality,
+    FailureKind,
     RunSpec,
     TaskBrief,
     TaskBudget,
@@ -49,6 +51,12 @@ from vise.runtime.recovery import (
 from vise.runtime.registry import AgentRegistry
 from vise.runtime.routing import TOP, ModelRouter, tier_of
 from vise.runtime.state import RunState, utcnow
+from vise.runtime.verify import (
+    Verification,
+    parse_verification,
+    verification_artifact,
+    verifier_brief,
+)
 from vise.runtime.worker import Worker, execute
 
 #: How long a collection wait blocks before the loop re-checks the run's
@@ -77,6 +85,12 @@ class SchedulerConfig:
     #: Consulted before each dispatch. True stops the run. The hook a caller
     #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
     should_cancel: Callable[[], bool] | None = None
+    #: Whether a passing task is checked by a second agent before it counts as
+    #: SUCCEEDED. On by default: a worker grading its own homework is the
+    #: failure the whole design exists to prevent. It only engages for tasks
+    #: that declare acceptance criteria — there is nothing to verify against
+    #: otherwise, and the brief already says so.
+    verify: bool = True
 
 
 class Scheduler:
@@ -89,6 +103,7 @@ class Scheduler:
         registry: AgentRegistry | None = None,
         router: ModelRouter | None = None,
         artifacts: ArtifactStore | None = None,
+        context: ContextResolver | None = None,
         state_root: Path | str | None = None,
         config: SchedulerConfig | None = None,
     ) -> None:
@@ -96,6 +111,7 @@ class Scheduler:
         self.registry = registry if registry is not None else AgentRegistry.bundled()
         self.router = router or ModelRouter()
         self.artifacts = artifacts
+        self.context = context
         self.state_root = Path(state_root) if state_root else None
         self.config = config or SchedulerConfig()
 
@@ -110,14 +126,23 @@ class Scheduler:
         started = time.monotonic()
 
         with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-            pending: dict[Future[tuple[TaskResult, GateOutcome]], str] = {}
+            pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]] = {}
+            # The brief each in-flight task was dispatched with, and — while a
+            # verifier is running — the work result it is judging. Held here
+            # rather than on the record because both are inputs to a decision
+            # that has not been made yet, and a record is what a decision left
+            # behind.
+            briefs: dict[str, TaskBrief] = {}
+            verifying: dict[str, TaskResult] = {}
             while not state.is_done():
                 if self._cancelled(state):
                     break
                 if self._over_wall_clock(state, started):
                     break
 
-                dispatched = self._dispatch_ready(state, by_id, pool, pending, started)
+                dispatched = self._dispatch_ready(
+                    state, by_id, pool, pending, briefs, started
+                )
 
                 if not pending:
                     if not dispatched:
@@ -131,8 +156,15 @@ class Scheduler:
 
                 done, _ = wait(list(pending), timeout=WAIT_SLICE_S, return_when=FIRST_COMPLETED)
                 for future in done:
-                    task_id = pending.pop(future)
-                    replan = self._collect(state, by_id, task_id, future)
+                    task_id, kind = pending.pop(future)
+                    if kind == "verify":
+                        replan = self._collect_verification(
+                            state, by_id, task_id, future, verifying
+                        )
+                    else:
+                        replan = self._collect(
+                            state, by_id, task_id, future, pool, pending, briefs, verifying
+                        )
                     if replan:
                         by_id = self._replan(state, by_id, tasks)
 
@@ -147,7 +179,8 @@ class Scheduler:
         state: RunState,
         by_id: dict[str, Any],
         pool: ThreadPoolExecutor,
-        pending: dict[Future[tuple[TaskResult, GateOutcome]], str],
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+        briefs: dict[str, TaskBrief],
         started: float,
     ) -> bool:
         """Start every task that is ready and admissible. True if any started."""
@@ -188,7 +221,8 @@ class Scheduler:
             future = pool.submit(
                 execute, brief, self.worker, project_dir=state.spec.project_dir
             )
-            pending[future] = task_id
+            pending[future] = (task_id, "work")
+            briefs[task_id] = brief
             started_any = True
         return started_any
 
@@ -293,8 +327,19 @@ class Scheduler:
         ), agent.id, decision.estimated_cost_usd
 
     def _context_for(self, state: RunState, task: Any) -> tuple[str, ...]:
-        """Hook for the context resolver. Empty until one is wired in."""
-        return ()
+        """Resolved context, or nothing when no resolver was supplied.
+
+        Nothing is the honest default. A scheduler that silently built its own
+        resolver would walk the caller's repository without being asked, and a
+        brief is the one place where "helpfully included extra" is a cost.
+        """
+        if self.context is None:
+            return ()
+        try:
+            return self.context.resolve(task)
+        except Exception as exc:  # noqa: BLE001 - context is an aid, never a gate
+            state.emit("context_failed", task=task.id, error=f"{type(exc).__name__}: {exc}")
+            return ()
 
     # --- collection ------------------------------------------------------
 
@@ -304,6 +349,10 @@ class Scheduler:
         by_id: dict[str, Any],
         task_id: str,
         future: Future[tuple[TaskResult, GateOutcome]],
+        pool: ThreadPoolExecutor,
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+        briefs: dict[str, TaskBrief],
+        verifying: dict[str, TaskResult],
     ) -> bool:
         """Fold one finished attempt in and act on it. True when a replan is due."""
         try:
@@ -331,6 +380,20 @@ class Scheduler:
         # router would pick next. Routing after the failure is recorded returns
         # the *escalated* tier, so asking it "are we at the top" answers one
         # attempt early and replans a task that still had opus to try.
+        if outcome.accepted and result.verdict is Verdict.PASS:
+            work_brief = briefs.get(task_id)
+            if work_brief is not None and self._verification_applies(work_brief):
+                verifying[task_id] = result
+                brief = verifier_brief(
+                    work_brief, result,
+                    model=self._verify_model()[0], effort=self._verify_model()[1],
+                )
+                state.emit("verifying", task=task_id, model=brief.model, effort=brief.effort)
+                pending[pool.submit(
+                    execute, brief, self.worker, project_dir=state.spec.project_dir
+                )] = (task_id, "verify")
+                return False
+
         used_tier = tier_of(record.model, record.effort)
         move = decide(
             result,
@@ -354,6 +417,117 @@ class Scheduler:
         )
         self._persist(state)
 
+        if move.action is Recovery.HUMAN:
+            state.stop_for_human(f"{task_id}: {move.reason}")
+        return move.action is Recovery.REPLAN
+
+    # --- verification ----------------------------------------------------
+
+    def _verification_applies(self, brief: TaskBrief) -> bool:
+        """Whether this task's pass gets a second opinion.
+
+        Only when it declares acceptance criteria. A verifier with nothing to
+        check against would be asked "is this good", which is the open-ended
+        question `reviewer` answers once per node — asking it once per task
+        buys an opinion nobody costed.
+        """
+        if not self.config.verify or not brief.acceptance:
+            return False
+        return self.registry.resolve("verify", writes=None).agent is not None
+
+    def _verify_model(self) -> tuple[str, str]:
+        agent = self.registry.resolve("verify", writes=None).agent
+        return (agent.model or "sonnet", agent.effort or "medium") if agent else \
+            ("sonnet", "medium")
+
+    def _collect_verification(
+        self,
+        state: RunState,
+        by_id: dict[str, Any],
+        task_id: str,
+        future: Future[tuple[TaskResult, GateOutcome]],
+        verifying: dict[str, TaskResult],
+    ) -> bool:
+        """Act on a verifier's answer about one task.
+
+        Three outcomes, three different meanings:
+
+        pass          the task succeeded — the only path to SUCCEEDED.
+        fail          the work was wrong; the verifier's reasons replace the
+                      worker's summary and the task escalates like any wrong
+                      answer.
+        inconclusive  the *verifier* could not evaluate. The task is blocked,
+                      not retried: re-running the implementer cannot fix a
+                      verifier that would not run, and paying for it to find
+                      that out again is the wrong lesson to learn twice.
+        """
+        work_result = verifying.pop(task_id, None)
+        record = state.record(task_id)
+        try:
+            verify_result, _ = future.result()
+        except Exception as exc:  # noqa: BLE001 - a verifier crash is not a task failure
+            verification = Verification(
+                Verdict.INCONCLUSIVE,
+                (f"the verifier raised {type(exc).__name__}: {exc}",),
+            )
+            verify_result = None
+        else:
+            state.ledger.spend(f"{task_id}::verify", verify_result.usage)
+            verification = parse_verification(verify_result)
+
+        if self.artifacts is not None:
+            self.artifacts.put(
+                verification_artifact(state.spec.run_id, task_id, verification)
+            )
+        state.emit(
+            "verified",
+            task=task_id,
+            verdict=verification.verdict.value,
+            unmet=list(verification.unmet),
+            reasons=list(verification.reasons)[:3],
+            cost_usd=round(verify_result.usage.cost_usd, 4) if verify_result else 0.0,
+        )
+
+        if verification.verdict is Verdict.PASS:
+            state.set_state(task_id, TaskState.SUCCEEDED, "verified against its criteria")
+            self._persist(state)
+            return False
+
+        if verification.verdict is Verdict.INCONCLUSIVE:
+            state.set_state(
+                task_id, TaskState.BLOCKED,
+                "the verifier could not evaluate this — "
+                + (verification.reasons[0] if verification.reasons else "no reason given"),
+            )
+            self._persist(state)
+            return False
+
+        # The verifier says the work is wrong. Its reasons, not the worker's
+        # summary, are what the next attempt is told.
+        reasons = "; ".join(verification.unmet or verification.reasons) or "criteria not met"
+        rejected = replace(
+            work_result or TaskResult(task_id=task_id, verdict=Verdict.FAIL),
+            verdict=Verdict.FAIL,
+            summary=f"verifier rejected it: {reasons}",
+            classification=FailureKind.CODE_BUG,
+        )
+        if record.attempts:
+            record.attempts[-1] = rejected.to_attempt(len(record.attempts))
+        used_tier = tier_of(record.model, record.effort)
+        move = decide(
+            rejected,
+            record.attempts,
+            gates_accepted=True,
+            at_top_rung=used_tier is not None and used_tier >= TOP,
+            replans_used=state.replans,
+            max_attempts=self.config.max_attempts,
+            max_replans=self.config.max_replans,
+        )
+        state.set_state(task_id, move.state, move.reason)
+        state.emit("collected", task=task_id, verdict="fail", gates_accepted=True,
+                   refusals=[], action=move.action.value, reason=move.reason,
+                   cost_usd=0.0)
+        self._persist(state)
         if move.action is Recovery.HUMAN:
             state.stop_for_human(f"{task_id}: {move.reason}")
         return move.action is Recovery.REPLAN

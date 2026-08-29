@@ -59,7 +59,11 @@ _BASE_BY_ROLE: dict[str, int] = {
     "design": 3,
     "security": 3,
     "review": 3,
-    "verify": 2,
+    # Verification is per task and therefore a volume operation: it checks a
+    # diff against an explicit checklist, which is closer to applying than to
+    # noticing. The open-ended adversarial pass that genuinely needs the big
+    # model is `review`, and it runs once per node rather than once per task.
+    "verify": 1,
     "replan": 3,
 }
 

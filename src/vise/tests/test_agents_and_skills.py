@@ -94,3 +94,27 @@ def test_skill_frontmatter_valid(path: Path):
     assert fm.get("description"), f"{path.parent.name}: missing description"
     assert fm["name"] == path.parent.name, \
         f"{path.parent.name}: skill name {fm['name']!r} != directory name"
+
+
+def test_every_agent_resolves_to_a_runtime_role():
+    """A charter the runtime cannot route to still ships, still loads in Claude
+    Code, and is simply never picked. Nothing else in the suite notices."""
+    from vise.runtime.registry import derive_role
+
+    unrouted = [
+        p.name for p in AGENT_FILES
+        if not (_frontmatter(p).get("role") or derive_role(_frontmatter(p)["name"]))
+    ]
+    assert not unrouted, f"agents no task can reach: {unrouted}"
+
+
+def test_claude_md_states_the_real_agent_count():
+    """Prose restating a fact drifts from it. This is the fact."""
+    import re
+
+    text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+    match = re.search(r"\|\s*`agents/`\s*\|\s*(\d+) bundled subagent charters", text)
+    assert match, "CLAUDE.md no longer states an agent count in the layout table"
+    assert int(match.group(1)) == len(AGENT_FILES), (
+        f"CLAUDE.md says {match.group(1)} agents; {len(AGENT_FILES)} ship"
+    )
