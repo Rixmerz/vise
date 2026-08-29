@@ -203,6 +203,15 @@ Four rules the run enforces that are easy to state and easy to skip:
   in-flight estimates are reserved, so four opus tasks cannot start against a
   budget for one.
 
+Three passes sit above the worker, each answering a question it cannot answer
+about itself: a **debugger** classifies a failure that named no kind (the
+classification decides retry vs escalate vs replan, so letting the failing
+worker choose it is the same mistake as letting it grade its own pass); an
+opt-in **adversarial review** runs once over the whole node after everything
+passes, and parks the run rather than reverting anything if it objects; and
+under isolation a failed attempt's worktree is **discarded** so the next attempt
+starts from HEAD.
+
 Add `--isolate` and each writing task gets its own git worktree, verified there
 and integrated into the main tree only once it has passed. In a shared tree a
 git diff cannot say whose file is whose, so the ownership gate has to excuse

@@ -54,6 +54,9 @@ from vise.runtime.routing import TOP, ModelRouter, tier_of
 from vise.runtime.state import RunState, cancel_requested, utcnow
 from vise.runtime.verify import (
     Verification,
+    debugger_brief,
+    parse_classification,
+    reviewer_brief,
     parse_verification,
     verification_artifact,
     verifier_brief,
@@ -86,6 +89,21 @@ class SchedulerConfig:
     #: Consulted before each dispatch. True stops the run. The hook a caller
     #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
     should_cancel: Callable[[], bool] | None = None
+    #: When a failure carries no classification, ask a separate agent where it
+    #: lives instead of guessing. The classification decides retry vs escalate
+    #: vs replan, so a wrong one costs a whole strategy rather than one attempt
+    #: — and letting the failing worker classify its own failure is the same
+    #: mistake as letting it grade its own pass.
+    diagnose: bool = True
+    #: Run one adversarial review over the whole node once every task has
+    #: succeeded. Off by default: it is a second opinion on work that already
+    #: has one, and it costs the top rung once per run.
+    review: bool = False
+    #: Under isolation, throw away a failed attempt's worktree so the next one
+    #: starts from HEAD rather than from its own failed output. Only available
+    #: with `isolate`: in a shared tree the same operation would revert files
+    #: the runtime cannot prove belong to this task alone.
+    rollback: bool = True
     #: Give each writing task its own git worktree, and integrate its changes
     #: back only after it has passed and been verified. Off by default because
     #: it needs a git repository with a commit and costs a checkout per task;
@@ -179,16 +197,18 @@ class Scheduler:
                     task_id, kind = pending.pop(future)
                     if kind == "verify":
                         replan = self._collect_verification(
-                            state, by_id, task_id, future, verifying
+                            state, by_id, task_id, future, verifying, baselines
                         )
                     else:
                         replan = self._collect(
                             state, by_id, task_id, future, pool, pending, briefs,
-                            verifying, trees,
+                            verifying, trees, baselines,
                         )
                     if replan:
                         by_id = self._replan(state, by_id, tasks)
 
+        if state.succeeded():
+            self._review(state)
         self._finalise(state)
         self._persist(state)
         if self._pool is not None:
@@ -481,6 +501,7 @@ class Scheduler:
         briefs: dict[str, TaskBrief],
         verifying: dict[str, TaskResult],
         trees: dict[str, str],
+        baselines: dict[str, str | None],
     ) -> bool:
         """Fold one finished attempt in and act on it. True when a replan is due."""
         try:
@@ -499,7 +520,7 @@ class Scheduler:
             )
             outcome = GateOutcome(True, (), result)
 
-        result = self._classify(result)
+        result = self._classify(state, result, briefs.get(task_id), trees.get(task_id))
         record = state.finish(task_id, result)
         if self.artifacts is not None and result.artifacts:
             self.artifacts.put_all(result.artifacts)
@@ -557,6 +578,8 @@ class Scheduler:
             reason=move.reason,
             cost_usd=round(result.usage.cost_usd, 4),
         )
+        if move.action in (Recovery.RETRY, Recovery.ESCALATE):
+            self._rollback(state, task_id, baselines)
         self._persist(state)
 
         if move.action is Recovery.HUMAN:
@@ -589,6 +612,7 @@ class Scheduler:
         task_id: str,
         future: Future[tuple[TaskResult, GateOutcome]],
         verifying: dict[str, TaskResult],
+        baselines: dict[str, str | None],
     ) -> bool:
         """Act on a verifier's answer about one task.
 
@@ -672,18 +696,92 @@ class Scheduler:
                    refusals=[], action=move.action.value, reason=move.reason,
                    cost_usd=0.0)
         self._persist(state)
+        if move.action in (Recovery.RETRY, Recovery.ESCALATE):
+            self._rollback(state, task_id, baselines)
         if move.action is Recovery.HUMAN:
             state.stop_for_human(f"{task_id}: {move.reason}")
         return move.action is Recovery.REPLAN
 
-    def _classify(self, result: TaskResult) -> TaskResult:
-        """Fill in a missing classification from the failure's own output."""
+    def _rollback(
+        self, state: RunState, task_id: str, baselines: dict[str, str | None]
+    ) -> None:
+        """Discard a failed attempt's worktree so the next one starts from HEAD.
+
+        Isolation only. In a shared tree the same operation would revert files
+        the runtime cannot prove belong to this task alone — which is the whole
+        reason isolation exists — so there it does nothing rather than
+        something dangerous.
+        """
+        if not (self.config.rollback and self._pool is not None):
+            return
+        if task_id not in self._pool.worktrees:
+            return
+        self._pool.release(task_id)
+        baselines.pop(task_id, None)
+        state.emit("rolled_back", task=task_id,
+                   reason="the failed attempt's worktree was discarded")
+
+    def _classify(
+        self,
+        state: RunState,
+        result: TaskResult,
+        brief: TaskBrief | None = None,
+        workdir: str | None = None,
+    ) -> TaskResult:
+        """Decide where a failure lives, cheapest source first.
+
+        The worker's own classification wins when it gave one — it was there.
+        Otherwise the text heuristic, which only recognises a machine that was
+        not present. Only when neither answers does a debugger run, because it
+        costs a model call and most failures name themselves.
+        """
         if result.verdict is Verdict.PASS or result.classification is not None:
             return result
         guessed = classify_from_text(f"{result.summary}\n{result.evidence}\n{result.checks}")
-        if guessed is None:
-            return result
-        return replace(result, classification=guessed)
+        if guessed is not None:
+            return replace(result, classification=guessed)
+        diagnosed = self._diagnose(state, result, brief, workdir)
+        return replace(result, classification=diagnosed) if diagnosed else result
+
+    def _diagnose(
+        self,
+        state: RunState,
+        result: TaskResult,
+        brief: TaskBrief | None,
+        workdir: str | None,
+    ) -> FailureKind | None:
+        """Ask a debugger where an undiagnosed failure lives.
+
+        Synchronous, and deliberately: the answer decides what happens to this
+        task next, so there is nothing to overlap it with. Any failure of the
+        debugger itself leaves the classification unset, which escalates — the
+        safe direction, since a missing diagnosis is not evidence the work was
+        fine.
+        """
+        if not self.config.diagnose or brief is None:
+            return None
+        resolution = self.registry.resolve("debug", writes=None)
+        if resolution.agent is None:
+            return None
+        agent = resolution.agent
+        probe = replace(
+            debugger_brief(brief, result,
+                           model=agent.model or "sonnet", effort=agent.effort or "high"),
+            workdir=workdir or state.spec.project_dir,
+        )
+        state.emit("diagnosing", task=brief.task_id, agent=agent.id)
+        try:
+            answer = self.worker.run(probe)
+        except Exception as exc:  # noqa: BLE001 - a debugger crash is not a task failure
+            state.emit("diagnose_failed", task=brief.task_id,
+                       error=f"{type(exc).__name__}: {exc}")
+            return None
+        state.ledger.spend(f"{brief.task_id}::debug", answer.usage)
+        kind = parse_classification(answer)
+        state.emit("diagnosed", task=brief.task_id,
+                   classification=kind.value if kind else None,
+                   cost_usd=round(answer.usage.cost_usd, 4))
+        return kind
 
     # --- replanning ------------------------------------------------------
 
@@ -716,6 +814,51 @@ class Scheduler:
             elif record.state in (TaskState.BLOCKED, TaskState.FAILED):
                 record.state = TaskState.PENDING
         return new_by_id
+
+    # --- the adversarial pass --------------------------------------------
+
+    def _review(self, state: RunState) -> None:
+        """One adversarial review over the whole node, after everything passed.
+
+        Not per task: the questions it asks — what two of these changes do to
+        each other, what an existing caller sees now — are about the node, and
+        asking them once per task is both more expensive and worse at answering
+        them. A blocking verdict parks the run; nothing is reverted, because
+        deciding what to do about a shipping objection is a person's call.
+        """
+        if not self.config.review:
+            return
+        resolution = self.registry.resolve("review", writes=None)
+        if resolution.agent is None:
+            state.emit("review_unavailable", reason="no agent takes role 'review'")
+            return
+        agent = resolution.agent
+        changed: list[str] = []
+        for record in state.tasks.values():
+            if record.result is not None:
+                changed.extend(record.result.changed_paths)
+        brief = replace(
+            reviewer_brief(
+                state.spec.run_id, goal=state.spec.goal,
+                changed_paths=tuple(sorted(set(changed))),
+                model=agent.model or "opus", effort=agent.effort or "high",
+            ),
+            workdir=state.spec.project_dir,
+        )
+        state.emit("reviewing", agent=agent.id, model=brief.model, effort=brief.effort)
+        try:
+            result = self.worker.run(brief)
+        except Exception as exc:  # noqa: BLE001 - a reviewer crash is not a run failure
+            state.emit("review_failed", error=f"{type(exc).__name__}: {exc}")
+            return
+        state.ledger.spend(f"{state.spec.run_id}::review", result.usage)
+        if self.artifacts is not None and result.artifacts:
+            self.artifacts.put_all(result.artifacts)
+        state.emit("reviewed", verdict=result.verdict.value,
+                   summary=result.summary[:400],
+                   cost_usd=round(result.usage.cost_usd, 4))
+        if result.verdict is Verdict.FAIL:
+            state.stop_for_human(f"the adversarial review objects: {result.summary[:400]}")
 
     # --- stopping --------------------------------------------------------
 

@@ -102,6 +102,20 @@ you may already depend on, it says so under **Behaviour change**.
   shared tree a git diff cannot say whose file is whose, so the ownership gate
   has to excuse paths a concurrent peer was entitled to write.
 
+- **Three passes above the worker.** A **debugger** classifies a failure that
+  named no kind, but only after the worker's own answer and a text heuristic
+  have both declined — most failures name themselves and a model call to confirm
+  is waste. An opt-in **adversarial review** runs once over the whole node after
+  everything succeeds and parks the run if it objects, because deciding what to
+  do about a shipping objection is a person's call. And under isolation a failed
+  attempt's worktree is **discarded**, so the next attempt starts from HEAD
+  rather than from its own failed output.
+
+  Reassign is deliberately absent, and the reason is in `docs/scheduler.md`: the
+  registry resolves a role to exactly one agent and reports ambiguity rather
+  than breaking it alphabetically, so "try a different agent" would mean picking
+  the one it already refused to pick by coincidence.
+
 ### Notes
 
 - **Four bugs found by writing the tests, each fixed with the test that caught

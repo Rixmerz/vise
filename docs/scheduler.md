@@ -176,6 +176,40 @@ either codebase has: an agent that cannot see what the last agent tried will try
 it again, and confidently. It costs a few hundred tokens and it is the difference
 between three attempts and three identical attempts.
 
+## Three passes above the worker
+
+Each answers a question the worker cannot answer about itself.
+
+**Diagnose.** A failure's classification decides retry vs escalate vs replan, so
+a wrong one costs a whole strategy rather than one attempt — and letting the
+failing worker classify its own failure is the same mistake as letting it grade
+its own pass. Sources in order: the worker's own classification when it gave one
+(it was there), then a text heuristic that only recognises a machine that was not
+present, and only then a debugger agent. Most failures name themselves; a model
+call to confirm that is waste. A debugger that cannot answer leaves the
+classification unset, which escalates — the safe direction, since "nobody said"
+is not evidence the work was fine.
+
+**Review.** One adversarial pass over the whole node once every task has
+succeeded, off by default. Not per task: the questions worth asking — what two
+of these changes do to each other, what an existing caller sees now — are about
+the node, and asking them once per task is both more expensive and worse at
+answering them. A blocking verdict parks the run; nothing is reverted, because
+deciding what to do about a shipping objection is a person's call.
+
+**Roll back.** Under isolation, a failed attempt's worktree is discarded so the
+next attempt starts from HEAD rather than from its own failed output. Offered
+only with `--isolate`: in a shared tree the same operation would revert files the
+runtime cannot prove belong to this task alone, which is the whole reason
+isolation exists.
+
+**Reassign is deliberately absent.** The registry resolves a role plus a
+capability to exactly one agent and reports ambiguity rather than breaking it
+alphabetically. "Try a different agent" would mean picking the one it already
+refused to pick by coincidence — and if a second agent genuinely fits, the fix is
+to say so in the task rather than to have the scheduler discover it after a
+failure.
+
 ## Human gates
 
 The scheduler stops and reports `WAITING_HUMAN` — it does not choose — when:
