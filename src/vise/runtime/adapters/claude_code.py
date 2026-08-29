@@ -117,14 +117,20 @@ class ClaudeCodeWorker:
     # --- the protocol ----------------------------------------------------
 
     def run(self, brief: TaskBrief) -> TaskResult:
-        before = _tracked_paths(self.project_dir)
+        # The brief's workdir wins over the adapter's. One adapter serves a
+        # whole run, and under worktree isolation each task runs somewhere
+        # different — a worker pinned to the main tree would write there while
+        # its baseline was taken in a worktree, and be refused for a tree it
+        # never touched.
+        workdir = brief.workdir or str(self.project_dir)
+        before = _tracked_paths(workdir)
         argv = self.build_argv(brief)
         self.calls.append(list(argv))
         timeout = brief.budget.timeout_s or self.timeout_s
         try:
             proc = self.runner(
                 argv,
-                cwd=str(self.project_dir),
+                cwd=workdir,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -145,7 +151,7 @@ class ClaudeCodeWorker:
                 f"configuration problem, not a failed task"
             ) from exc
 
-        after = _tracked_paths(self.project_dir)
+        after = _tracked_paths(workdir)
         changed = tuple(sorted(_changed(before, after)))
         return self.parse(brief, proc, changed_paths=changed)
 

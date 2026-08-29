@@ -271,6 +271,11 @@ class TaskBrief:
     effort: str = "medium"
     budget: TaskBudget = field(default_factory=TaskBudget)
     writes: bool = True
+    #: Where the work happens. Empty means "wherever the worker was configured
+    #: to run". Set by the scheduler, and load-bearing under worktree isolation:
+    #: a worker that runs in the main tree while its baseline was taken in a
+    #: worktree is judged against a tree it never touched.
+    workdir: str = ""
 
     def render(self) -> str:
         """The brief as text, in the order a worker should read it.

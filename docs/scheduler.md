@@ -98,6 +98,28 @@ Ownership is not a lock. It is an admission rule evaluated against tasks that ar
 *in flight*, and it is enforced by not dispatching, never by rejecting a write
 after the fact.
 
+### One tree or many
+
+In a single shared working tree, a git diff cannot say whose file is whose, so
+the ownership gate has to excuse paths a concurrent peer was entitled to write.
+That is correct and bounded and still an excuse: a task writing into a peer's
+territory goes unnoticed for as long as that peer could be running.
+
+`--isolate` removes the question instead of bounding it. Each writing task gets
+its own git worktree branched from HEAD, runs there, is verified there, and is
+integrated into the main tree only once it has passed. The only writes in a
+task's tree are that task's, so the gate goes back to being strict.
+
+Integration is a three-way apply. A conflict means two tasks changed the same
+lines, which is either an ownership declaration that was wrong or a plan that
+was — both decisions, so the runtime reports the conflict and blocks the task
+rather than picking a side. A refused apply is backed out to exactly the paths
+it touched, so the main tree is never left half-patched.
+
+It is off by default: it needs a git repository with a commit and costs a
+checkout per task. Where it cannot run, the scheduler says so on the record and
+falls back to the shared tree.
+
 ## Task states
 
 ```

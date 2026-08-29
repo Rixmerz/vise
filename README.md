@@ -203,6 +203,14 @@ Four rules the run enforces that are easy to state and easy to skip:
   in-flight estimates are reserved, so four opus tasks cannot start against a
   budget for one.
 
+Add `--isolate` and each writing task gets its own git worktree, verified there
+and integrated into the main tree only once it has passed. In a shared tree a
+git diff cannot say whose file is whose, so the ownership gate has to excuse
+paths a concurrent peer was entitled to write; with a worktree per task the
+question does not arise. A conflicting integration blocks the task and names the
+conflict rather than picking a side — two tasks changing the same lines means an
+ownership declaration was wrong or the plan was, and both are decisions.
+
 ### `vise insights` — what the gates actually did
 
 vise gates other repos on evidence, so it keeps some about itself. Every red

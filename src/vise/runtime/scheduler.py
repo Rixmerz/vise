@@ -86,6 +86,12 @@ class SchedulerConfig:
     #: Consulted before each dispatch. True stops the run. The hook a caller
     #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
     should_cancel: Callable[[], bool] | None = None
+    #: Give each writing task its own git worktree, and integrate its changes
+    #: back only after it has passed and been verified. Off by default because
+    #: it needs a git repository with a commit and costs a checkout per task;
+    #: on, it removes the attribution problem the ownership gate otherwise has
+    #: to bound — see runtime/isolation.py.
+    isolate: bool = False
     #: Whether a passing task is checked by a second agent before it counts as
     #: SUCCEEDED. On by default: a worker grading its own homework is the
     #: failure the whole design exists to prevent. It only engages for tasks
@@ -113,6 +119,7 @@ class Scheduler:
         self.router = router or ModelRouter()
         self.artifacts = artifacts
         self.context = context
+        self._pool = None
         self.state_root = Path(state_root) if state_root else None
         self.config = config or SchedulerConfig()
 
@@ -123,6 +130,7 @@ class Scheduler:
         by_id = {t.id: t for t in tasks}
         state = RunState.for_tasks(spec, by_id)
         state.emit("run_started", goal=spec.goal, tasks=len(by_id))
+        self._pool = self._open_pool(state)
         max_parallel = max(1, spec.budget.max_parallel or 1)
         started = time.monotonic()
 
@@ -141,6 +149,11 @@ class Scheduler:
             # against the attempt's own start would refuse it for doing what it
             # was asked to do again.
             baselines: dict[str, str | None] = {}
+            # Where each task ran. The verifier has to read the same tree: under
+            # isolation the work is not in the main tree until it has been
+            # verified, so a verifier pointed at the main tree would be judging
+            # a diff that is not there yet.
+            trees: dict[str, str] = {}
             while not state.is_done():
                 if self._cancelled(state):
                     break
@@ -148,7 +161,7 @@ class Scheduler:
                     break
 
                 dispatched = self._dispatch_ready(
-                    state, by_id, pool, pending, briefs, baselines, started
+                    state, by_id, pool, pending, briefs, baselines, trees, started
                 )
 
                 if not pending:
@@ -170,14 +183,72 @@ class Scheduler:
                         )
                     else:
                         replan = self._collect(
-                            state, by_id, task_id, future, pool, pending, briefs, verifying
+                            state, by_id, task_id, future, pool, pending, briefs,
+                            verifying, trees,
                         )
                     if replan:
                         by_id = self._replan(state, by_id, tasks)
 
         self._finalise(state)
         self._persist(state)
+        if self._pool is not None:
+            self._pool.cleanup()
+            self._pool = None
         return state
+
+    # --- isolation -------------------------------------------------------
+
+    def _open_pool(self, state: RunState):
+        """A worktree pool, or None with the reason on the record.
+
+        Degrades rather than raises: a repository that cannot host worktrees
+        should run in the shared tree and say so, not refuse to run at all.
+        """
+        if not self.config.isolate:
+            return None
+        from vise.runtime.isolation import IsolationUnavailable, WorktreePool
+
+        root = self.state_root or Path(state.spec.project_dir) / ".vise" / "runtime"
+        try:
+            pool = WorktreePool.create(
+                state.spec.project_dir, root / "runs" / state.spec.run_id, state.spec.run_id
+            )
+        except IsolationUnavailable as exc:
+            state.emit("isolation_unavailable", reason=str(exc))
+            return None
+        state.emit("isolation_enabled", root=str(pool.root))
+        return pool
+
+    def _tree_for(self, state: RunState, task: Any, brief: TaskBrief) -> str:
+        """Where this task's worker runs: its own worktree, or the shared tree."""
+        if self._pool is None or not brief.writes:
+            return state.spec.project_dir
+        from vise.runtime.isolation import IsolationUnavailable
+
+        try:
+            return str(self._pool.acquire(task.id))
+        except IsolationUnavailable as exc:
+            state.emit("isolation_unavailable", task=task.id, reason=str(exc))
+            return state.spec.project_dir
+
+    def _integrate(self, state: RunState, task_id: str) -> bool:
+        """Bring one verified task's worktree back. True when it landed."""
+        if self._pool is None or task_id not in self._pool.worktrees:
+            return True
+        result = self._pool.integrate(task_id)
+        state.emit(
+            "integrated", task=task_id, applied=result.applied,
+            paths=list(result.changed_paths), conflicts=list(result.conflicts),
+            reason=result.reason,
+        )
+        if result.applied:
+            self._pool.release(task_id)
+            return True
+        self._apply(
+            state, task_id, TaskState.BLOCKED,
+            f"its changes do not integrate: {result.reason}",
+        )
+        return False
 
     # --- dispatch --------------------------------------------------------
 
@@ -189,6 +260,7 @@ class Scheduler:
         pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
         briefs: dict[str, TaskBrief],
         baselines: dict[str, str | None],
+        trees: dict[str, str],
         started: float,
     ) -> bool:
         """Start every task that is ready and admissible. True if any started."""
@@ -207,6 +279,14 @@ class Scheduler:
             if built is None:
                 continue
             brief, agent_id, estimate = built
+            # Re-brief once the tree is known: workdir is part of the brief, and
+            # `_tree_for` needs the brief to know whether the task writes.
+            tree = self._tree_for(state, task, brief)
+            if tree != brief.workdir:
+                built = self._brief(state, task, workdir=tree)
+                if built is None:
+                    continue
+                brief, agent_id, estimate = built
 
             admission = state.ledger.admit(
                 estimate,
@@ -226,14 +306,18 @@ class Scheduler:
             state.start(task_id, agent_id=agent_id, model=brief.model, effort=brief.effort)
             state.emit("dispatched", task=task_id, model=brief.model, effort=brief.effort,
                        agent=agent_id, attempt=attempt_number)
+            trees[task_id] = tree
             if task_id not in baselines:
-                baselines[task_id] = (
-                    tree_hash(state.spec.project_dir) if brief.writes else None
-                )
+                baselines[task_id] = tree_hash(tree) if brief.writes else None
             future = pool.submit(
                 execute, brief, self.worker,
-                project_dir=state.spec.project_dir,
-                foreign_ownership=self._foreign_ownership(by_id, task_id),
+                project_dir=tree,
+                # Under isolation a task's tree holds only its own writes, so
+                # nothing needs excusing and the gate goes back to being strict.
+                foreign_ownership=(
+                    () if self._pool is not None
+                    else self._foreign_ownership(by_id, task_id)
+                ),
                 baseline_tree=baselines[task_id],
             )
             pending[future] = (task_id, "work")
@@ -312,7 +396,9 @@ class Scheduler:
             budget_remaining_usd=state.ledger.remaining_usd(),
         )
 
-    def _brief(self, state: RunState, task: Any) -> tuple[TaskBrief, str, float] | None:
+    def _brief(
+        self, state: RunState, task: Any, workdir: str | None = None
+    ) -> tuple[TaskBrief, str, float] | None:
         """Assemble the brief, or park the task when nobody can run it.
 
         Returns the brief, the agent id it was built for, and the routed cost
@@ -364,6 +450,7 @@ class Scheduler:
             ),
             writes=bool(getattr(task, "writes", True)),
             context=self._context_for(state, task),
+            workdir=workdir or state.spec.project_dir,
         ), agent.id, decision.estimated_cost_usd
 
     def _context_for(self, state: RunState, task: Any) -> tuple[str, ...]:
@@ -393,6 +480,7 @@ class Scheduler:
         pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
         briefs: dict[str, TaskBrief],
         verifying: dict[str, TaskResult],
+        trees: dict[str, str],
     ) -> bool:
         """Fold one finished attempt in and act on it. True when a replan is due."""
         try:
@@ -424,13 +512,16 @@ class Scheduler:
             work_brief = briefs.get(task_id)
             if work_brief is not None and self._verification_applies(work_brief):
                 verifying[task_id] = result
-                brief = verifier_brief(
-                    work_brief, result,
-                    model=self._verify_model()[0], effort=self._verify_model()[1],
+                verify_model, verify_effort = self._verify_model()
+                brief = replace(
+                    verifier_brief(work_brief, result,
+                                   model=verify_model, effort=verify_effort),
+                    workdir=trees.get(task_id, state.spec.project_dir),
                 )
                 state.emit("verifying", task=task_id, model=brief.model, effort=brief.effort)
                 pending[pool.submit(
-                    execute, brief, self.worker, project_dir=state.spec.project_dir
+                    execute, brief, self.worker,
+                    project_dir=trees.get(task_id, state.spec.project_dir),
                 )] = (task_id, "verify")
                 return False
 
@@ -444,6 +535,17 @@ class Scheduler:
             max_attempts=self.config.max_attempts,
             max_replans=self.config.max_replans,
         )
+        # A task that passed without a verifier still has to land. Under
+        # isolation its work is in its own worktree until it does, so this is
+        # the point where "the task succeeded" becomes true of the repository
+        # and not just of the worker.
+        if move.state is TaskState.SUCCEEDED and not self._integrate(state, task_id):
+            state.emit("collected", task=task_id, verdict=result.verdict.value,
+                       gates_accepted=outcome.accepted, refusals=list(outcome.refusals),
+                       action="blocked", reason="integration conflict",
+                       cost_usd=round(result.usage.cost_usd, 4))
+            self._persist(state)
+            return False
         self._apply(state, task_id, move.state, move.reason)
         state.emit(
             "collected",
@@ -529,7 +631,9 @@ class Scheduler:
         )
 
         if verification.verdict is Verdict.PASS:
-            self._apply(state, task_id, TaskState.SUCCEEDED, "verified against its criteria")
+            if self._integrate(state, task_id):
+                self._apply(state, task_id, TaskState.SUCCEEDED,
+                            "verified against its criteria")
             self._persist(state)
             return False
 

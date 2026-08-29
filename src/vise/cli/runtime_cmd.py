@@ -159,6 +159,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     run_p.add_argument("--permission-mode", default=None,
                        help="passed to the CLI; omitted by default so the run "
                             "does not widen permissions on its own")
+    run_p.add_argument("--isolate", action="store_true",
+                       help="give each writing task its own git worktree and "
+                            "integrate only after it verifies; needs a git repo "
+                            "with a commit, and degrades to the shared tree with "
+                            "a reason on the record if it cannot")
     run_p.add_argument("--no-verify", action="store_true",
                        help="skip the second-opinion pass (cheaper, and a worker "
                             "then grades its own homework)")
@@ -244,7 +249,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         artifacts=ArtifactStore(root, run_id),
         context=ContextResolver(project_dir=spec.project_dir),
         state_root=root,
-        config=SchedulerConfig(verify=not args.no_verify),
+        config=SchedulerConfig(verify=not args.no_verify, isolate=args.isolate),
     )
     print(f"\nrun {run_id} — state in {root / 'runs' / run_id}\n")
     state = scheduler.run(spec, tasks)

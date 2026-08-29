@@ -230,6 +230,7 @@ def test_a_missing_cli_is_a_configuration_error_not_a_failed_task():
 
 
 def _repo(tmp_path: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     for args in (
         ["git", "init", "-q"],
         ["git", "config", "user.email", "t@e.com"],
@@ -274,3 +275,46 @@ def test_the_adapter_satisfies_the_worker_protocol():
     from vise.runtime.worker import Worker
 
     assert isinstance(_worker(), Worker)
+
+
+# --- the brief says where the work happens -------------------------------
+
+
+def test_the_brief_workdir_wins_over_the_adapters(tmp_path):
+    """One adapter serves a whole run. Under worktree isolation each task runs
+    somewhere different, and a worker pinned to the main tree writes there while
+    its baseline was taken in a worktree — then is refused for a tree it never
+    touched."""
+    seen = {}
+
+    def runner(argv, **kw):
+        seen["cwd"] = kw.get("cwd")
+        return subprocess.CompletedProcess(argv, 0, _envelope(_block()), "")
+
+    worker = ClaudeCodeWorker(project_dir=tmp_path / "main", runner=runner)
+    worker.run(_brief(workdir=str(tmp_path / "worktree")))
+    assert seen["cwd"] == str(tmp_path / "worktree")
+
+
+def test_without_a_workdir_the_adapter_runs_where_it_was_configured(tmp_path):
+    seen = {}
+
+    def runner(argv, **kw):
+        seen["cwd"] = kw.get("cwd")
+        return subprocess.CompletedProcess(argv, 0, _envelope(_block()), "")
+
+    ClaudeCodeWorker(project_dir=tmp_path, runner=runner).run(_brief())
+    assert seen["cwd"] == str(tmp_path)
+
+
+def test_changed_paths_are_read_from_the_brief_workdir(tmp_path):
+    main = _repo(tmp_path / "main")
+    other = _repo(tmp_path / "other")
+
+    def runner(argv, **_):
+        (other / "in_worktree.py").write_text("x\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, _envelope(_block()), "")
+
+    worker = ClaudeCodeWorker(project_dir=main, runner=runner)
+    result = worker.run(_brief(workdir=str(other)))
+    assert result.changed_paths == ("in_worktree.py",)

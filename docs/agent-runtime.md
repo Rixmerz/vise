@@ -117,6 +117,7 @@ verdicts, and the phase gate reads them.
 | Context | what a worker is shown, and what it is not | `runtime/context.py` |
 | Verification | the second opinion that makes SUCCEEDED mean something | `runtime/verify.py` |
 | Adapter | running a brief as a Claude Code session | `runtime/adapters/claude_code.py` |
+| Isolation | one git worktree per task, and integrating it back | `runtime/isolation.py` |
 
 ## Testable without spending anything
 

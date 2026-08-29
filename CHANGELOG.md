@@ -90,6 +90,18 @@ you may already depend on, it says so under **Behaviour change**.
 - **Coverage floor raised 71 → 74 (CI 62 → 70).** Measured 75%. Every new
   runtime module is 89–100%.
 
+- **`--isolate`: one git worktree per task.** Each writing task runs in its own
+  worktree branched from HEAD, is verified there, and is integrated into the
+  main tree only once it has passed. Integration is a three-way apply; a
+  conflict blocks the task and names it rather than picking a side, and a
+  refused apply is backed out to exactly the paths it touched so the main tree
+  is never left half-patched. Off by default, and degrades to the shared tree
+  with the reason on the record where it cannot run.
+
+  This is what removes the attribution problem instead of bounding it. In one
+  shared tree a git diff cannot say whose file is whose, so the ownership gate
+  has to excuse paths a concurrent peer was entitled to write.
+
 ### Notes
 
 - **Four bugs found by writing the tests, each fixed with the test that caught
