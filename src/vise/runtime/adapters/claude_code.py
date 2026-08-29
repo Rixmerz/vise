@@ -394,7 +394,13 @@ def _tracked_paths(project_dir: str | Path) -> dict[str, str] | None:
         return None
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain"],
+            # -uall, not the default: plain --porcelain collapses an untracked
+            # directory to `src/`, so a task that creates the first file under
+            # a new directory reports `src/` as its changed path and the
+            # ownership gate refuses `src/auth/**` work for writing outside its
+            # claim. Found by an end-to-end run, not by a unit test — every
+            # unit test wrote into a directory that already existed.
+            ["git", "status", "--porcelain", "-uall"],
             cwd=str(project_dir), capture_output=True, text=True, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):

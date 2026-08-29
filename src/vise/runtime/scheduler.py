@@ -41,7 +41,7 @@ from vise.runtime.contracts import (
     TaskState,
     Verdict,
 )
-from vise.runtime.honesty import GateOutcome
+from vise.runtime.honesty import GateOutcome, tree_hash
 from vise.runtime.recovery import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_REPLANS,
@@ -135,6 +135,12 @@ class Scheduler:
             # behind.
             briefs: dict[str, TaskBrief] = {}
             verifying: dict[str, TaskResult] = {}
+            # The tree as it stood before this task's *first* attempt. Reused by
+            # every retry: a second attempt that legitimately reproduces the
+            # first one's file changes nothing since the first, and comparing
+            # against the attempt's own start would refuse it for doing what it
+            # was asked to do again.
+            baselines: dict[str, str | None] = {}
             while not state.is_done():
                 if self._cancelled(state):
                     break
@@ -142,7 +148,7 @@ class Scheduler:
                     break
 
                 dispatched = self._dispatch_ready(
-                    state, by_id, pool, pending, briefs, started
+                    state, by_id, pool, pending, briefs, baselines, started
                 )
 
                 if not pending:
@@ -182,6 +188,7 @@ class Scheduler:
         pool: ThreadPoolExecutor,
         pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
         briefs: dict[str, TaskBrief],
+        baselines: dict[str, str | None],
         started: float,
     ) -> bool:
         """Start every task that is ready and admissible. True if any started."""
@@ -219,8 +226,15 @@ class Scheduler:
             state.start(task_id, agent_id=agent_id, model=brief.model, effort=brief.effort)
             state.emit("dispatched", task=task_id, model=brief.model, effort=brief.effort,
                        agent=agent_id, attempt=attempt_number)
+            if task_id not in baselines:
+                baselines[task_id] = (
+                    tree_hash(state.spec.project_dir) if brief.writes else None
+                )
             future = pool.submit(
-                execute, brief, self.worker, project_dir=state.spec.project_dir
+                execute, brief, self.worker,
+                project_dir=state.spec.project_dir,
+                foreign_ownership=self._foreign_ownership(by_id, task_id),
+                baseline_tree=baselines[task_id],
             )
             pending[future] = (task_id, "work")
             briefs[task_id] = brief
@@ -239,6 +253,31 @@ class Scheduler:
             if all(dep in completed for dep in getattr(task, "dependencies", ())):
                 out.append(task_id)
         return out
+
+    def _foreign_ownership(self, by_id: dict[str, Any], task_id: str) -> tuple[str, ...]:
+        """What a peer could legitimately write while this task runs.
+
+        Every other writing task whose claim does not conflict with this one's —
+        not the ones marked RUNNING right now. An in-flight snapshot is taken at
+        dispatch, and two peers dispatched in the same pass each miss the other:
+        the first is started before the second exists to be seen. That is
+        exactly the case an end-to-end run hit, and it refused both writers for
+        each other's work.
+
+        Conflicting peers are deliberately excluded. Admission serialises them,
+        so their files appearing mid-run is not a peer being busy — it is
+        something genuinely wrong, and the gate should still say so.
+        """
+        task = by_id.get(task_id)
+        mine = getattr(task, "ownership", ()) or () if task is not None else ()
+        claims: list[str] = []
+        for other_id, other in by_id.items():
+            if other_id == task_id or not getattr(other, "writes", True):
+                continue
+            theirs = getattr(other, "ownership", ()) or ()
+            if theirs and not _own.conflicts(mine, theirs):
+                claims.extend(theirs)
+        return tuple(claims)
 
     def _ownership_conflict(
         self, state: RunState, by_id: dict[str, Any], task: Any

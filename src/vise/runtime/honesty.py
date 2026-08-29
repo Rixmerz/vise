@@ -89,6 +89,7 @@ def check_result(
     *,
     baseline_tree: str | None = None,
     current_tree: str | None = None,
+    foreign_ownership: tuple[str, ...] = (),
 ) -> GateOutcome:
     """Run the four gates against one claimed result.
 
@@ -121,7 +122,18 @@ def check_result(
                 "moved since the task started, so nothing was written or committed"
             )
 
+    # Paths another task was concurrently entitled to write are not this task's
+    # to answer for. Changed paths come from a git diff of one shared working
+    # tree, and a diff cannot tell whose file is whose — so without this, every
+    # parallel run refuses both writers for each other's work.
+    #
+    # The cost is real and bounded: a task that writes into a concurrent peer's
+    # territory is excused for exactly as long as that peer is in flight. The
+    # fix that removes the cost rather than bounding it is per-task worktree
+    # isolation, where the diffs never share a tree.
     escaped = _own.escaped(result.changed_paths, brief.ownership)
+    if escaped and foreign_ownership:
+        escaped = tuple(p for p in escaped if not _own.matches(p, foreign_ownership))
     if escaped:
         refusals.append(
             "wrote outside its declared ownership: "

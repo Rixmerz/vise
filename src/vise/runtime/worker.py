@@ -65,20 +65,36 @@ def execute(
     worker: Worker,
     *,
     project_dir: str | Path | None = None,
+    foreign_ownership: tuple[str, ...] = (),
+    baseline_tree: str | None = None,
 ) -> tuple[TaskResult, GateOutcome]:
     """Run one brief and put the result through the honesty gates.
 
-    The baseline tree hash is taken *here*, immediately before the worker starts,
-    rather than by the caller. A baseline captured earlier would include whatever
-    happened between then and now — another task's writes, a rebase, the user
-    editing a file — and rule 3 would be comparing the wrong two states.
+    With no ``baseline_tree``, the baseline is taken here, immediately before the
+    worker starts. The scheduler supplies one instead, captured before the
+    task's first attempt, so that a retry is judged against where the task
+    began rather than against what its own previous attempt already wrote.
+
+    ``foreign_ownership`` is what other tasks were entitled to write while this
+    one ran. In a shared working tree a git diff cannot attribute a file to a
+    writer, so without it two parallel tasks refuse each other for their own
+    work.
 
     Returns both the (possibly downgraded) result and the gate outcome. Callers
     that only want the verdict should read the result; callers reporting to a
     human want the refusals, which say what was actually wrong.
     """
-    baseline = tree_hash(project_dir) if brief.writes else None
+    # A caller-supplied baseline is the task's, not the attempt's: a retry that
+    # legitimately reproduces the previous attempt's file changes nothing since
+    # that attempt, and would be refused for repeating what it was asked to do.
+    baseline = baseline_tree
+    if baseline is None and brief.writes:
+        baseline = tree_hash(project_dir)
     result = worker.run(brief)
     current = tree_hash(project_dir) if brief.writes else None
-    outcome = check_result(brief, result, baseline_tree=baseline, current_tree=current)
+    outcome = check_result(
+        brief, result,
+        baseline_tree=baseline, current_tree=current,
+        foreign_ownership=foreign_ownership,
+    )
     return (outcome.result or result), outcome
