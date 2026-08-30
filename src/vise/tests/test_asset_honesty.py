@@ -30,6 +30,7 @@ DEAD_TOOLS = ("execute_mcp_tool", "next_task_record", "next_task_get", "proxy_to
 
 # vise's real MCP surface — the only thing INTERNAL_BINDINGS may point at.
 VISE_TOOLS = frozenset({
+    "agent_list",
     "capability_audit", "capability_set",
     "experience_derive_checklist", "experience_list", "experience_query",
     "experience_record", "experience_stats",
@@ -45,7 +46,10 @@ VISE_TOOLS = frozenset({
     "graph_task_complete", "graph_timeline", "graph_traverse", "graph_validate",
     "graph_visualize",
     "recipe_describe", "recipe_list", "recipe_run",
+    "run_budget", "run_cancel", "run_explain", "run_list", "run_plan",
+    "run_status",
     "snapshot_create", "snapshot_diff", "snapshot_list", "snapshot_restore",
+    "task_list",
     "vise_version",
 })
 

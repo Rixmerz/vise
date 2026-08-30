@@ -6,6 +6,170 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Added
+
+- **An agent execution plane — specified, contracted, and planning; not yet
+  dispatching.** vise decided *what process* a change follows and never *who
+  does the work*: one session walked every phase serially, at one effort, with
+  one context that grew until it was compacted. `src/vise/runtime/` is the
+  plane that answers the second question, and `docs/agent-runtime.md`,
+  `docs/scheduler.md`, `docs/model-routing.md` and `docs/worker-contract.md`
+  specify the whole of it, including the parts this release does not implement.
+
+  **There is no second workflow engine, deliberately.** `Node.node_type ==
+  "dag"` already held tasks with dependencies, and `compute_ready_tasks`
+  already computed which were unblocked. A parallel task graph with its own ids
+  and its own edges would be a second engine with the same job, and the two
+  would disagree within a release. So the runtime metadata lands as optional
+  fields on the `Task` that exists — `role`, `ownership`, `criticality`,
+  `complexity`, `writes`, `model`, `effort`, `acceptance`, `max_cost`,
+  `max_turns`, `timeout_s` — each defaulting to today's behaviour. The nine
+  bundled workflows declare none of them and parse byte-identically.
+
+  Eight modules, all offline and deterministic: `contracts` (the data),
+  `registry` (reads the 20 shipped charters rather than restating them),
+  `routing` (model and effort, with the argument attached), `ownership` (which
+  tasks may run together), `budget` (when the run stops), `artifacts` (what one
+  worker hands the next), `honesty` (the four gates a claimed pass must
+  survive), `planner` (waves, admission, cost).
+
+- **`vise runtime plan` and `vise runtime agents`.** Read-only, offline. `plan`
+  derives a DAG node's waves, resolves each task to an agent, routes a model
+  with its reasons, and prices the run before anything starts — exiting non-zero
+  when the plan has problems, so an unroutable task cannot be scripted past.
+  `agents` lists what the registry can route to and names the roles that are
+  ambiguous.
+
+- **Four honesty gates, three of them ported from mini-vise.** A worker's
+  `pass` is a claim, not a result. A testing role must quote a command and its
+  real output; an implementing role must quote the repo's existing checks; a
+  pass claiming edits must move `git status --porcelain` plus `HEAD`; and a
+  pass may not have written outside its declared ownership. These fail closed —
+  the inverse of vise's hook contract — with one precise exception: an
+  *unknowable* tree hash produces no finding, because a gate that cannot compute
+  its input and reports a violation anyway commits the error it exists to catch.
+
+  The tree-hash rule is the only mechanical honesty check in either codebase.
+  Every other one asks another model, which means every other one can be talked
+  out of its finding.
+
+- **The scheduler, and everything that makes its verdicts mean something.**
+  `runtime/scheduler.py` walks a DAG node's tasks on a thread pool: dispatch
+  what is ready and admissible, collect, gate, and decide retry / escalate /
+  replan / stop. Around it: `state` (the inert record, persisted per run),
+  `recovery` (the pure decision function), `context` (what a worker is shown —
+  and, more importantly, what it is not), `verify` (the second opinion),
+  `adapters/claude_code` (the only module that can spend money).
+
+  `SUCCEEDED` now requires a second agent. Every task declaring acceptance
+  criteria is checked by `vise:verifier`, given the criteria, the diff and the
+  evidence — and deliberately not the implementer's prompt or summary, which are
+  the two artefacts a wrong-but-confident worker produces most convincingly. A
+  verifier that says *inconclusive* blocks the task rather than retrying it:
+  re-running the implementer cannot fix a verifier that would not run.
+
+- **`vise runtime run|status|explain|budget|cancel`**, and eight MCP tools
+  (`agent_list`, `run_plan`, `run_list`, `run_status`, `task_list`,
+  `run_explain`, `run_budget`, `run_cancel`). `run` prints the plan and its cost
+  and stops there unless `--yes` is given. `cancel` writes a sentinel the loop
+  polls, because the person cancelling is usually at another terminal.
+
+  **There is no `run_start` MCP tool, deliberately.** This server runs inside a
+  Claude Code session; a dispatch tool here would have the session spawning
+  sessions through the one component that cannot call another server's tools.
+  Same boundary `recipe_run` holds.
+
+- **Stress, real concurrency, and failure injection.** Forty-task pseudo-random
+  DAGs, a third of attempts failing, workers that always raise. The concurrency
+  test detects genuine temporal overlap rather than dispatch order — and asserts
+  the opposite too, since a scheduler that never overlaps anything passes every
+  ownership test and is worth nothing.
+
+- **Coverage floor raised 71 → 74 (CI 62 → 70).** Measured 75%. Every new
+  runtime module is 89–100%.
+
+- **`--isolate`: one git worktree per task.** Each writing task runs in its own
+  worktree branched from HEAD, is verified there, and is integrated into the
+  main tree only once it has passed. Integration is a three-way apply; a
+  conflict blocks the task and names it rather than picking a side, and a
+  refused apply is backed out to exactly the paths it touched so the main tree
+  is never left half-patched. Off by default, and degrades to the shared tree
+  with the reason on the record where it cannot run.
+
+  This is what removes the attribution problem instead of bounding it. In one
+  shared tree a git diff cannot say whose file is whose, so the ownership gate
+  has to excuse paths a concurrent peer was entitled to write.
+
+- **Three passes above the worker.** A **debugger** classifies a failure that
+  named no kind, but only after the worker's own answer and a text heuristic
+  have both declined — most failures name themselves and a model call to confirm
+  is waste. An opt-in **adversarial review** runs once over the whole node after
+  everything succeeds and parks the run if it objects, because deciding what to
+  do about a shipping objection is a person's call. And under isolation a failed
+  attempt's worktree is **discarded**, so the next attempt starts from HEAD
+  rather than from its own failed output.
+
+  Reassign is deliberately absent, and the reason is in `docs/scheduler.md`: the
+  registry resolves a role to exactly one agent and reports ambiguity rather
+  than breaking it alphabetically, so "try a different agent" would mean picking
+  the one it already refused to pick by coincidence.
+
+- **`requires_human: true` on a task** parks the run before it starts, checked
+  before the budget — the point of the flag is that the work should not begin,
+  and finding out only because the money ran out would be an accident.
+
+- **The verifier reports no confidence number, deliberately.** A model's stated
+  confidence is not evidence about that model's output, and a runtime that
+  routes on it has made itself a consumer of exactly the signal it exists to
+  check. `unmet` replaces it: which criteria were not met, named individually,
+  so a reader can disagree with the claim rather than with a decimal.
+
+### Fixed
+
+- **The model policy is a table of defaults per kind of work, and the charter is
+  a default rather than a floor.** Both were wrong in the first implementation
+  and the two errors compounded.
+
+  Each role mapped to a ladder *index*, so any default that is not a rung —
+  documentation at `haiku/medium` — was inexpressible and got silently rewritten
+  to the nearest rung. And an agent charter's `model` was treated as a floor the
+  policy could not go below, so `docs-writer` declaring `sonnet` overruled
+  documentation's `haiku`. Between them, the entire cheapest tier was
+  unreachable through any bundled agent — a symptom this changelog previously
+  reported as a property of the charters, when it was a bug in the router.
+
+  Precedence is now: a model the task pins, then the policy for the kind of
+  work, then the charter's own model for a role the policy does not cover. The
+  table is asserted row by row, and a test pins that a default which is not a
+  ladder rung survives routing intact.
+
+### Notes
+
+- **Four bugs found by writing the tests, each fixed with the test that caught
+  it.** Admission counted settled spend only, so four opus tasks could start
+  against a budget for one — nothing was billed yet, so everything fit; the
+  ledger now reserves an estimate while a task is in flight. `at_top_rung` read
+  the route computed *after* the failure was recorded, which is the escalated
+  tier, so a task was replanned one attempt early while it still had opus to
+  try. The stall pass overwrote a specific block reason with a generic one. And
+  a pinned `haiku` was priced as `sonnet`, because rung 0 is falsy and
+  `tier_of(...) or fallback` fell through.
+
+- **Ambiguity is reported, not broken alphabetically.** Twelve bundled agents
+  take the `backend` role and differ only by language. A task that names none is
+  reported unroutable rather than sent to whichever charter sorts first — which
+  would have put a Python task on the C++ charter and made the plan read as
+  though someone chose that.
+
+- **Model routing defaults are measured, not guessed.** The orchestrator-effort
+  and implementer-model sweeps behind the table in `docs/model-routing.md` were
+  run in mini-vise against test oracles written independently of the pipeline.
+  The short version: implementers stay on sonnet, because the one gap opus
+  closed was a reviewer-charter problem that costs nothing to fix directly and
+  2× per run to fix by paying for a bigger implementer.
+
 ## [0.1.0a20] — 2026-08-22
 
 ### Added

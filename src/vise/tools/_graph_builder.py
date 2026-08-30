@@ -132,6 +132,28 @@ def _generate_graph_yaml(builder: dict) -> str:
                     lines.append("        prompt: |")
                     for pl in task["prompt"].split("\n"):
                         lines.append(f"          {pl}")
+                # Agent-runtime fields. Each is emitted only when set to a
+                # non-default, so a graph authored without them round-trips to
+                # byte-identical YAML — the builder must not start writing
+                # runtime metadata into workflows that never asked for it.
+                for key in ("role", "model", "effort"):
+                    if task.get(key):
+                        lines.append(f'        {key}: "{task[key]}"')
+                for key, default in (("criticality", "routine"), ("complexity", "medium")):
+                    if task.get(key) and task[key] != default:
+                        lines.append(f'        {key}: "{task[key]}"')
+                if task.get("writes") is False:
+                    lines.append("        writes: false")
+                if task.get("requires_human"):
+                    lines.append("        requires_human: true")
+                for key in ("ownership", "acceptance"):
+                    if task.get(key):
+                        lines.append(f"        {key}:")
+                        for item in task[key]:
+                            lines.append(f'          - "{item}"')
+                for key in ("max_cost", "max_turns", "timeout_s"):
+                    if task.get(key):
+                        lines.append(f"        {key}: {task[key]}")
 
         lines.append("")
 
@@ -238,7 +260,13 @@ def register_graph_builder_tools(mcp):
             node_type: Node execution type — "wave" (default), "dag", or "milestone"
             tasks: List of task dicts for dag nodes. Each dict: {"id": str, "name"?: str,
                 "prompt"?: str, "dependencies"?: list[str], "tools_blocked"?: list[str],
-                "mcps_enabled"?: list[str]}
+                "mcps_enabled"?: list[str]}, plus the optional agent-runtime keys
+                (docs/agent-runtime.md): "role", "ownership": list[str],
+                "criticality": routine|elevated|critical, "complexity":
+                trivial|low|medium|high, "writes": bool, "model", "effort",
+                "acceptance": list[str], "max_cost", "max_turns", "timeout_s",
+                "requires_human": bool.
+                Omit them all and the node behaves exactly as before.
             validators: Optional list of validator dicts declared on this node.
                 Each dict: {"type": str, "weight"?: float, ...}.
                 Used with ``condition_type: validators_green`` edges —

@@ -1,7 +1,8 @@
 """Tool registration for the vise MCP server.
 
 Registers every tool family vise ships: snapshots, experience memory,
-workflow graph (+ enforcer control), recipes/capabilities, and goals.
+workflow graph (+ enforcer control), recipes/capabilities, goals, and the
+agent runtime.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ def register_all(mcp: "FastMCP") -> None:
     from vise.tools.graph import register_graph
     from vise.tools.graph_enforcer_control import register_graph_enforcer_control_tools
     from vise.tools.recipes import register_recipes
+    from vise.tools.runtime import register_runtime
     from vise.tools.snapshot import register_snapshot
 
     register_snapshot(mcp)
@@ -26,3 +28,4 @@ def register_all(mcp: "FastMCP") -> None:
     register_graph_enforcer_control_tools(mcp)
     register_recipes(mcp)
     register_goal(mcp)
+    register_runtime(mcp)

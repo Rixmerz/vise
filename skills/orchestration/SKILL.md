@@ -117,6 +117,7 @@ agent carries nothing. Pass its name as `subagent_type`.
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |
 | Unit / integration tests for landed code | `vise:tester` |
 | README, changelog, API docs | `vise:docs-writer` |
+| Does finished work meet its acceptance criteria | `vise:verifier` (read-only) |
 | Adversarial review before commit/merge | `vise:reviewer` (read-only) |
 | Security surface (auth, input, secrets) | `vise:security-auditor` (read-only) |
 
