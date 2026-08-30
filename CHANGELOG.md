@@ -180,9 +180,9 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Fixed — found by installing it and running a real build
 
-Three bugs the test suite could not have found, because each needed a real
-worker, a real repo, and a person watching. A six-task build of a small Python
-CLI in a scratch repo surfaced all three in one run.
+Four bugs the test suite could not have found, because each needed a real
+worker, a real repo, and a person watching. Building a small Python CLI from a
+six-task DAG in a scratch repo surfaced all four.
 
 - **Notes filed as a `verification` artifact shadowed the verdict, and stalled
   the run.** `parse_verification` preferred an artifact of kind `verification`
@@ -204,6 +204,11 @@ CLI in a scratch repo surfaced all three in one run.
   just started a run looks at it — `vise runtime status` answered "no such run",
   and a process killed in that window left nothing behind, against the promise
   in `state.py`'s own docstring that a dead run says which tasks were in flight.
+
+- **`vise runtime budget` printed its "per task:" heading over nothing.**
+  `RunState.load` restored the run's total spend and its worker count but not
+  `by_task`. The command reads only persisted state, so the one question it
+  exists to answer — what did each task cost — had no answer for any run.
 
 - **The capability tokeniser split on a hand-written list of separators.** A
   task named `Money value type (python)` tokenised to `(python)`, matched no

@@ -342,4 +342,17 @@ class RunState:
             wall_time_s=float(spent.get("wall_time_s", 0.0)),
         )
         state.ledger.workers_started = int((data.get("budget") or {}).get("workers_started", 0))
+        # Per-task spend, without which `vise runtime budget` prints its
+        # "per task:" heading over nothing. It is the whole question that
+        # command exists to answer, and it reads only persisted state — so
+        # dropping this on the way back in made the command answer it for no
+        # run at all.
+        for task_id, usage in ((data.get("budget") or {}).get("by_task") or {}).items():
+            if isinstance(usage, dict):
+                state.ledger.by_task[str(task_id)] = Usage(
+                    tokens_in=int(usage.get("tokens_in", 0)),
+                    tokens_out=int(usage.get("tokens_out", 0)),
+                    cost_usd=float(usage.get("cost_usd", 0.0)),
+                    wall_time_s=float(usage.get("wall_time_s", 0.0)),
+                )
         return state

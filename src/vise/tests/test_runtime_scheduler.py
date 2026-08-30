@@ -382,6 +382,24 @@ def test_the_state_file_exists_while_the_first_task_is_still_running(tmp_path: P
     assert seen["model"] == "sonnet"
 
 
+def test_per_task_spend_survives_a_reload(tmp_path: Path):
+    """Found by running `vise runtime budget` on a real run.
+
+    It printed its "per task:" heading over nothing. The command reads only
+    persisted state, so a by_task that did not survive the round trip made it
+    unable to answer the one question it exists for, for every run.
+    """
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"])]
+    state = _run(tasks, state_root=tmp_path)
+    assert state.ledger.by_task, "the live ledger should attribute spend per task"
+
+    reloaded = RunState.load(tmp_path, state.spec.run_id)
+    assert reloaded is not None
+    assert set(reloaded.ledger.by_task) == set(state.ledger.by_task)
+    assert reloaded.ledger.report()["by_task"]["a"]["cost_usd"] == \
+        state.ledger.by_task["a"].cost_usd
+
+
 def test_loading_an_unknown_run_returns_none(tmp_path: Path):
     assert RunState.load(tmp_path, "never-ran") is None
 
