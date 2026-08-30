@@ -178,6 +178,28 @@ you may already depend on, it says so under **Behaviour change**.
   and leaves no trace is not a gate, it is a default — and an overridden run
   records `spec_gate_overridden` rather than reporting itself as passed.
 
+### Fixed — `./install.sh` never actually updated an installed plugin
+
+Found while re-testing: the cached plugin under `~/.claude/plugins/cache/` was
+still the copy from the first install, hours and six commits earlier. Every
+session was reading that — the skills, the agents, the `lspServers` map — while
+`vise doctor`, which runs from the venv's editable install, reported the working
+tree. The two disagreeing is exactly how a fixed bug looks unfixed.
+
+This is the second time the promise broke, and both times the same way. The
+first fix replaced a bare "already installed" that did no work with a
+`claude plugin update` call. But `update` compares the **version** in
+`plugin.json` and short-circuits when it matches — `already at the latest
+version (0.1.0a20)` — and a dev checkout pulls a hundred changes between version
+bumps. The idempotence promise held while the update path silently did nothing,
+one layer down from where it did nothing before.
+
+The installed branch now uninstalls, clears the cache directory, and installs
+again, which is the only refresh a local marketplace at an unchanged version
+responds to. Safe here because vise declares no `userConfig`, so an uninstall
+drops no stored option values. Verified by staling the cache on purpose and
+watching a plain `./install.sh` heal it.
+
 ### Added — guidance on *when* to use a language server, where the decision happens
 
 Fixing the servers made them work. It did not make anything use them, which was

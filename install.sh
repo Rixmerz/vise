@@ -83,14 +83,27 @@ else
 fi
 
 if claude plugin list 2>/dev/null | grep -q "vise@${MARKETPLACE}"; then
-  # Already installed: re-point it at what the marketplace now says. Without
-  # this, `git pull && ./install.sh` printed "already installed" and updated
-  # nothing — the idempotence promise held while the update path silently
-  # did no work.
-  claude plugin update "vise@${MARKETPLACE}" || true
-  echo "ok: vise plugin updated — restart Claude Code to apply."
+  # Already installed. Reinstall rather than update, because `claude plugin
+  # update` compares the *version* in plugin.json and short-circuits when it
+  # matches — and a dev checkout pulls a hundred changes between version bumps.
+  #
+  # This is the second time this promise broke. The first fix added the
+  # `update` call to replace a bare "already installed" that did no work; the
+  # update then did no work either, for the same reason one layer down, and the
+  # installed copy under ~/.claude/plugins/cache silently stayed at whatever
+  # commit it was first installed from. Anything that reads the plugin — every
+  # skill, every agent, the lspServers map — was reading that stale copy while
+  # `vise doctor`, which runs from the venv's editable install, reported the
+  # working tree. The two disagreeing is exactly how a fixed bug looks unfixed.
+  #
+  # Uninstall-then-install is safe here: vise declares no `userConfig`, so
+  # there are no stored option values for the uninstall to drop.
+  claude plugin uninstall "vise@${MARKETPLACE}" >/dev/null 2>&1 || true
+  rm -rf "${HOME}/.claude/plugins/cache/${MARKETPLACE}/vise"
+  claude plugin install "vise@${MARKETPLACE}" --yes
+  echo "ok: vise plugin reinstalled from this checkout — restart Claude Code to apply."
 else
-  claude plugin install "vise@${MARKETPLACE}"
+  claude plugin install "vise@${MARKETPLACE}" --yes
 fi
 
 # 4. LSP binaries: vise declares language servers for 12 ecosystems in
