@@ -16,9 +16,7 @@
         ".cc": "cpp",
         ".cxx": "cpp",
         ".hpp": "cpp",
-        ".hxx": "cpp",
-        ".C": "cpp",
-        ".H": "cpp"
+        ".hxx": "cpp"
       }
     },
     "csharp-ls": {
@@ -37,8 +35,7 @@
       "command": "jdtls",
       "extensionToLanguage": {
         ".java": "java"
-      },
-      "startupTimeout": 120000
+      }
     },
     "kotlin-lsp": {
       "command": "kotlin-lsp",
@@ -48,8 +45,7 @@
       "extensionToLanguage": {
         ".kt": "kotlin",
         ".kts": "kotlin"
-      },
-      "startupTimeout": 120000
+      }
     },
     "lua": {
       "command": "lua-language-server",

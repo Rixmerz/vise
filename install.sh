@@ -94,38 +94,25 @@ else
 fi
 
 # 4. LSP binaries: vise declares language servers for 12 ecosystems in
-#    plugin.json, but does NOT ship the binaries. Each server starts lazily
-#    (only when a file of its type is opened) and is a no-op if its command is
-#    absent (strict:false). Report which are present and how to get the rest.
+#    plugin.json but does NOT ship the binaries. Each starts lazily, only when
+#    a file of its type is opened.
+#
+#    Report through `vise doctor` rather than re-deriving the list here. The
+#    hint table used to be duplicated in this script, which meant two places
+#    to keep in step with plugin.json — and this copy only ran `command -v`,
+#    so it printed a green tick for `rust-analyzer` when rustup had installed
+#    a shim that exits with "Unknown binary" the moment anything runs it.
+#    `vise doctor` starts each server the way Claude Code does and reports
+#    what actually happened.
 echo
-echo "LSP language servers (declared by vise, installed separately):"
-_lsp_hints=(
-  "rust-analyzer:rustup component add rust-analyzer"
-  "gopls:go install golang.org/x/tools/gopls@latest"
-  "pyright-langserver:npm i -g pyright"
-  "typescript-language-server:npm i -g typescript typescript-language-server"
-  "clangd:brew install llvm  # or apt install clangd"
-  "intelephense:npm i -g intelephense"
-  "ruby-lsp:gem install ruby-lsp"
-  "lua-language-server:brew install lua-language-server"
-  "jdtls:brew install jdtls"
-  "kotlin-lsp:see github.com/Kotlin/kotlin-lsp"
-  "sourcekit-lsp:ships with the Swift toolchain (swift.org)"
-  "csharp-ls:dotnet tool install --global csharp-ls"
-)
-_missing=0
-for entry in "${_lsp_hints[@]}"; do
-  cmd="${entry%%:*}"; hint="${entry#*:}"
-  if command -v "$cmd" >/dev/null 2>&1; then
-    printf '  \033[32m✓\033[0m %s\n' "$cmd"
-  else
-    printf '  \033[33m·\033[0m %-28s missing — %s\n' "$cmd" "$hint"
-    _missing=$((_missing + 1))
-  fi
-done
-if [ "$_missing" -gt 0 ]; then
-  echo "  ($_missing not installed — that's fine; each stays dormant until you open that language.)"
+if [ -x "${VENV_DIR}/bin/vise" ]; then
+  "${VENV_DIR}/bin/vise" doctor 2>/dev/null | sed -n '/LSP servers/,/^$/p'
+elif command -v vise >/dev/null 2>&1; then
+  vise doctor 2>/dev/null | sed -n '/LSP servers/,/^$/p'
+else
+  echo "LSP servers: run \`vise doctor\` to see which are installed."
 fi
+echo "  (a missing server stays dormant until you open that language.)"
 
 echo
 echo "vise installed. Restart Claude Code (or start a new session) to load it."

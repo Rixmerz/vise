@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,77 @@ def _load_manifest() -> dict[str, Any] | None:
         return None
 
 
+#: Fields Claude Code's plugin schema accepts for an LSP server. Anything else
+#: is refused, and three of these are refused at runtime with "not yet
+#: implemented" even though the schema takes them — see
+#: ``test_plugin_lsp_manifest.py``, which pins the list.
+_LSP_UNIMPLEMENTED_FIELDS = ("startupTimeout", "shutdownTimeout", "restartOnCrash")
+
+#: How long a healthy server has to prove it is one by staying alive.
+_PROBE_SETTLE_S = 1.5
+
+
+def _probe(binary: str, args: list[str]) -> tuple[bool, str]:
+    """Whether a language server on PATH can actually be started.
+
+    ``shutil.which`` answers "a file with that name exists on PATH", which is a
+    different question. ``rustup`` installs a ``rust-analyzer`` shim that exits
+    with *"error: Unknown binary 'rust-analyzer' in official toolchain"* until
+    the component is added: present, found, and dead. Reporting that as ``[OK]``
+    is the assert-instead-of-verify mistake vise's own gates exist to prevent,
+    and it is how a declared server ends up unusable with the doctor saying it
+    is fine.
+
+    The probe is to start it **exactly as Claude Code will** — the declared
+    command with the declared args — and see whether it is still alive a moment
+    later. A language server speaking stdio blocks waiting for a request; one
+    that cannot run exits at once, and its own output says why.
+
+    ``--version`` was the obvious probe and is the wrong one:
+    ``pyright-langserver`` does not implement it and exits complaining that no
+    transport was selected, so a perfectly healthy server reports as suspect.
+    A check that cries wolf on a working install teaches people to ignore it,
+    which is the same failure as a gate that goes red for environment reasons.
+    """
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - argv comes from the manifest
+            [binary, *args],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, ValueError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    try:
+        # `wait`, not `communicate`: communicate closes stdin, the server reads
+        # EOF and exits cleanly, and the probe reports a healthy pyright as
+        # dead. Still running after the settle window is the pass — it is
+        # waiting for an LSP request, which is the whole job.
+        proc.wait(timeout=_PROBE_SETTLE_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        _close(proc)
+        return True, "started and waited for input"
+
+    # It exited on its own. The pipes cannot block now, and what it printed on
+    # the way out is the only useful thing to show a person.
+    out = proc.stdout.read() if proc.stdout else ""
+    err = proc.stderr.read() if proc.stderr else ""
+    _close(proc)
+    detail = (err or out).strip().splitlines()
+    return False, detail[0] if detail else f"exited {proc.returncode} with no output"
+
+
+def _close(proc: subprocess.Popen) -> None:
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:  # pragma: no cover - closing a dead pipe
+                pass
+
+
 def _cmd_doctor() -> int:
     manifest = _load_manifest()
     lines: list[str] = []
@@ -60,17 +132,44 @@ def _cmd_doctor() -> int:
         servers: dict[str, Any] = manifest.get("lspServers", {})
         declared = len(servers)
         installed = 0
+        unusable: list[str] = []
         for name, cfg in sorted(servers.items()):
             binary = cfg.get("command", name)
             found = shutil.which(binary)
             exts = " ".join(sorted(cfg.get("extensionToLanguage", {}).keys()))
-            if found:
+            rejected = [f for f in _LSP_UNIMPLEMENTED_FIELDS if f in cfg]
+            if rejected:
+                # Claude Code throws on these before the server is registered,
+                # so it can never start however well the binary is installed.
+                unusable.append(name)
+                lines.append(
+                    f"  {name:<15} [BROKEN]  {exts}  — plugin.json sets "
+                    f"{', '.join(rejected)}, which Claude Code refuses "
+                    f"(\"not yet implemented\"); remove the field"
+                )
+                continue
+            if not found:
+                hint = _INSTALL_HINTS.get(name, f"install `{binary}` and put it on PATH")
+                lines.append(f"  {name:<15} [MISSING] {exts}  — install: {hint}")
+                continue
+            args = list(cfg.get("args") or [])
+            ok, evidence = _probe(binary, args)
+            invocation = " ".join([binary, *args])
+            if ok:
                 installed += 1
                 lines.append(f"  {name:<15} [OK]      {exts}")
             else:
-                hint = _INSTALL_HINTS.get(name, f"install `{binary}` and put it on PATH")
-                lines.append(f"  {name:<15} [MISSING] {exts}  — install: {hint}")
-        lines.append(f"declared: {declared} / installed: {installed}")
+                unusable.append(name)
+                lines.append(
+                    f"  {name:<15} [ON PATH, UNVERIFIED]  {exts}\n"
+                    f"{'':<19}`{invocation}` did not start: {evidence[:160]}"
+                )
+        lines.append(f"declared: {declared} / verified: {installed}")
+        if unusable:
+            lines.append(
+                f"  {len(unusable)} declared but not usable as configured: "
+                f"{', '.join(unusable)}"
+            )
 
         # A Deno workspace under typescript-language-server fails EVERY LSP
         # call — that server hard-requires a `typescript` package in

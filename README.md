@@ -396,8 +396,18 @@ speaking LSP at all.
 | `sourcekit-lsp` | `.swift` | bundled with the Swift toolchain |
 | `typescript` | `.ts .tsx .js .jsx .mts .cts .mjs .cjs` | `npm install -g typescript-language-server typescript` |
 
-Run `vise doctor` to see which of these actually resolve on `PATH` on your
-machine, plus the status of vise's own `ruff`/`mypy` diagnostics shell-out
+Three fields the schema accepts are refused at load — `startupTimeout`,
+`shutdownTimeout` and `restartOnCrash` each throw *"is not yet implemented.
+Remove this field from the configuration."* before the server is registered, so
+declaring one makes that server unstartable however well its binary is
+installed. `test_plugin_lsp_manifest.py` pins that none of them appears here,
+along with the rules the schema enforces silently: extension keys are
+lowercased before use, so an uppercase key is a hidden duplicate rather than a
+distinct mapping, and two servers claiming one extension makes resolution
+undefined.
+
+Run `vise doctor` to see which of these actually **work** on your machine, plus
+the status of vise's own `ruff`/`mypy` diagnostics shell-out
 and any pending XDG state migration.
 
 ### Deno projects — opt-in, and why it isn't the default
@@ -423,10 +433,10 @@ plugin → tool → server → handshake path is sound).
 `.ts .tsx .js .jsx .mts` — every one of which `typescript` already claims.
 The manifest schema (read out of Claude Code's own LSP Zod schema:
 `command`, `args`, `extensionToLanguage`, `transport`, `env`,
-`initializationOptions`, `settings`, `workspaceFolder`, `startupTimeout`,
-plus `lspServers` accepting a record, a `.lsp.json` path, or an array of
-either) has **no priority field, no workspace-root marker, and no
-project-level override** — `lspServers` is plugin-scoped only. So which
+`initializationOptions`, `settings`, `workspaceFolder`, `maxRestarts`, plus
+`lspServers` accepting a record, a `.lsp.json` path, or an array of either)
+has **no priority field, no workspace-root marker, and no project-level
+override** — `lspServers` is plugin-scoped only. So which
 server wins an extension both claim is **undetermined**, and shipping the
 collision would make `.ts` behavior a coin flip for every user, including
 Node users for whom it works today. A deterministic opt-in beats a

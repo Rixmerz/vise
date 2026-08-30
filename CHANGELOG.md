@@ -178,6 +178,56 @@ you may already depend on, it says so under **Behaviour change**.
   and leaves no trace is not a gate, it is a default — and an overridden run
   records `spec_gate_overridden` rather than reporting itself as passed.
 
+### Fixed — the LSP servers were declared, not usable
+
+Reported as "the LSPs we added can't actually be used". They could not, and
+`vise doctor` said they were fine. Four defects, each checked against Claude
+Code's own plugin loader rather than against belief about it.
+
+- **`jdtls` and `kotlin-lsp` were dead on arrival.** Both declared
+  `startupTimeout: 120000`. The loader answers that with
+
+      LSP server 'jdtls': startupTimeout is not yet implemented.
+      Remove this field from the configuration.
+
+  and it throws *before* the server is registered, so neither could ever start
+  however well its binary was installed. Two of the twelve were unusable by
+  construction. The same holds for `shutdownTimeout` and `restartOnCrash`: the
+  schema accepts all three and the loader refuses all three.
+
+- **`vise doctor` reported presence as health.** Its check was `shutil.which`,
+  which answers "a file with that name is on PATH" — a different question. On a
+  machine where `rustup` has installed a `rust-analyzer` shim without the
+  component, that file exists and exits with *"Unknown binary 'rust-analyzer' in
+  official toolchain"* the moment anything runs it. Doctor printed `[OK]`. It
+  now starts each server the way Claude Code does — the declared command with
+  the declared args — and passes it only if it is still alive a moment later,
+  which is a language server waiting for a request. A server that exits is
+  reported `[ON PATH, UNVERIFIED]` with its own first line of output, never as
+  broken: a check that cries wolf on a working install teaches people to ignore
+  it.
+
+  `--version` was the obvious probe and is the wrong one — `pyright-langserver`
+  does not implement it and exits complaining that no transport was selected,
+  so a healthy server reported as suspect.
+
+- **`clangd` mapped `.C` and `.H`, which cannot mean anything.** Claude Code
+  lowercases every `extensionToLanguage` key before building its map, so those
+  collapsed onto `.c` and `.h` — already mapped to `c` in the same entry. The
+  intent (treat `.C`/`.H` as C++) was unreachable and the collision invisible.
+
+- **`install.sh` documented a `strict: false` that does not exist.** The
+  server schema is a *strict* object with no such key, so the reassurance users
+  were given for ten missing servers was not backed by anything in the
+  manifest. The installer also kept its own twelve-entry copy of the hint table
+  and its own `command -v` check — a second place to drift, and the one that
+  printed the green tick for the dead `rust-analyzer`. It now calls
+  `vise doctor` and prints what that found.
+
+`test_plugin_lsp_manifest.py` pins all of it: no unimplemented field, no field
+outside the schema, no uppercase extension key, no extension claimed by two
+servers, and an install hint for every server declared.
+
 ### Fixed — the two findings that first shipped as known holes
 
 Both were reported rather than fixed in the first pass because each looked like
