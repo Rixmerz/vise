@@ -87,14 +87,41 @@ def test_a_plan_level_failure_past_the_replan_budget_stops_for_a_person():
     assert move.action is Recovery.HUMAN
 
 
+def _inconclusive_attempts(n: int) -> list[Attempt]:
+    """Attempts as the scheduler actually presents them.
+
+    `state.finish()` appends the attempt and *then* calls `decide`, so the list
+    always includes the one being judged. Driving `decide` with an empty list is
+    a state production never reaches — and it is why this test passed for a
+    version that gave inconclusive zero retries.
+    """
+    return [
+        Attempt(i, "haiku", "medium", Verdict.INCONCLUSIVE, "error_max_turns",
+                FailureKind.ENVIRONMENT_BUG, Usage())
+        for i in range(1, n + 1)
+    ]
+
+
 def test_inconclusive_retries_once_then_stops():
-    first = decide(_result(Verdict.INCONCLUSIVE), _attempts(0))
-    assert first.action is Recovery.RETRY
-    second = decide(
-        _result(Verdict.INCONCLUSIVE),
-        _attempts(2, FailureKind.ENVIRONMENT_BUG),
-    )
+    """Found by a real run: a docs task that ran out of turns was parked for a
+    person after its *first* attempt, told "inconclusive twice"."""
+    first = decide(_result(Verdict.INCONCLUSIVE), _inconclusive_attempts(1))
+    assert first.action is Recovery.RETRY, first.reason
+
+    second = decide(_result(Verdict.INCONCLUSIVE), _inconclusive_attempts(2))
     assert second.action is Recovery.HUMAN
+    assert "twice" in second.reason
+
+
+def test_inconclusive_and_an_environment_failure_get_the_same_budget():
+    """The two branches share a constant and used to disagree by one character,
+    so identical histories took opposite paths."""
+    env_result = _result(classification=FailureKind.ENVIRONMENT_BUG)
+    for n, expected in ((1, Recovery.RETRY), (2, Recovery.HUMAN)):
+        inconclusive = decide(_result(Verdict.INCONCLUSIVE), _inconclusive_attempts(n))
+        environment = decide(env_result, _inconclusive_attempts(n))
+        assert inconclusive.action is expected, (n, inconclusive.reason)
+        assert environment.action is expected, (n, environment.reason)
 
 
 def test_inconclusive_is_never_treated_as_a_wrong_answer():

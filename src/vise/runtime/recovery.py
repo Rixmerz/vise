@@ -107,7 +107,14 @@ def decide(
     if result.verdict is Verdict.INCONCLUSIVE:
         # Nothing was learned about the code. Trying again at a bigger model
         # would be paying more to learn nothing again.
-        if _env_retries(attempts) < max_env_retries and used < max_attempts:
+        #
+        # `<=`, not `<`, and for the same reason as the RETRY_KINDS branch
+        # below: `attempts` includes the attempt being judged, so on the first
+        # one `_env_retries` is already 1. With `<` this gave a task *zero*
+        # retries and then reported "inconclusive twice" after one — which is
+        # what a docs task that ran out of turns hit, parking a run that had
+        # one cheap retry left.
+        if _env_retries(attempts) <= max_env_retries and used < max_attempts:
             return RecoveryDecision(
                 Recovery.RETRY, TaskState.PENDING,
                 "inconclusive — the work was never evaluated, so the same rung tries again",

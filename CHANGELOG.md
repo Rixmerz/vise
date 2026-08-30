@@ -178,6 +178,30 @@ you may already depend on, it says so under **Behaviour change**.
   and leaves no trace is not a gate, it is a default — and an overridden run
   records `spec_gate_overridden` rather than reporting itself as passed.
 
+### Fixed — an inconclusive attempt got zero retries and was told it got two
+
+Found by re-running the six-task build against the current tree. A `docs` task
+ran out of turns, came back `inconclusive`, and was parked for a person on its
+**first** attempt with the note *"inconclusive twice — the task cannot be
+evaluated here"*. Its record showed one dispatch, one attempt, one collect.
+
+An off-by-one, and the two sibling branches of `recovery.decide` disagreed by
+one character. `attempts` includes the attempt being judged — `state.finish()`
+appends it and *then* calls `decide` — so on the first attempt `_env_retries`
+is already 1. The environment branch guards with `<= max_env_retries` and gets
+its one retry; the inconclusive branch guarded with `<` and got none. Two
+identical histories, opposite outcomes, from the same constant.
+
+The message was already right about the intent; the guard was wrong about the
+count. Now `<=`, matching its sibling.
+
+`test_inconclusive_retries_once_then_stops` existed and passed throughout,
+because it drove `decide` with an **empty** attempt list — a state the scheduler
+never produces. It now builds attempts the way the scheduler presents them, and
+a second test asserts the two branches agree, since sharing a constant while
+differing by an operator is how they drifted in the first place. Both fail
+against the unfixed code.
+
 ### Fixed — `./install.sh` never actually updated an installed plugin
 
 Found while re-testing: the cached plugin under `~/.claude/plugins/cache/` was
