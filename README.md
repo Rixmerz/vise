@@ -363,6 +363,45 @@ Both diff against `base:` (default `HEAD`, i.e. uncommitted work) and
 `diff_scope` also sees untracked files, since a brand-new file outside the
 partition is exactly the case worth catching.
 
+## Project agents
+
+vise ships 21 agents. A project can add its own in `.vise/agents/*.md`, and the
+runtime layers them over the bundled fleet — same frontmatter, same rules:
+
+```
+.vise/agents/researcher.md      # name, description, model, effort, role, tools
+```
+
+This is what "store the capability so later sessions reuse it" looks like when
+the store is the repo: it persists, it diffs, it reviews, and it travels with
+the branch that needed it. The obvious alternative — vise's experience memory —
+is the wrong home: it applies FSRS decay because it is built for observations
+that age, and a capability does not become less true with time.
+
+Three rules, each load-bearing:
+
+- **One bar.** A project charter is validated by
+  `registry.validate_charter()` — the same invariants the suite asserts about
+  the bundled fleet, and the same function it calls. A second, laxer check for
+  the files nobody reviewed would be exactly backwards.
+- **Shadowing is visible.** A project charter whose id matches a bundled agent
+  replaces it — that is how a repo specialises an agent to itself. Every
+  replacement is recorded, printed by `vise runtime agents`, and emitted into
+  the run's events. The mechanism is allowed; the invisibility is not. Note
+  that shadowing is not yet constrained to *narrowing* — a project charter can
+  widen an agent today, and that is a known gap rather than a decision.
+- **One bad charter costs one agent.** A malformed file is refused with its
+  reason and the fleet keeps working. This is the opposite of how the gates
+  behave, deliberately: a gate that cannot run must never report success,
+  whereas a charter that cannot load already reports the honest outcome — the
+  agent is not there, and a task that needed it is unroutable with a reason.
+
+**Seven roles the model policy prices have no bundled agent**: `research`,
+`extract`, `inventory`, `classify`, `integration`, `architecture`, `replan` —
+including every role on the cheapest (haiku) tier. `.vise/agents/` is how a
+project staffs them. `test_project_agents.py` pins the list, so a role added to
+the policy either ships an agent or says out loud that it does not.
+
 ## LSP servers
 
 `.claude-plugin/plugin.json` declares `lspServers` — Claude Code's own LSP

@@ -86,6 +86,8 @@ _VALID_RUN_EVENTS = frozenset({
     "integrated",
     "isolation_enabled",
     "isolation_unavailable",
+    "agent_refused",
+    "agents_shadowed",
     "spec_gate_passed",
     "spec_gate_blocked",
     "spec_gate_overridden",

@@ -87,6 +87,21 @@ def test_agent_frontmatter_valid(path: Path):
             f"{path.name}: references skill {skill!r} not shipped in {SKILLS_DIR}"
 
 
+@pytest.mark.parametrize("path", AGENT_FILES, ids=lambda p: p.name)
+def test_the_runtime_bar_and_this_test_state_the_same_thing(path: Path):
+    """`registry.validate_charter` runs these invariants at load time, so a
+    project's charters meet the same bar as the bundled ones.
+
+    Asserting it here is what stops the two from drifting: if the loader's
+    version ever goes laxer, the fleet this test blesses would stop being the
+    fleet the loader accepts, and the weaker standard would be the one applied
+    to the files nobody reviewed.
+    """
+    from vise.runtime.registry import load_agent, validate_charter
+
+    assert validate_charter(load_agent(path), known_skills=frozenset(LOCAL_SKILLS)) == []
+
+
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)
 def test_skill_frontmatter_valid(path: Path):
     fm = _frontmatter(path)

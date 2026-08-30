@@ -203,7 +203,7 @@ class Artifact:
             run_id=str(data.get("run_id", "")),
             task_id=str(data.get("task_id", "")),
             kind=str(data.get("kind", "")),
-            payload=data.get("payload") if isinstance(data.get("payload"), dict) else {},
+            payload=payload if isinstance(payload := data.get("payload"), dict) else {},
             created_at=str(data.get("created_at") or _utcnow()),
         )
 

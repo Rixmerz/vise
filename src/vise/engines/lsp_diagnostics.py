@@ -90,19 +90,44 @@ def _severity_for_ruff(code: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _find_checker(name: str) -> str | None:
+def _find_checker(name: str, project_dir: str | Path | None = None) -> str | None:
     """Return the path to *name*, preferring the active venv's bin directory.
 
-    Uses system PATH first, then the VIRTUAL_ENV env var, then the venv that
-    vise itself is installed in.
+    The venv comes first, and the docstring used to say so while the code did
+    the opposite — `shutil.which` ran first, so a system checker shadowed the
+    project's every time. That is not a cosmetic ordering: a type checker
+    outside the project's environment cannot see the project's dependencies, so
+    it reports `Cannot find implementation or library stub for "numpy"` about a
+    numpy that is installed. Three of those were blocking vise's own `validate`
+    gate, which is the failure `CLAUDE.md` warns about for `pytest` in exactly
+    these words — a gate that goes red for environment reasons teaches people
+    to set VISE_NODE_GATE_OVERRIDE=1.
+
+    Order: the checked project's own venv, then the active venv, then the venv
+    vise is installed in, then PATH.
+
+    The project comes first because that is the only environment guaranteed to
+    hold the dependencies the code under check imports. Everything downstream of
+    it is a guess — and the gate runs inside the MCP server, whose cwd and venv
+    have nothing to do with the repo being validated. That is how this gate came
+    to report missing stubs for a numpy the project has installed.
     """
-    found = shutil.which(name)
-    if found:
-        return found
+    if project_dir is not None:
+        candidate = Path(project_dir) / ".venv" / "bin" / name
+        if candidate.exists():
+            return str(candidate)
 
     virtual_env = os.environ.get("VIRTUAL_ENV")
     if virtual_env:
         candidate = Path(virtual_env) / "bin" / name
+        if candidate.exists():
+            return str(candidate)
+
+    # A checkout's own .venv, which is what CLAUDE.md tells contributors to
+    # build and what every documented command here runs through.
+    cwd = Path.cwd().resolve()
+    for base in (cwd, *cwd.parents):
+        candidate = base / ".venv" / "bin" / name
         if candidate.exists():
             return str(candidate)
 
@@ -113,6 +138,10 @@ def _find_checker(name: str) -> str | None:
         if candidate.exists():
             return str(candidate)
 
+    found = shutil.which(name)
+    if found:
+        return found
+
     return None
 
 
@@ -121,9 +150,9 @@ def _find_checker(name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _run_ruff(file_path: str) -> list[dict[str, Any]] | None:
+def _run_ruff(file_path: str, project_dir: str | None = None) -> list[dict[str, Any]] | None:
     """Run ruff on *file_path* and return normalised diagnostic dicts, or None on failure."""
-    ruff = _find_checker("ruff")
+    ruff = _find_checker("ruff", project_dir)
     if not ruff:
         return None
 
@@ -168,9 +197,9 @@ def _run_ruff(file_path: str) -> list[dict[str, Any]] | None:
         return None
 
 
-def _run_mypy(file_path: str) -> list[dict[str, Any]] | None:
+def _run_mypy(file_path: str, project_dir: str | None = None) -> list[dict[str, Any]] | None:
     """Run mypy on *file_path* and return normalised diagnostic dicts, or None on failure."""
-    mypy = _find_checker("mypy")
+    mypy = _find_checker("mypy", project_dir)
     if not mypy:
         return None
 
@@ -484,13 +513,13 @@ def lsp_diagnostics(
         tools_run: list[str] = []
 
         if "ruff" in tools:
-            ruff_result = _run_ruff(file_path)
+            ruff_result = _run_ruff(file_path, project_dir)
             if ruff_result is not None:
                 all_diags.extend(ruff_result)
                 tools_run.append("ruff")
 
         if "mypy" in tools:
-            mypy_result = _run_mypy(file_path)
+            mypy_result = _run_mypy(file_path, project_dir)
             if mypy_result is not None:
                 all_diags.extend(mypy_result)
                 tools_run.append("mypy")

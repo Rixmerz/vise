@@ -42,6 +42,12 @@ dev = [
     "bandit>=1.7.0",
     "coverage>=7.0.0",
     "detect-secrets>=1.5.0",
+    # The lsp_clean validator shells out to mypy and `vise doctor` reports it
+    # under "vise's own ruff/mypy shell-out" — but it was never installed, so it
+    # could only ever resolve to a system mypy that cannot see this project's
+    # dependencies and invents missing-stub errors about installed packages.
+    "mypy>=1.8.0",
+    "types-PyYAML",
     "pip-audit>=2.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

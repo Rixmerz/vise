@@ -32,6 +32,7 @@ from vise.runtime.artifacts import ArtifactStore
 from vise.runtime.context import ContextResolver
 from vise.runtime.contracts import (
     TERMINAL_STATES,
+    Artifact,
     Criticality,
     FailureKind,
     RunSpec,
@@ -147,6 +148,9 @@ class Scheduler:
         config: SchedulerConfig | None = None,
     ) -> None:
         self.worker = worker
+        # Held so `run` can tell "the caller chose this registry" from "nobody
+        # did" — only the second is rebuilt from the run's project dir.
+        self._registry_given = registry is not None
         self.registry = registry if registry is not None else AgentRegistry.bundled()
         self.router = router or ModelRouter()
         self.artifacts = artifacts
@@ -161,6 +165,15 @@ class Scheduler:
         """Dispatch until every task is terminal, parked, or the run stops."""
         by_id = {t.id: t for t in tasks}
         state = RunState.for_tasks(spec, by_id)
+        if not self._registry_given:
+            # `.vise/agents/` belongs to the tree the run is against, not to
+            # wherever the scheduler was constructed.
+            self.registry = AgentRegistry.for_project(spec.project_dir)
+            for path, reason in self.registry.refused:
+                state.emit("agent_refused", path=path, reason=reason)
+            if self.registry.shadowed:
+                state.emit("agents_shadowed", ids=list(self.registry.shadowed))
+
         state.emit("run_started", goal=spec.goal, tasks=len(by_id))
 
         # Before the pool, before the worktrees, before any money: a run that
@@ -493,7 +506,7 @@ class Scheduler:
             return None
 
         record = state.record(task.id)
-        inputs = ()
+        inputs: tuple[Artifact, ...] = ()
         if self.artifacts is not None:
             inputs = self.artifacts.inputs_for(getattr(task, "dependencies", ()) or ())
         return TaskBrief(
@@ -678,7 +691,7 @@ class Scheduler:
         work_result = verifying.pop(task_id, None)
         record = state.record(task_id)
         try:
-            verify_result, _ = future.result()
+            collected = future.result()
         except Exception as exc:  # noqa: BLE001 - a verifier crash is not a task failure
             verification = Verification(
                 Verdict.INCONCLUSIVE,
@@ -686,6 +699,10 @@ class Scheduler:
             )
             verify_result = None
         else:
+            # Unpacked here rather than in the `try`, so the name is bound once
+            # on a path where it cannot be None. The two-branch version read the
+            # same and left every later use nullable.
+            verify_result, _ = collected
             state.ledger.spend(f"{task_id}::verify", verify_result.usage)
             verification = parse_verification(verify_result)
 

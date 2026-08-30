@@ -97,7 +97,8 @@ def _cmd_agents(args: argparse.Namespace) -> int:
     from vise.runtime.registry import AgentRegistry
 
     registry = (
-        AgentRegistry.from_dir(Path(args.dir)) if args.dir else AgentRegistry.bundled()
+        AgentRegistry.from_dir(Path(args.dir)) if args.dir
+        else AgentRegistry.for_project(Path(args.project_dir).resolve())
     )
     if not registry.agents:
         print("vise runtime: no agents found — not running from a plugin checkout?",
@@ -106,17 +107,31 @@ def _cmd_agents(args: argparse.Namespace) -> int:
 
     if args.json:
         print(json.dumps(
-            {"agents": [a.to_dict() for a in registry.agents.values()]}, indent=2
+            {
+                "agents": [
+                    {**a.to_dict(), "origin": registry.origins.get(a.id, "bundled")}
+                    for a in registry.agents.values()
+                ],
+                "shadowed": list(registry.shadowed),
+                "refused": [{"path": p, "reason": r} for p, r in registry.refused],
+            },
+            indent=2
         ))
         return 0
 
-    print(f"{'agent':<22} {'role':<10} {'writes':<7} {'model':<8} capabilities")
+    print(f"{'agent':<22} {'from':<8} {'role':<10} {'writes':<7} {'model':<8} capabilities")
     for agent in sorted(registry.agents.values(), key=lambda a: (a.role or "~", a.id)):
+        origin = registry.origins.get(agent.id, "bundled")
+        mark = "*" if agent.id in registry.shadowed else ""
         print(
-            f"{agent.id:<22} {(agent.role or '—'):<10} "
+            f"{agent.id + mark:<22} {origin:<8} {(agent.role or '—'):<10} "
             f"{str(agent.writes).lower():<7} {(agent.model or '—'):<8} "
             f"{', '.join(agent.capabilities)}"
         )
+    if registry.shadowed:
+        print(f"\n* replaces a bundled agent: {', '.join(sorted(registry.shadowed))}")
+    for path, reason in registry.refused:
+        print(f"refused {path}: {reason}", file=sys.stderr)
 
     ambiguous = [
         role for role in sorted(registry.roles())
@@ -153,6 +168,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
     agents_p = inner.add_parser("agents", help="what the registry can route to")
     agents_p.add_argument("--dir", default=None, help="read charters from this directory")
+    agents_p.add_argument("--project-dir", default=".",
+                          help="the project whose .vise/agents/ is layered on the fleet")
     agents_p.add_argument("--json", action="store_true", help="machine-readable output")
     agents_p.set_defaults(func=_cmd_agents)
 

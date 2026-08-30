@@ -119,10 +119,10 @@ def test_ruff_missing_but_mypy_present(tmp_py, monkeypatch: pytest.MonkeyPatch) 
     fp = tmp_py("any.py", "x = 1\n")
     real_find = diag._find_checker
 
-    def _patched_find(name: str) -> str | None:
+    def _patched_find(name: str, project_dir=None) -> str | None:
         if name == "ruff":
             return None
-        return real_find(name)
+        return real_find(name, project_dir)
 
     monkeypatch.setattr(diag, "_find_checker", _patched_find)
     result = diag.lsp_diagnostics(project_dir=str(Path(fp).parent), file_path=fp)
@@ -556,3 +556,55 @@ def test_tsc_timeout_is_unavailable(tmp_path: Path) -> None:
             result = diag.lsp_diagnostics_project(str(tmp_path), tools=("tsc",))
 
     assert result["available"] is False
+
+
+# --- checker resolution ---------------------------------------------------
+
+
+def test_the_checked_project_s_venv_wins_over_everything_else(tmp_path, monkeypatch):
+    """Found by vise's own `validate` gate blocking on errors that were not real.
+
+    The gate runs inside the MCP server, whose cwd and venv have nothing to do
+    with the repo being validated. Resolving the checker from either of those
+    picks a mypy that cannot see the project's dependencies, and it reports
+    `Cannot find implementation or library stub for "numpy"` about a numpy the
+    project has installed. Three such errors were blocking the gate — which is
+    the exact failure CLAUDE.md warns about for `pytest`, in a validator vise
+    ships.
+    """
+    from vise.engines.lsp_diagnostics import _find_checker
+
+    project = tmp_path / "proj"
+    binary = project / ".venv" / "bin"
+    binary.mkdir(parents=True)
+    (binary / "mypy").write_text("#!/bin/sh\n", encoding="utf-8")
+    (binary / "mypy").chmod(0o755)
+
+    other = tmp_path / "other"
+    (other / "bin").mkdir(parents=True)
+    (other / "bin" / "mypy").write_text("#!/bin/sh\n", encoding="utf-8")
+    (other / "bin" / "mypy").chmod(0o755)
+    monkeypatch.setenv("VIRTUAL_ENV", str(other))
+
+    assert _find_checker("mypy", str(project)) == str(binary / "mypy")
+
+
+def test_without_a_project_the_active_venv_still_wins_over_path(tmp_path, monkeypatch):
+    from vise.engines.lsp_diagnostics import _find_checker
+
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "ruff").write_text("#!/bin/sh\n", encoding="utf-8")
+    (venv / "bin" / "ruff").chmod(0o755)
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+
+    assert _find_checker("ruff") == str(venv / "bin" / "ruff")
+
+
+def test_an_absent_checker_resolves_to_none(tmp_path, monkeypatch):
+    """A missing checker must report absent, not crash — `quality_check` skips
+    on it, and a crash there would take the traverse down."""
+    from vise.engines.lsp_diagnostics import _find_checker
+
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    assert _find_checker("no-such-checker-anywhere", str(tmp_path)) is None

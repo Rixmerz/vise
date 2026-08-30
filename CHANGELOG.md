@@ -224,6 +224,66 @@ responds to. Safe here because vise declares no `userConfig`, so an uninstall
 drops no stored option values. Verified by staling the cache on purpose and
 watching a plain `./install.sh` heal it.
 
+### Added — a project can staff its own roles
+
+`AgentRegistry.bundled()` read exactly one directory, so a project could not add
+a capability without forking vise. That was already binding on vise itself:
+**seven of the fourteen roles the model policy prices resolve to nobody** —
+`research`, `extract`, `inventory`, `classify`, `integration`, `architecture`,
+`replan` — including every role on the cheapest tier. The policy quoted a price
+for work the fleet could not take.
+
+`.vise/agents/*.md` is now layered over the bundled fleet. The store is the
+repo, deliberately: it persists, diffs, reviews, and travels with the branch
+that needed it. The obvious alternative — vise's experience memory — applies
+FSRS decay because it is built for observations that age, and a capability does
+not become less true with time; the fleet would have rotted on a schedule
+nobody chose.
+
+- **One bar.** `registry.validate_charter()` holds the invariants
+  `test_agents_and_skills.py` asserted about bundled charters, and that test now
+  calls it. A second, laxer check for the files nobody reviewed would be exactly
+  backwards.
+- **Shadowing is visible.** A project charter replaces a bundled agent of the
+  same id — that is how a repo specialises one to itself — and every
+  replacement is recorded, printed by `vise runtime agents`, and emitted into
+  the run's events. Shadowing is *not yet* constrained to narrowing; that is a
+  stated gap, not an oversight.
+- **One bad charter costs one agent**, not the run. The opposite of the gates,
+  and for a reason: a gate that cannot run must never report success, whereas a
+  charter that cannot load already reports the honest outcome — the agent is
+  not there, and a task that needed it is unroutable with its reason.
+- A test pins that every priced role is staffed or declared project-supplied,
+  so the policy table and the fleet cannot drift apart again. It reads
+  `roles()`, not `resolve()`: a role twelve agents take resolves to None too,
+  and reading ambiguity as absence is what would send someone to write a
+  thirteenth backend agent for a task that had a perfectly good twelfth.
+
+### Fixed — the `lsp_clean` gate was red on vise's own repo, for reasons that were not real
+
+Found by running `/feature` on vise and being blocked at `validate`. Three of
+the eight errors were `Cannot find implementation or library stub for "numpy"`
+about a numpy that is installed. Three compounding causes:
+
+- **`mypy` was never in `[dev]`.** vise ships a validator that shells out to it
+  and `vise doctor` reports it under "vise's own ruff/mypy shell-out", but
+  `pip install -e '.[dev]'` never installed it, so it could only ever resolve to
+  a system mypy.
+- **`_find_checker` tried `PATH` first**, while its docstring said it preferred
+  the venv. So even `ruff`, which *is* in `[dev]`, resolved to the system copy.
+- **Resolution ignored the project being checked.** The gate runs inside the MCP
+  server, whose cwd and venv have nothing to do with the repo under validation.
+  `_find_checker` now takes the project dir and looks at its `.venv` first.
+
+This is the failure `CLAUDE.md` warns about for `pytest`, in vise's own words —
+*"a gate that goes red for environment reasons teaches people to set
+VISE_NODE_GATE_OVERRIDE=1"* — shipped in a validator vise wrote after writing
+the warning.
+
+With the fix, `mypy src/vise/runtime` is clean for the first time; the four real
+type errors it was hiding (a `tuple[()]` annotation, an `Artifact` payload, and
+a `TaskResult | None` the `else` branch could not narrow) are fixed too.
+
 ### Added — guidance on *when* to use a language server, where the decision happens
 
 Fixing the servers made them work. It did not make anything use them, which was

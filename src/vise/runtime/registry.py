@@ -195,6 +195,68 @@ def load_agent(path: Path) -> AgentSpec:
     )
 
 
+#: Built-in tools a charter may list. MCP tools (``mcp__*``) are allowed too;
+#: anything else will not resolve when the subagent launches, and the failure
+#: surfaces as a dead agent rather than a bad file.
+BUILTIN_TOOLS = frozenset({
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
+    "Glob", "Grep", "Bash", "BashOutput", "KillShell",
+    "Task", "WebFetch", "WebSearch", "TodoWrite", "Skill", "LSP",
+})
+VALID_MODELS = frozenset({"sonnet", "opus", "haiku", "fable", "inherit"})
+VALID_EFFORT = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+
+def bundled_skills() -> frozenset[str]:
+    """Skill names that ship with the plugin, or empty outside a checkout."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".claude-plugin" / "plugin.json").exists():
+            skills = parent / "skills"
+            try:
+                return frozenset(p.parent.name for p in skills.glob("*/SKILL.md"))
+            except OSError:  # pragma: no cover - unreadable skills tree
+                return frozenset()
+    return frozenset()
+
+
+def validate_charter(
+    spec: AgentSpec, *, known_skills: frozenset[str] | None = None
+) -> list[str]:
+    """Everything wrong with one charter, or an empty list.
+
+    One bar for every agent, bundled or project-local. Writing a second, laxer
+    check for charters nobody reviewed would mean the fleet has two standards
+    and the weaker one applies to the files that came from outside.
+
+    These are the invariants ``test_agents_and_skills.py`` already asserted
+    about the bundled fleet, moved here so they also run at load time — and so
+    the test and the loader cannot come to state different things. The test
+    calls this.
+
+    Colour is deliberately not checked here: it is a display hint the parser
+    drops before an ``AgentSpec`` exists, and nothing at runtime can break on
+    it. The test still reads it off the frontmatter, which is where it lives.
+    """
+    problems: list[str] = []
+    if not spec.description:
+        problems.append("missing description — nothing can route to it")
+    if spec.model is not None and spec.model not in VALID_MODELS \
+            and not spec.model.startswith("claude-"):
+        problems.append(f"invalid model {spec.model!r}")
+    if spec.effort is not None and spec.effort not in VALID_EFFORT:
+        problems.append(f"invalid effort {spec.effort!r}")
+    for tool in spec.tools:
+        if tool not in BUILTIN_TOOLS and not tool.startswith("mcp__"):
+            problems.append(f"unknown tool {tool!r} — will not resolve at launch")
+    if known_skills is None:
+        known_skills = bundled_skills()
+    if known_skills:
+        for skill in spec.skills:
+            if skill not in known_skills:
+                problems.append(f"references skill {skill!r}, which does not ship")
+    return problems
+
+
 def bundled_agents_dir() -> Path | None:
     """The ``agents/`` directory of the installed plugin, if we are inside one."""
     for parent in Path(__file__).resolve().parents:
@@ -209,13 +271,85 @@ class AgentRegistry:
     """The agents a run may route to."""
 
     agents: dict[str, AgentSpec] = field(default_factory=dict)
+    #: Where each agent came from — "bundled" or "project". A run that behaves
+    #: differently from the documented fleet must be able to say why.
+    origins: dict[str, str] = field(default_factory=dict)
+    #: Ids a project charter replaced. Shadowing is the mechanism that lets a
+    #: repo specialise an agent to itself; the invisibility is what is not
+    #: allowed, so every replacement is recorded.
+    shadowed: tuple[str, ...] = ()
+    #: (path, reason) for every charter refused. Reported, never raised — see
+    #: `merge_dir`.
+    refused: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def from_dir(cls, directory: Path) -> AgentRegistry:
+        """Strict load: a bad charter raises.
+
+        For a directory someone named explicitly, where silence would be worse
+        than a stack trace. `merge_dir` is the lenient path.
+        """
         reg = cls()
         for path in sorted(Path(directory).glob("*.md")):
             spec = load_agent(path)
             reg.agents[spec.id] = spec
+            reg.origins[spec.id] = "bundled"
+        return reg
+
+    def merge_dir(self, directory: Path | str, origin: str) -> None:
+        """Layer a directory of charters over this registry. Never raises.
+
+        A malformed charter costs that one agent, not the run. The blast radius
+        of strictness here is larger than what it protects against: the charter
+        is refused either way, and a typo in one project file is a poor reason
+        for a run not to start.
+
+        Note this is the opposite of how the gates behave, and deliberately. A
+        gate that cannot run must never report success, because silence there
+        reads as a pass. A charter that cannot load reports nothing at all — the
+        agent simply is not there, and a task that needed it comes back
+        unroutable with its reason. The honest outcome is already the failing
+        one.
+        """
+        directory = Path(directory)
+        try:
+            paths = sorted(directory.glob("*.md"))
+        except OSError:
+            return
+        if not directory.is_dir():
+            return
+        shadowed = list(self.shadowed)
+        refused = list(self.refused)
+        for path in paths:
+            try:
+                spec = load_agent(path)
+            except (RegistryError, OSError) as exc:
+                refused.append((str(path), str(exc)))
+                continue
+            problems = validate_charter(spec)
+            if problems:
+                refused.append((str(path), "; ".join(problems)))
+                continue
+            if spec.id in self.agents and self.origins.get(spec.id) != origin:
+                shadowed.append(spec.id)
+            self.agents[spec.id] = spec
+            self.origins[spec.id] = origin
+        self.shadowed = tuple(shadowed)
+        self.refused = tuple(refused)
+
+    @classmethod
+    def for_project(cls, project_dir: Path | str | None) -> AgentRegistry:
+        """The bundled fleet, with the project's own agents layered over it.
+
+        `.vise/agents/*.md` is the answer to "store the capability somewhere it
+        survives the session and I can edit it". A directory of markdown in the
+        repo persists, diffs, reviews, and travels with the branch that needed
+        it — none of which a database would have given for free, and one of
+        which (decay) the obvious database would have taken away.
+        """
+        reg = cls.bundled()
+        if project_dir is not None:
+            reg.merge_dir(Path(project_dir) / ".vise" / "agents", "project")
         return reg
 
     @classmethod

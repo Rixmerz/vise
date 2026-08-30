@@ -189,7 +189,9 @@ def plan(
     discover: the alternative is learning you are gated from the command that
     spends money.
     """
-    registry = registry if registry is not None else AgentRegistry.bundled()
+    registry = (
+        registry if registry is not None else AgentRegistry.for_project(project_dir)
+    )
     router = router or ModelRouter()
     ledger = BudgetLedger(budget or RunBudget())
     remaining = ledger.remaining_usd()
