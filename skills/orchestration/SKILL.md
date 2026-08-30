@@ -66,6 +66,13 @@ Three things that are *not* escape hatches:
 
 - **Delegating.** A subagent hits the same gate — it is a node gate, not a
   prompt. Dispatching a builder from `spec` does not move the workflow.
+- **The agent runtime.** `vise runtime run` dispatches a `dag` node's tasks as
+  their own sessions, which never traverse the graph and so never reach a node
+  gate. That was a real hole and it is now closed by a second gate: the
+  scheduler asks, once before its first dispatch, whether the project has a
+  well-formed change to implement, and a run that fails it spends nothing.
+  `vise runtime plan` shows the same verdict for free. See
+  `docs/scheduler.md` § The spec gate.
 - **`VISE_NODE_GATE_OVERRIDE=1`.** It bypasses the block and records the
   attempt. Using it because the proposal is unwritten is the habit the gate
   exists to prevent; using it because the *gate* is wrong is a bug report.

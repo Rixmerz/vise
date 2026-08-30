@@ -118,6 +118,7 @@ verdicts, and the phase gate reads them.
 | Verification | the second opinion that makes SUCCEEDED mean something | `runtime/verify.py` |
 | Adapter | running a brief as a Claude Code session | `runtime/adapters/claude_code.py` |
 | Isolation | one git worktree per task, and integrating it back | `runtime/isolation.py` |
+| Spec gate | may this project have work written into it at all | `runtime/spec_gate.py` |
 
 ## Testable without spending anything
 

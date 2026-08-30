@@ -20,6 +20,7 @@ from vise.runtime.budget import BudgetLedger
 from vise.runtime.contracts import RunBudget
 from vise.runtime.registry import AgentRegistry, AgentSpec, capability_hint
 from vise.runtime.routing import ModelRouter, RoutingDecision
+from vise.runtime.spec_gate import check as spec_gate_check
 
 
 @dataclass(frozen=True)
@@ -178,8 +179,16 @@ def plan(
     router: ModelRouter | None = None,
     budget: RunBudget | None = None,
     completed: Iterable[str] = (),
+    project_dir: str | None = None,
+    change: str = "",
 ) -> RunPlan:
-    """Turn a DAG node's tasks into a readable, costed, checked plan."""
+    """Turn a DAG node's tasks into a readable, costed, checked plan.
+
+    ``project_dir`` opts the plan into the same spec gate the scheduler
+    enforces. Reporting it here is what makes the block cost nothing to
+    discover: the alternative is learning you are gated from the command that
+    spends money.
+    """
     registry = registry if registry is not None else AgentRegistry.bundled()
     router = router or ModelRouter()
     ledger = BudgetLedger(budget or RunBudget())
@@ -187,6 +196,14 @@ def plan(
 
     raw_waves, unschedulable = dependency_waves(tasks, completed)
     problems: list[str] = []
+    if project_dir is not None:
+        verdict = spec_gate_check(
+            project_dir,
+            change=change,
+            writes=any(bool(getattr(t, "writes", True)) for t in tasks),
+        )
+        if not verdict.ok:
+            problems.append(f"spec gate: {verdict.reason}")
     if unschedulable:
         problems.append(
             "unschedulable (dependency cycle or unknown dependency): "

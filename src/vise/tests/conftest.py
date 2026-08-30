@@ -73,3 +73,31 @@ def _clear_ambient_test_and_lint_cmd(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("VISE_TEST_CMD", raising=False)
     monkeypatch.delenv("VISE_LINT_CMD", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _spec_gate_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Open the runtime spec gate for every test that is not about the gate.
+
+    ``Scheduler`` refuses to dispatch a writing run in a project with no
+    well-formed OpenSpec change. That is the point of the gate, and it means
+    the dispatch tests — which run against ``/nonexistent-not-a-repo`` and tmp
+    dirs on purpose, because they are about waves, ownership, escalation and
+    budgets — would all block before their first dispatch.
+
+    So the default binding is opened here, and never by setting
+    ``VISE_NODE_GATE_OVERRIDE=1``: overriding is a distinct outcome the gate
+    reports differently, and a suite that ran under the override would be
+    unable to tell a met gate from a bypassed one — which is the exact
+    confusion the override exists to prevent.
+
+    The gate itself is exercised for real in ``test_runtime_spec_gate.py``,
+    including through the scheduler, by passing an explicit ``spec_gate``.
+    """
+    from vise.runtime import scheduler as _scheduler
+    from vise.runtime.spec_gate import SpecGateVerdict
+
+    monkeypatch.setattr(
+        _scheduler, "spec_gate_check",
+        lambda *a, **k: SpecGateVerdict(True, "gate opened by the test suite"),
+    )

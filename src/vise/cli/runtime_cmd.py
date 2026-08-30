@@ -74,7 +74,11 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         max_cost_usd=args.max_cost or 0.0,
         max_parallel=args.max_parallel,
     )
-    result = plan(tasks, budget=budget, completed=args.completed or ())
+    result = plan(
+        tasks, budget=budget, completed=args.completed or (),
+        project_dir=str(Path(args.project_dir).resolve()),
+        change=args.change or "",
+    )
 
     if args.json:
         payload = result.to_dict()
@@ -139,6 +143,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
                         help="how many tasks may run at once (default 4)")
     plan_p.add_argument("--completed", nargs="*", default=None,
                         help="task ids already done; they are not replanned")
+    plan_p.add_argument("--project-dir", default=".",
+                        help="the working tree the plan is checked against")
+    plan_p.add_argument("--change", default=None,
+                        help="the openspec change this run implements; "
+                             "without it any well-formed active change satisfies the gate")
     plan_p.add_argument("--json", action="store_true", help="machine-readable output")
     plan_p.set_defaults(func=_cmd_plan)
 
@@ -152,6 +161,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     run_p.add_argument("--node", default=None, help="which dag node to run")
     run_p.add_argument("--goal", default=None, help="what this run is for")
     run_p.add_argument("--project-dir", default=".", help="the working tree to run against")
+    run_p.add_argument("--change", default=None,
+                       help="the openspec change this run implements; "
+                            "without it any well-formed active change satisfies the gate")
     run_p.add_argument("--max-cost", type=float, default=None, help="run cost ceiling in USD")
     run_p.add_argument("--max-parallel", type=int, default=4)
     run_p.add_argument("--max-workers", type=int, default=None)
@@ -218,7 +230,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         max_wall_time_s=args.max_wall_time or 0.0,
     )
 
-    preview = plan(tasks, budget=budget)
+    preview = plan(
+        tasks, budget=budget,
+        project_dir=str(Path(args.project_dir).resolve()),
+        change=args.change or "",
+    )
     print(f"node: {node_id}  ({graph_path.name})\n")
     print(preview.render())
     if preview.problems:
@@ -249,7 +265,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         artifacts=ArtifactStore(root, run_id),
         context=ContextResolver(project_dir=spec.project_dir),
         state_root=root,
-        config=SchedulerConfig(verify=not args.no_verify, isolate=args.isolate),
+        config=SchedulerConfig(
+            verify=not args.no_verify,
+            isolate=args.isolate,
+            spec_change=args.change or "",
+        ),
     )
     print(f"\nrun {run_id} — state in {root / 'runs' / run_id}\n")
     state = scheduler.run(spec, tasks)

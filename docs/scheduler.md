@@ -52,6 +52,53 @@ in a wave before starting any task in the next one wastes the wall-clock of its
 slowest member. The waves exist so a person can read the plan; dispatch follows
 dependencies, not wave boundaries.
 
+## The spec gate
+
+Asked once, before the first dispatch, whenever the run contains a task that
+writes: **does this project have a plan?**
+
+vise's node gate already makes the spec phase impossible to talk past, and
+`skills/orchestration/SKILL.md` says why delegation is not an escape hatch — a
+subagent hits the same gate, because it is a node gate rather than a prompt.
+The execution plane broke that. A `dag` node's tasks never traverse the graph;
+the scheduler turns them straight into subprocesses, so they reach no node at
+all. Without this gate the runtime is a side door around the strongest
+guarantee vise ships, and it is a door vise built itself.
+
+The bar is an active OpenSpec change with a `proposal.md` and well-formed spec
+deltas — every `### Requirement:` carrying at least one `#### Scenario:`.
+Deliberately **not** `tasks_complete`, which is the bar the node gate uses on
+the edge into the irreversible phase: there the work is done, here the run is
+what does it. Requiring a ticked checklist to start would gate work on its own
+output.
+
+Three properties, each load-bearing:
+
+- **It is asked once, before anything opens.** Not per task. A per-task check
+  would let the first three tasks spend money before the fourth discovered the
+  project has no specs — a run that ends half-applied, which is worse than one
+  that never starts. A blocked run creates no worktrees and its recorded cost
+  is zero.
+- **A read-only run is exempt.** A run where every task declares
+  `writes: false` cannot change the system's contract, so there is nothing for
+  a specification to describe. The gate's red should always mean "you are about
+  to build something nobody wrote down".
+- **It never shells out and never raises.** The `openspec` CLI is a Node
+  package; a gate that goes red because a teammate has not run `npm i -g`
+  teaches people to bypass it. Everything here reads files vise already owns,
+  and an unreadable planning tree is a refusal with an accurate reason rather
+  than a crash.
+
+`vise runtime plan` reports the same verdict among its problems, so the block
+costs nothing to discover — you never first learn you are gated from the
+command that spends money.
+
+The only bypass is `VISE_NODE_GATE_OVERRIDE=1`, the same variable the node gate
+honours, and an overridden run records `spec_gate_overridden` rather than
+reporting itself as having passed. There is deliberately no `--no-spec-gate`
+flag: a bypass that costs one keystroke and leaves no trace is not a gate, it
+is a default.
+
 ## Admission
 
 A task that is dependency-ready is not yet runnable. Four questions decide, in

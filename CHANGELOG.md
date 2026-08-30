@@ -145,6 +145,39 @@ you may already depend on, it says so under **Behaviour change**.
   table is asserted row by row, and a test pins that a default which is not a
   ladder rung survives routing intact.
 
+### Added
+
+- **The spec gate reaches the execution plane.** `mandatory-openspec-gate` made
+  vise's spec phase impossible to talk past, and `skills/orchestration/SKILL.md`
+  named delegation as the first thing that is not an escape hatch: a subagent
+  hits the same gate, because it is a node gate rather than a prompt.
+
+  The agent runtime broke that sentence. A `dag` node's tasks are dispatched by
+  the scheduler as their own sessions; they never traverse the graph, so they
+  reach no node gate at all — `grep -ri openspec src/vise/runtime/ docs/`
+  returned nothing. A six-task run against a scratch repo wrote a whole Python
+  package with no `openspec/` root anywhere and nothing to stop it. The gate
+  vise ships had a side door, and it was the door vise built.
+
+  `runtime/spec_gate.py` closes it. Asked once, before the first dispatch,
+  whenever the run contains a task that writes: is there an active change with
+  a proposal and well-formed spec deltas? A blocked run creates no worktrees
+  and its recorded cost is zero. `vise runtime plan` reports the same verdict,
+  so the block costs nothing to discover. `--change <name>` pins which change a
+  run implements.
+
+  Deliberately **not** gated on `tasks_complete` — that is the bar the node gate
+  uses on the edge into the irreversible phase, where the work is done; here the
+  run is what does it, and requiring a ticked checklist first would gate work on
+  its own output. A run where every task declares `writes: false` is not gated
+  at all: it cannot change the system's contract, so there is nothing for a
+  specification to describe.
+
+  One bypass, and it is the one that already exists: `VISE_NODE_GATE_OVERRIDE=1`.
+  There is no `--no-spec-gate` flag, because a bypass that costs one keystroke
+  and leaves no trace is not a gate, it is a default — and an overridden run
+  records `spec_gate_overridden` rather than reporting itself as passed.
+
 ### Fixed — found by installing it and running a real build
 
 Three bugs the test suite could not have found, because each needed a real

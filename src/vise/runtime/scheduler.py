@@ -51,6 +51,8 @@ from vise.runtime.recovery import (
 )
 from vise.runtime.registry import AgentRegistry, capability_hint
 from vise.runtime.routing import TOP, ModelRouter, tier_of
+from vise.runtime.spec_gate import SpecGateVerdict
+from vise.runtime.spec_gate import check as spec_gate_check
 from vise.runtime.state import RunState, cancel_requested, utcnow
 from vise.runtime.verify import (
     Verification,
@@ -116,6 +118,18 @@ class SchedulerConfig:
     #: that declare acceptance criteria — there is nothing to verify against
     #: otherwise, and the brief already says so.
     verify: bool = True
+    #: Asked once, before the first dispatch, when the run contains a task that
+    #: writes: may this project have code written into it at all? vise's node
+    #: gate makes the spec phase impossible to talk past, and the execution
+    #: plane is the one path to a worker that never traverses a node — so
+    #: without this the gate has a side door, and it is the door vise built.
+    #: Left as None to mean the real filesystem check, so the binding stays
+    #: late — the same shape as `replanner` and `should_cancel`, and the reason
+    #: a test can substitute one without reaching into a frozen default.
+    spec_gate: Callable[..., SpecGateVerdict] | None = None
+    #: Pin the change this run implements. Empty accepts any well-formed active
+    #: change, which is the common single-change-in-flight case.
+    spec_change: str = ""
 
 
 class Scheduler:
@@ -148,6 +162,18 @@ class Scheduler:
         by_id = {t.id: t for t in tasks}
         state = RunState.for_tasks(spec, by_id)
         state.emit("run_started", goal=spec.goal, tasks=len(by_id))
+
+        # Before the pool, before the worktrees, before any money: a run that
+        # cannot start should not have created anything to clean up.
+        gate = self._spec_gate(state, by_id)
+        if not gate.ok:
+            for task_id in by_id:
+                self._apply(state, task_id, TaskState.BLOCKED,
+                            f"spec gate: {gate.reason}")
+            self._finalise(state)
+            self._persist(state)
+            return state
+
         self._pool = self._open_pool(state)
         max_parallel = max(1, spec.budget.max_parallel or 1)
         started = time.monotonic()
@@ -980,6 +1006,30 @@ class Scheduler:
             succeeded=state.succeeded(),
             cost_usd=round(state.ledger.spent.cost_usd, 4),
         )
+
+    def _spec_gate(self, state: RunState, by_id: dict[str, Any]) -> SpecGateVerdict:
+        """Ask once whether this project may have work written into it.
+
+        Asked here rather than per task on purpose. A per-task check would run
+        the same repository-level query N times, and would let the first three
+        tasks spend money before the fourth discovered the project has no
+        specs — a run that ends half-applied, which is worse than one that
+        never starts.
+        """
+        writes = any(bool(getattr(t, "writes", True)) for t in by_id.values())
+        gate = self.config.spec_gate or spec_gate_check
+        verdict = gate(
+            state.spec.project_dir,
+            change=self.config.spec_change,
+            writes=writes,
+        )
+        if verdict.overridden:
+            state.emit("spec_gate_overridden", reason=verdict.reason)
+        elif not verdict.ok:
+            state.emit("spec_gate_blocked", reason=verdict.reason)
+        elif verdict.change:
+            state.emit("spec_gate_passed", change=verdict.change)
+        return verdict
 
     def _persist(self, state: RunState) -> None:
         if self.state_root is not None:

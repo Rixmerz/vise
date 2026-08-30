@@ -180,14 +180,25 @@ two-line change is before it starts:
 
 ```sh
 vise runtime run path/to/oauth-graph.yaml --max-cost 12 --max-parallel 4 --yes
+vise runtime run path/to/oauth-graph.yaml --change add-oauth --yes   # pin the change
 vise runtime status                  # where runs stand
 vise runtime explain run-a1b2c3      # every scheduler decision, in order
 vise runtime budget run-a1b2c3       # what it cost, per task
 vise runtime cancel run-a1b2c3       # stop one from another terminal
 ```
 
-Four rules the run enforces that are easy to state and easy to skip:
+Five rules the run enforces that are easy to state and easy to skip:
 
+- **A run that writes needs a spec.** Before its first dispatch — before the
+  worktrees, before any money — the scheduler asks whether the project has an
+  active OpenSpec change with a proposal and well-formed deltas. vise's node
+  gate makes the spec phase impossible to talk past, but a `dag` node's tasks
+  never traverse the graph, so without this they reach no gate at all. A
+  blocked run creates nothing and costs nothing, `vise runtime plan` shows the
+  same verdict for free, `--change <name>` pins which change it implements, and
+  a run where every task declares `writes: false` is not gated. The only bypass
+  is `VISE_NODE_GATE_OVERRIDE=1`, and it records itself as a bypass rather than
+  a pass.
 - **A `pass` is a claim, not a result.** A testing role must quote a command and
   its real output; an implementing role must quote the repo's existing checks; a
   pass claiming edits must have moved `git status --porcelain` plus `HEAD`; and

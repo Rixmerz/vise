@@ -81,13 +81,19 @@ def register_runtime(mcp: FastMCP) -> None:
         node_id: str | None = None,
         max_cost_usd: float = 0.0,
         max_parallel: int = 4,
+        project_dir: str = ".",
+        change: str = "",
     ) -> dict[str, Any]:
         """Plan a DAG node's work without dispatching any of it.
 
         Returns the waves, the agent and model each task resolves to with the
         reasons, and an estimated total cost. ``problems`` is non-empty when the
         plan cannot run as written — an unroutable task, a dependency cycle, a
-        task that does not fit the budget.
+        task that does not fit the budget, or a project with no well-formed
+        OpenSpec change to implement.
+
+        ``change`` pins the change this run implements; without it any
+        well-formed active change satisfies the spec gate.
         """
         from vise.engines.graph_parser import GraphParseError, load_graph_from_file
         from vise.runtime.contracts import RunBudget
@@ -116,6 +122,8 @@ def register_runtime(mcp: FastMCP) -> None:
         result = plan(
             node.tasks,
             budget=RunBudget(max_cost_usd=max_cost_usd, max_parallel=max_parallel),
+            project_dir=str(Path(project_dir).resolve()),
+            change=change,
         )
         payload = result.to_dict()
         payload["node"] = node.id
