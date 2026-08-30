@@ -21,6 +21,7 @@ that ignored its instructions indistinguishable from one that succeeded.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -94,6 +95,28 @@ def _default_runner(argv: Sequence[str], **kwargs: Any) -> CompletedProcess:
     return subprocess.run(list(argv), **kwargs)  # noqa: S603 - argv is built here, not user text
 
 
+def _worker_env() -> dict[str, str]:
+    """The worker's environment: this process's, plus one byte-code setting.
+
+    A Python worker that runs the code it just wrote — which the honesty gates
+    require it to do, since a `pass` without evidence is refused — leaves
+    ``__pycache__/*.pyc`` beside it. ``git status --porcelain -uall`` reports
+    those, the ownership gate reads them as writing outside the task's declared
+    paths, and a task that did exactly what it was asked is refused for the
+    exhaust of proving it. That cost a whole attempt plus a debugger call in a
+    real run.
+
+    Not creating the byproduct is the fix, rather than teaching the gate to
+    forgive a list of paths. A forgiveness list is a hole that grows: every
+    ecosystem has its own build detritus, and each entry is somewhere a real
+    escape can hide. `PYTHONDONTWRITEBYTECODE` costs the worker a little import
+    time and leaves the gate exactly as strict as it was.
+    """
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 @dataclass
 class ClaudeCodeWorker:
     """A ``Worker`` that runs each brief as a headless Claude Code session."""
@@ -134,6 +157,7 @@ class ClaudeCodeWorker:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=_worker_env(),
             )
         except subprocess.TimeoutExpired:
             return TaskResult(

@@ -334,8 +334,14 @@ def test_a_conflicting_integration_blocks_the_task_and_names_the_reason(
     from vise.runtime.contracts import TaskResult, Usage, Verdict
     from vise.runtime.worker import MockWorker
 
+    # A person editing the same lines in the main tree while the run is out.
+    # This is what a genuine integration conflict looks like now: two tasks in
+    # the same run no longer collide, because each worktree is seeded with what
+    # the run has already integrated, so the second builds on the first.
+    (repo / "shared.txt").write_text("line1\nFROM THE USER\nline3\n", encoding="utf-8")
+
     class Clasher(MockWorker):
-        """Both tasks rewrite the same seeded file, differently."""
+        """Rewrites the same line the user has in flight."""
 
         def run(self, brief):
             self.briefs.append(brief)
@@ -347,10 +353,8 @@ def test_a_conflicting_integration_blocks_the_task_and_names_the_reason(
                 model=brief.model, effort=brief.effort,
             )
 
-    tasks = [
-        Task(id="backend-python-a", name="a", role="backend", ownership=["shared.txt"]),
-        Task(id="backend-python-b", name="b", role="backend", ownership=["shared.txt"]),
-    ]
+    tasks = [Task(id="backend-python-a", name="a", role="backend",
+                  ownership=["shared.txt"])]
     spec = RunSpec(run_id="iso-2", goal="g", project_dir=str(repo),
                    budget=RunBudget(max_parallel=1))
     state = Scheduler(
@@ -358,12 +362,107 @@ def test_a_conflicting_integration_blocks_the_task_and_names_the_reason(
         config=SchedulerConfig(isolate=True, verify=False, max_attempts=1),
     ).run(spec, tasks)
 
-    states = {t: r.state for t, r in state.tasks.items()}
-    assert TaskState.SUCCEEDED in states.values(), "the first task lands"
-    blocked = [t for t, st in states.items() if st is not TaskState.SUCCEEDED]
-    assert blocked, "the second cannot"
+    blocked = [t for t, r in state.tasks.items() if r.state is not TaskState.SUCCEEDED]
+    assert blocked, "a patch that will not apply blocks its task"
     assert "integrate" in state.tasks[blocked[0]].note
+    # Backed out, not half-applied: the user's in-flight edit survives intact.
     assert "<<<<<<<" not in (repo / "shared.txt").read_text()
+    assert "FROM THE USER" in (repo / "shared.txt").read_text()
+
+
+def test_a_later_worktree_starts_from_what_the_run_has_already_integrated(pool):
+    """Found by running a six-task DAG against a real repo.
+
+    Integration writes to the main *working tree* without committing, so HEAD
+    never moves. A worktree branches from a commit — so before this, every task
+    started without a single thing its dependencies had produced, and a DAG with
+    real dependencies could not be built under isolation at all.
+    """
+    a = pool.acquire("task-a")
+    (a / "from_a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    assert pool.integrate("task-a").applied
+
+    b = pool.acquire("task-b")
+    assert (b / "from_a.py").read_text() == "VALUE = 1\n", \
+        "task-b must see what task-a integrated"
+
+
+def test_the_seeded_work_is_not_counted_as_the_later_task_s_own(pool):
+    """The seed is committed on the throwaway branch for exactly this reason.
+
+    Left uncommitted it would show up in `git diff HEAD` as the second task's
+    writes — re-integrated under its name, and refused by the ownership gate for
+    writing outside what it declared.
+    """
+    a = pool.acquire("task-a")
+    (a / "from_a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    pool.integrate("task-a")
+
+    b = pool.acquire("task-b")
+    (b / "from_b.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert pool.changed_paths("task-b") == ("from_b.py",)
+
+
+def test_seeding_never_touches_a_branch_the_user_has(pool):
+    a = pool.acquire("task-a")
+    (a / "from_a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    pool.integrate("task-a")
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=pool.project_dir,
+        capture_output=True, text=True, check=True,
+    ).stdout
+    pool.acquire("task-b")
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=pool.project_dir,
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert head_before == head_after, "the main branch never moves"
+
+
+def test_a_dependent_task_sees_its_dependency_under_isolation(tmp_path, monkeypatch):
+    """The end-to-end shape of the bug: `cli` importing what `parser` wrote."""
+    from vise.engines.graph_engine import Task
+    from vise.runtime.contracts import RunBudget, RunSpec, TaskResult, Usage, Verdict
+    from vise.runtime.scheduler import Scheduler, SchedulerConfig
+    from vise.runtime.state import TaskState
+    from vise.runtime.worker import MockWorker
+
+    _TREES.clear()
+    _TreeRecordingScheduler.patch(monkeypatch)
+    repo = _repo(tmp_path)
+    seen: dict[str, bool] = {}
+
+    class Chain(MockWorker):
+        def run(self, brief):
+            self.briefs.append(brief)
+            tree = Path(_TREES[brief.task_id])
+            if brief.task_id == "backend-python-first":
+                (tree / "dep.py").write_text("VALUE = 1\n", encoding="utf-8")
+            else:
+                seen["second"] = (tree / "dep.py").is_file()
+                (tree / "uses_dep.py").write_text("from dep import VALUE\n", encoding="utf-8")
+            return TaskResult(
+                task_id=brief.task_id, verdict=Verdict.PASS, summary="ok",
+                evidence="$ t\nok", checks="$ c\nok", usage=Usage(cost_usd=0.1),
+                model=brief.model, effort=brief.effort,
+            )
+
+    tasks = [
+        Task(id="backend-python-first", name="first", role="backend",
+             ownership=["dep.py"]),
+        Task(id="backend-python-second", name="second", role="backend",
+             ownership=["uses_dep.py"], dependencies=["backend-python-first"]),
+    ]
+    spec = RunSpec(run_id="iso-dep", goal="g", project_dir=str(repo),
+                   budget=RunBudget(max_parallel=2))
+    state = Scheduler(
+        worker=Chain(), registry=_registry(), state_root=tmp_path / "state",
+        config=SchedulerConfig(isolate=True, verify=False),
+    ).run(spec, tasks)
+
+    assert seen.get("second") is True, "the dependent task must see dep.py"
+    assert all(r.state is TaskState.SUCCEEDED for r in state.tasks.values())
+    assert (repo / "dep.py").is_file() and (repo / "uses_dep.py").is_file()
 
 
 def test_a_non_repository_degrades_to_the_shared_tree_rather_than_refusing(tmp_path):

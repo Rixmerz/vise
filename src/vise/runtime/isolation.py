@@ -82,6 +82,9 @@ class WorktreePool:
     branch_prefix: str = "vise/run"
     run_id: str = "run"
     worktrees: dict[str, Path] = field(default_factory=dict)
+    #: Every patch this run has integrated into the main tree, in the order it
+    #: landed. Replayed into each new worktree — see ``_seed``.
+    integrated: list[Path] = field(default_factory=list)
 
     @classmethod
     def create(cls, project_dir: Path | str, root: Path | str, run_id: str) -> WorktreePool:
@@ -105,9 +108,19 @@ class WorktreePool:
     def acquire(self, task_id: str) -> Path:
         """The worktree for one task, created on first use.
 
-        Branched from the *main tree's HEAD*, not from another task's branch:
-        tasks are independent by construction, and chaining them would make the
-        order they happened to start in part of the result.
+        Branched from the main tree's HEAD and then seeded with everything this
+        run has already integrated — never from another task's branch. Chaining
+        branches would make the order tasks happened to start in part of the
+        result; replaying the integrated set does not, because that set is by
+        construction what had finished and verified before this task began,
+        which is exactly what the dependency edges promised it.
+
+        Branching from bare HEAD, which is what this did first, is what makes a
+        DAG with dependencies unbuildable under isolation: integration writes to
+        the main *working tree* without committing, so HEAD never moves and a
+        fresh worktree starts without a single thing the run has produced. A
+        task whose dependencies have all landed was handed a tree that did not
+        contain them. That is not isolation, it is amnesia.
         """
         existing = self.worktrees.get(task_id)
         if existing is not None:
@@ -125,7 +138,53 @@ class WorktreePool:
                 f"could not create a worktree for {task_id}: {result.stderr.strip()}"
             )
         self.worktrees[task_id] = path
+        self._seed(task_id, path)
         return path
+
+    def _seed(self, task_id: str, path: Path) -> None:
+        """Replay this run's integrated work into a fresh worktree, and commit it.
+
+        The commit is what keeps the task's own diff its own. Left uncommitted,
+        the seeded files would show up in ``git diff HEAD`` as this task's
+        writes — re-integrated under its name, and refused by the ownership gate
+        for writing outside what it declared. The commit lands on the throwaway
+        ``vise/run/<id>/<task>`` branch, which ``release`` deletes; nothing here
+        ever writes to a branch the user has.
+
+        A replay that will not apply raises ``IsolationUnavailable``, and the
+        scheduler's answer to that is to run the task in the shared tree — which
+        is precisely the tree that already holds the work this failed to copy.
+        """
+        if not self.integrated:
+            return
+        for patch in self.integrated:
+            applied = _git(path, "apply", "--3way", "--whitespace=nowarn", str(patch))
+            if not applied.ok:
+                self._remove(path)
+                self.worktrees.pop(task_id, None)
+                _git(self.project_dir, "branch", "-D", self.branch_for(task_id))
+                raise IsolationUnavailable(
+                    f"could not replay already-integrated work into {task_id}'s "
+                    f"worktree ({patch.name}): {applied.stderr.strip() or 'apply failed'}"
+                )
+        _git(path, "add", "-A")
+        # An explicit identity: the repo under test may have none configured,
+        # and a commit that fails for that would leave the seeded work looking
+        # like this task wrote it.
+        committed = _git(
+            path,
+            "-c", "user.name=vise", "-c", "user.email=vise@localhost",
+            "commit", "--no-verify", "-m",
+            f"vise: work integrated before {task_id} started",
+        )
+        if not committed.ok and "nothing to commit" not in committed.stdout.lower():
+            self._remove(path)
+            self.worktrees.pop(task_id, None)
+            _git(self.project_dir, "branch", "-D", self.branch_for(task_id))
+            raise IsolationUnavailable(
+                f"could not commit the replayed work in {task_id}'s worktree: "
+                f"{committed.stderr.strip() or committed.stdout.strip()}"
+            )
 
     def release(self, task_id: str) -> None:
         """Drop one task's worktree and its branch. Safe to call twice."""
@@ -190,6 +249,9 @@ class WorktreePool:
         snapshot = self._snapshot(changed)
         applied = _git(self.project_dir, "apply", "--3way", "--whitespace=nowarn", str(patch))
         if applied.ok:
+            # Kept so the next worktree starts from what this run has built, not
+            # from a HEAD that integration never moves.
+            self.integrated.append(patch)
             return IntegrationResult(task_id, True, changed, (), "applied cleanly")
 
         conflicts = _conflicted_paths(self.project_dir)

@@ -178,6 +178,52 @@ you may already depend on, it says so under **Behaviour change**.
   and leaves no trace is not a gate, it is a default — and an overridden run
   records `spec_gate_overridden` rather than reporting itself as passed.
 
+### Fixed — the two findings that first shipped as known holes
+
+Both were reported rather than fixed in the first pass because each looked like
+it needed a decision. Neither did.
+
+- **Under `--isolate`, a task could not see its dependencies' output.**
+  Integration applies a verified worktree's diff to the main *working tree*
+  without committing, so `HEAD` never moves — and a worktree branches from a
+  commit. Every task therefore started without a single thing the run had
+  produced, and a DAG with real dependencies was unbuildable under isolation. A
+  six-task build showed it exactly: `cli-python` was correctly refused by its
+  verifier with `ModuleNotFoundError`, because `money.py`, `parser.py` and
+  `report.py` did not exist in its tree.
+
+  A worktree is now seeded with every patch the run has already integrated, and
+  that seed is committed **on the throwaway `vise/run/<id>/<task>` branch**. So
+  no decision about writing into the user's history was needed after all: a
+  test pins that the main branch's `HEAD` does not move. The commit is not
+  cosmetic — left uncommitted, the seeded files would appear in `git diff HEAD`
+  as the later task's own writes, be re-integrated under its name, and be
+  refused by the ownership gate for writing outside what it declared.
+
+  `acquire`'s docstring argued the opposite: *"tasks are independent by
+  construction, and chaining them would make the order they happened to start
+  in part of the result."* True of independent tasks, false of tasks that
+  declare `dependencies` — and replaying the integrated set is not chaining,
+  because that set is by construction what had finished and verified before
+  this task began.
+
+- **A worker that ran the code it just wrote was refused for the exhaust.**
+  Proving a `pass` means executing something, and a Python worker that does
+  leaves `__pycache__/*.pyc` beside its module. `git status --porcelain -uall`
+  reports those, the ownership gate reads them as writing outside the task's
+  declared paths, and the attempt is refused — classified `environment_bug` and
+  retried, so it recovers, at the cost of an attempt plus a debugger call every
+  time the model does not think to tidy up.
+
+  The worker's environment now carries `PYTHONDONTWRITEBYTECODE=1`. Not
+  creating the byproduct, rather than teaching the gate to forgive a list of
+  paths: a forgiveness list grows with every ecosystem's build detritus, and
+  each entry is somewhere a real escape can hide.
+
+  Verified together on one `--isolate` run of the same six-task DAG: 6 dispatched,
+  6 verified, 6 integrated, **one attempt each**, no fallback to the shared tree,
+  no `__pycache__` anywhere in the tree.
+
 ### Fixed — found by installing it and running a real build
 
 Four bugs the test suite could not have found, because each needed a real
