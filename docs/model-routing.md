@@ -17,6 +17,7 @@ The router reads six things and nothing else:
 |---|---|---|
 | `role` | the task | picks the candidate agents |
 | `complexity` | the planner's estimate, `trivial…high` | only `high` raises the floor; `medium` is the unstated default and must be a no-op |
+| `role` | the task | selects the policy row |
 | `criticality` | the task, `routine…critical` | `critical` pins to the top tier |
 | `attempts` | the run's own history | each prior failure climbs one rung |
 | `context_size` | resolved context, in tokens | large context raises effort, never lowers it |
@@ -30,33 +31,52 @@ consumer of exactly the signal it is supposed to check.
 `budget_remaining` can only veto. A router that promotes on a full budget spends
 the budget because it is there.
 
-## Defaults
+## The policy
 
-Starting point, not law. Every cell is overridable per task, per agent charter,
-and per repo.
+The table is the policy. The ladder below is a different thing — the path
+escalation walks when a policy default fails — and conflating them is a mistake
+worth naming, because the first implementation of this module made it: each role
+mapped to a ladder *index*, which made any default that is not a rung
+(documentation at `haiku/medium`) inexpressible, and silently rewrote it to the
+nearest rung. A policy that cannot state its own defaults is not a policy.
 
-| Work | Model | Effort |
-|---|---|---|
-| extraction, classification | haiku | low |
-| simple research, file inventory | haiku | low |
-| documentation | haiku | low |
-| implementation | sonnet | medium |
-| test authoring | sonnet | medium |
-| debugging | sonnet | high |
-| integration | sonnet | high |
-| architecture | opus | high |
-| security-critical change | opus | high |
-| adversarial review | opus | high |
-| replanning | opus | high |
+| Work | Role | Model | Effort |
+|---|---|---|---|
+| extraction, classification | `extract`, `classify` | haiku | low |
+| simple research, file inventory | `research`, `inventory` | haiku | low |
+| documentation | `docs` | haiku | medium |
+| ordinary coding | `backend`, `frontend` | sonnet | medium |
+| testing | `test` | sonnet | medium |
+| debugging | `debug` | sonnet | high |
+| integration | `integration` | sonnet | high |
+| architecture | `architecture` | opus | high |
+| security-critical change | `security` | opus | high |
+| adversarial review | `review` | opus | high |
+| replanning | `replan` | opus | high |
 
-Two rules that override the table:
+Defaults, not law. Every cell is overridable per task and per repo.
 
-- `criticality == "critical"` routes to the top tier regardless of the row.
-- An agent charter that pins a model sets the **floor**, not the ceiling. It
-  named that model for a reason the router does not have access to, so nothing
-  drops below it — but a failing task may still climb above it.
-- A **task** that pins a model is absolute, escalation included. A person wrote
-  that line; the router has no standing to overrule it.
+### Precedence
+
+Highest first:
+
+1. **A model the task pins** is absolute, escalation included. A person wrote
+   that line; the router has no standing to overrule it.
+2. **The policy for the kind of work**, adjusted by criticality, complexity and
+   the attempt history below.
+3. **The agent charter's own model** — a *default*, not a floor, and used only
+   for a role the policy does not cover.
+
+Point 3 was wrong in the first implementation and is worth stating twice. A
+charter that declares `sonnet` is saying what that agent runs at when nobody
+else has an opinion; reading it as a floor let `docs-writer`'s `sonnet` overrule
+documentation's `haiku`, which made the entire cheapest tier unreachable through
+any bundled agent — and the symptom looked like a property of the charters
+rather than a bug in the router.
+
+One rule overrides the table outright: `criticality == "critical"` routes to the
+top tier regardless of the row. `criticality == "elevated"` adds one rung, and
+`complexity == "high"` raises the floor to `sonnet/high`.
 
 ## The ladder
 

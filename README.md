@@ -162,10 +162,14 @@ wave 2  (2 task(s), ~$2.05)
 
 `migrate-users` above lands in its own wave rather than beside `backend-python-auth`,
 because both claim `src/auth/**` — two agents writing one path produce a diff
-neither of them wrote. `vise runtime agents` lists what the registry can route
-to, and names the roles that are ambiguous: twelve agents take `backend`, so a
-task that does not name a language is reported as unroutable rather than sent to
-whichever charter sorts first.
+neither of them wrote. The model comes from the policy table in
+[`docs/model-routing.md`](docs/model-routing.md), which is what decides the
+default for a kind of work; an agent charter's own `model` is the fallback for a
+role the policy does not cover, never an override of one it does.
+`vise runtime agents` lists what the registry can route to, and names the roles
+that are ambiguous: twelve agents take `backend`, so a task that does not name a
+language is reported as unroutable rather than sent to whichever charter sorts
+first.
 
 Exit code is non-zero when the plan has problems, so a plan with an unroutable
 task cannot be scripted past.

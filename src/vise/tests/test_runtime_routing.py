@@ -15,7 +15,9 @@ import pytest
 from vise.runtime.contracts import Attempt, FailureKind, Verdict
 from vise.runtime.registry import AgentSpec
 from vise.runtime.routing import (
+    FALLBACK,
     LADDER,
+    POLICY,
     TOP,
     ModelRouter,
     escalation_steps,
@@ -97,16 +99,28 @@ def test_the_ladder_terminates_and_names_the_next_move():
     assert any("replan" in r for r in decision.reasons)
 
 
-def test_a_charter_pin_raises_the_floor_but_does_not_cap_escalation():
-    agent = AgentSpec(id="reviewer", role="review", description="d", model="opus")
-    base = route(role="docs", agent=agent)
-    assert base.model == "opus"
-    assert any("charter pins" in r for r in base.reasons)
+def test_a_charter_model_does_not_overrule_the_policy():
+    """The charter is a default, not a floor. `docs-writer` declaring sonnet is
+    saying what it runs at when nobody else has an opinion — not overruling a
+    policy that put documentation on haiku. Getting this backwards made the
+    whole haiku tier unreachable through any bundled agent."""
+    agent = AgentSpec(id="docs-writer", role="docs", description="d",
+                      model="sonnet", effort="low")
+    assert route(role="docs", agent=agent).model == "haiku"
 
 
-def test_a_charter_pin_below_the_computed_rung_does_not_lower_it():
-    agent = AgentSpec(id="cheap", role="review", description="d", model="haiku")
-    assert route(role="review", agent=agent).model == "opus"
+def test_a_charter_supplies_the_default_for_a_role_the_policy_does_not_cover():
+    agent = AgentSpec(id="designer", role="design", description="d",
+                      model="opus", effort="high")
+    decision = route(role="design", agent=agent)
+    assert (decision.model, decision.effort) == ("opus", "high")
+    assert any("not in the policy" in r for r in decision.reasons)
+
+
+def test_a_role_with_no_policy_and_no_charter_falls_back_to_sonnet_medium():
+    decision = route(role="astrology")
+    assert (decision.model, decision.effort) == FALLBACK
+    assert any("falls back to" in r for r in decision.reasons)
 
 
 def test_a_task_pin_is_absolute_and_survives_escalation():
@@ -162,6 +176,48 @@ def test_decision_serialises():
 def test_an_unknown_role_starts_at_the_implementation_rung():
     """Too low fails visibly and escalates; too high just costs money."""
     assert route(role="astrology").tier == pytest.approx(1)
+
+
+# --- the policy table itself ---------------------------------------------
+
+
+@pytest.mark.parametrize("role,expected", [
+    ("extract", ("haiku", "low")),
+    ("research", ("haiku", "low")),
+    ("classify", ("haiku", "low")),
+    ("docs", ("haiku", "medium")),
+    ("backend", ("sonnet", "medium")),
+    ("frontend", ("sonnet", "medium")),
+    ("test", ("sonnet", "medium")),
+    ("debug", ("sonnet", "high")),
+    ("integration", ("sonnet", "high")),
+    ("architecture", ("opus", "high")),
+    ("security", ("opus", "high")),
+    ("review", ("opus", "high")),
+    ("replan", ("opus", "high")),
+])
+def test_the_policy_table_routes_as_written(role, expected):
+    """The whole table, asserted row by row. It is a specification someone wrote
+    down; a router that quietly rounds it to the nearest ladder rung is not
+    implementing it."""
+    decision = route(role=role)
+    assert (decision.model, decision.effort) == expected
+
+
+def test_a_default_that_is_not_a_ladder_rung_survives_routing():
+    """haiku/medium is not on the ladder. Reading the result back off the ladder
+    rewrote it to haiku/low, which is how the table became unimplementable."""
+    assert ("haiku", "medium") not in LADDER
+    assert POLICY["docs"] == ("haiku", "medium")
+    decision = route(role="docs")
+    assert (decision.model, decision.effort) == ("haiku", "medium")
+
+
+def test_escalating_off_a_non_rung_default_lands_on_the_ladder():
+    attempts = [Attempt(1, "haiku", "medium", Verdict.FAIL, "wrong", FailureKind.CODE_BUG)]
+    decision = route(role="docs", attempts=attempts)
+    assert (decision.model, decision.effort) == LADDER[1]
+    assert decision.escalated_from == "haiku/low"
 
 
 def test_a_haiku_pin_is_priced_as_haiku():

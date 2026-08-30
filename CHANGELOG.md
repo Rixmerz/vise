@@ -126,6 +126,25 @@ you may already depend on, it says so under **Behaviour change**.
   check. `unmet` replaces it: which criteria were not met, named individually,
   so a reader can disagree with the claim rather than with a decimal.
 
+### Fixed
+
+- **The model policy is a table of defaults per kind of work, and the charter is
+  a default rather than a floor.** Both were wrong in the first implementation
+  and the two errors compounded.
+
+  Each role mapped to a ladder *index*, so any default that is not a rung —
+  documentation at `haiku/medium` — was inexpressible and got silently rewritten
+  to the nearest rung. And an agent charter's `model` was treated as a floor the
+  policy could not go below, so `docs-writer` declaring `sonnet` overruled
+  documentation's `haiku`. Between them, the entire cheapest tier was
+  unreachable through any bundled agent — a symptom this changelog previously
+  reported as a property of the charters, when it was a bug in the router.
+
+  Precedence is now: a model the task pins, then the policy for the kind of
+  work, then the charter's own model for a role the policy does not cover. The
+  table is asserted row by row, and a test pins that a default which is not a
+  ladder rung survives routing intact.
+
 ### Notes
 
 - **Four bugs found by writing the tests, each fixed with the test that caught

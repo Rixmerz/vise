@@ -43,39 +43,51 @@ TOP = len(LADDER) - 1
 #: to run it.
 TIER_COST_USD: tuple[float, ...] = (0.05, 0.85, 1.20, 2.10)
 
-#: Starting rung by role. Everything not listed starts at implementation level,
-#: which is the safe default: too low fails visibly and escalates, too high just
-#: costs money.
-_BASE_BY_ROLE: dict[str, int] = {
-    "research": 0,
-    "inventory": 0,
-    "docs": 0,
-    "backend": 1,
-    "frontend": 1,
-    "test": 1,
-    "migration": 2,
-    "debug": 2,
-    "integration": 2,
-    "design": 3,
-    "security": 3,
-    "review": 3,
-    # Verification is per task and therefore a volume operation: it checks a
-    # diff against an explicit checklist, which is closer to applying than to
-    # noticing. The open-ended adversarial pass that genuinely needs the big
-    # model is `review`, and it runs once per node rather than once per task.
-    "verify": 1,
-    "replan": 3,
+#: The default model and effort per kind of work. This table is the policy; the
+#: ladder above is only the path escalation walks when this default fails.
+#:
+#: Keeping them separate matters. An earlier version mapped each role to a ladder
+#: *index*, which made any default that is not a rung — documentation at
+#: haiku/medium — inexpressible, and quietly rewrote it to the nearest rung.
+#: A policy that cannot state its own defaults is not a policy.
+POLICY: dict[str, tuple[str, str]] = {
+    # extraction, simple research, classification
+    "extract": ("haiku", "low"),
+    "research": ("haiku", "low"),
+    "inventory": ("haiku", "low"),
+    "classify": ("haiku", "low"),
+    # documentation
+    "docs": ("haiku", "medium"),
+    # ordinary coding
+    "backend": ("sonnet", "medium"),
+    "frontend": ("sonnet", "medium"),
+    # testing
+    "test": ("sonnet", "medium"),
+    # debugging
+    "debug": ("sonnet", "high"),
+    # integration
+    "integration": ("sonnet", "high"),
+    # architecture
+    "architecture": ("opus", "high"),
+    # security-critical work
+    "security": ("opus", "high"),
+    # adversarial review
+    "review": ("opus", "high"),
+    # replanning
+    "replan": ("opus", "high"),
 }
+
+#: What a role not in the table falls back to, before the agent's own default.
+FALLBACK: tuple[str, str] = ("sonnet", "medium")
 
 #: Complexity raises the floor and never lowers it. Only ``high`` raises
 #: anything: ``medium`` is the default a task gets when nobody stated a
 #: complexity, so it has to be a no-op. A neutral default that promotes is a
-#: router that spends the budget because it is there — and it would make the
-#: haiku rung unreachable for every task whose author simply did not fill the
-#: field in.
+#: router that spends the budget because it is there — and it would put every
+#: task whose author simply did not fill the field in one rung above its policy.
 #:
 #: Lowering is not available at any value. A ``trivial`` task on a role whose
-#: base rung is high stays high: the rung was chosen for what the work *is*, and
+#: policy is high stays high: the policy was chosen for what the work *is*, and
 #: one instance looking easy is not evidence against it.
 _FLOOR_BY_COMPLEXITY: dict[str, int] = {
     Complexity.TRIVIAL.value: 0,
@@ -83,6 +95,20 @@ _FLOOR_BY_COMPLEXITY: dict[str, int] = {
     Complexity.MEDIUM.value: 0,
     Complexity.HIGH.value: 2,
 }
+
+
+def _position(model: str, effort: str) -> int:
+    """Where a (model, effort) default sits on the escalation ladder.
+
+    A default need not be a rung — haiku/medium is not — so this falls back to
+    the first rung carrying that model. The rung is only used to decide what
+    escalation climbs *to*; it never rewrites the default itself.
+    """
+    exact = tier_of(model, effort)
+    if exact is not None:
+        return exact
+    by_model = tier_of(model)
+    return by_model if by_model is not None else 1
 
 
 def tier_of(model: str, effort: str | None = None) -> int | None:
@@ -161,7 +187,7 @@ def escalation_steps(attempts: Iterable[Attempt]) -> int:
 class ModelRouter:
     """Turns a task plus its history into a model, an effort, and an argument."""
 
-    base_by_role: dict[str, int] = field(default_factory=lambda: dict(_BASE_BY_ROLE))
+    policy: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(POLICY))
     ladder: tuple[tuple[str, str], ...] = LADDER
 
     def route(
@@ -174,6 +200,12 @@ class ModelRouter:
     ) -> RoutingDecision:
         """Decide a model and effort for one task.
 
+        Precedence, highest first: a model the *task* pins, then the policy for
+        its kind of work, then the agent charter's own default. The charter is a
+        default and not a floor — an agent that declares ``sonnet`` is saying
+        what it runs at when nobody else has an opinion, not overruling a policy
+        that put documentation on haiku.
+
         ``task`` is duck-typed on purpose — it is ``graph_engine.Task`` in
         production and a stub in tests, and the router needs six attributes, not
         an import of the control plane.
@@ -182,29 +214,16 @@ class ModelRouter:
         reasons: list[str] = []
 
         role = getattr(task, "role", None) or ""
-        base = self.base_by_role.get(role, 1)
-        reasons.append(f"role {role or '(none)'} starts at {self._name(base)}")
-        tier = base
+        model, effort, source = self._default_for(role, agent)
+        reasons.append(f"role {role or '(none)'} {source} {model}/{effort}")
+        base_tier = _position(model, effort)
+        tier = base_tier
 
         complexity = str(getattr(task, "complexity", Complexity.MEDIUM.value))
-        floor = _FLOOR_BY_COMPLEXITY.get(complexity, 1)
+        floor = _FLOOR_BY_COMPLEXITY.get(complexity, 0)
         if floor > tier:
             reasons.append(f"complexity {complexity} raises the floor to {self._name(floor)}")
             tier = floor
-
-        # A charter that names a model did so for a reason the router does not
-        # have. It sets the floor, not the ceiling: escalation may still climb
-        # above it when attempts fail, but nothing drops below it.
-        charter_model = getattr(agent, "model", None) if agent is not None else None
-        if charter_model:
-            charter_tier = tier_of(str(charter_model))
-            if charter_tier is not None and charter_tier > tier:
-                agent_id = getattr(agent, "id", "charter")
-                reasons.append(
-                    f"{agent_id} charter pins {charter_model}, raising the floor to "
-                    f"{self._name(charter_tier)}"
-                )
-                tier = charter_tier
 
         criticality = str(getattr(task, "criticality", Criticality.ROUTINE.value))
         if criticality == Criticality.CRITICAL.value:
@@ -228,6 +247,12 @@ class ModelRouter:
 
         escalated_from = self._name(before) if tier != before else None
 
+        # The policy pair survives while nothing moved it. Reading the rung back
+        # off the ladder would rewrite documentation's haiku/medium to haiku/low
+        # — which is the bug that made the table unimplementable.
+        if tier != base_tier:
+            model, effort = self.ladder[tier]
+
         # Task pins are absolute. A person who wrote `model:` into the workflow
         # made a decision the router has no standing to overrule — including by
         # escalating past it.
@@ -237,23 +262,14 @@ class ModelRouter:
         if pin_model:
             pinned = True
             model = str(pin_model)
-            # `or` chaining is wrong here: rung 0 is falsy, so a haiku pin fell
-            # through to the computed rung and was priced as sonnet. Rungs are
-            # indices, and an index needs an explicit None check.
             pin_tier = tier_of(model)
             effort = str(pin_effort or self.ladder[pin_tier if pin_tier is not None else tier][1])
-            exact = tier_of(model, effort)
-            if exact is not None:
-                tier = exact
-            elif pin_tier is not None:
-                tier = pin_tier
+            tier = _position(model, effort)
             reasons = [f"task pins {model}/{effort} — the router does not overrule a task pin"]
             escalated_from = None
-        else:
-            model, effort = self.ladder[tier]
-            if pin_effort:
-                effort = str(pin_effort)
-                reasons.append(f"task pins effort {effort}")
+        elif pin_effort:
+            effort = str(pin_effort)
+            reasons.append(f"task pins effort {effort}")
 
         cost = TIER_COST_USD[min(tier, len(TIER_COST_USD) - 1)]
         affordable = budget_remaining_usd is None or cost <= budget_remaining_usd
@@ -273,6 +289,18 @@ class ModelRouter:
             estimated_cost_usd=cost,
             affordable=affordable,
         )
+
+    def _default_for(self, role: str, agent: Any) -> tuple[str, str, str]:
+        """The starting model and effort, and where it came from."""
+        if role in self.policy:
+            model, effort = self.policy[role]
+            return model, effort, "routes to"
+        charter_model = getattr(agent, "model", None) if agent is not None else None
+        if charter_model:
+            agent_id = getattr(agent, "id", "its charter")
+            charter_effort = getattr(agent, "effort", None) or FALLBACK[1]
+            return str(charter_model), str(charter_effort), f"is not in the policy; {agent_id} defaults to"
+        return FALLBACK[0], FALLBACK[1], "is not in the policy and no charter names a model; falls back to"
 
     def _name(self, tier: int) -> str:
         m, e = self.ladder[max(0, min(tier, TOP))]
