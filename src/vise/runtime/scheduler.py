@@ -49,7 +49,7 @@ from vise.runtime.recovery import (
     classify_from_text,
     decide,
 )
-from vise.runtime.registry import AgentRegistry
+from vise.runtime.registry import AgentRegistry, capability_hint
 from vise.runtime.routing import TOP, ModelRouter, tier_of
 from vise.runtime.state import RunState, cancel_requested, utcnow
 from vise.runtime.verify import (
@@ -172,6 +172,12 @@ class Scheduler:
             # verified, so a verifier pointed at the main tree would be judging
             # a diff that is not there yet.
             trees: dict[str, str] = {}
+            # Write the file before the first dispatch, not after the first
+            # collection. Until this exists `vise runtime status` answers "no
+            # such run" — for the whole of the first task, which is exactly when
+            # someone watching a run they just started looks — and a process
+            # killed during that task leaves nothing behind at all.
+            self._persist(state)
             while not state.is_done():
                 if self._cancelled(state):
                     break
@@ -181,6 +187,11 @@ class Scheduler:
                 dispatched = self._dispatch_ready(
                     state, by_id, pool, pending, briefs, baselines, trees, started
                 )
+                if dispatched:
+                    # A dispatch is a transition like any other: it is what makes
+                    # the difference between "of unknown outcome" and "never
+                    # started" readable after a crash.
+                    self._persist(state)
 
                 if not pending:
                     if not dispatched:
@@ -417,7 +428,7 @@ class Scheduler:
         resolution = self.registry.resolve(
             role,
             writes=True if getattr(task, "writes", True) else None,
-            capability=_capability_of(task),
+            capability=capability_hint(task),
         ) if role else None
         agent = resolution.agent if resolution else None
         return agent, self.router.route(
@@ -981,20 +992,6 @@ def _criticality(task: Any) -> Criticality:
         return Criticality(raw)
     except ValueError:
         return Criticality.ROUTINE
-
-
-_CAPABILITY_WORDS = frozenset({
-    "python", "typescript", "go", "rust", "java", "kotlin", "swift", "ruby",
-    "php", "csharp", "cpp", "lua",
-})
-
-
-def _capability_of(task: Any) -> str | None:
-    haystack = f"{getattr(task, 'id', '')} {getattr(task, 'name', '')}".lower()
-    for word in haystack.replace("/", " ").replace("-", " ").replace("_", " ").split():
-        if word in _CAPABILITY_WORDS:
-            return word
-    return None
 
 
 def run_tasks(

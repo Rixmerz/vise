@@ -18,7 +18,7 @@ from typing import Any, Iterable, Sequence
 from vise.runtime import ownership as _own
 from vise.runtime.budget import BudgetLedger
 from vise.runtime.contracts import RunBudget
-from vise.runtime.registry import AgentRegistry, AgentSpec
+from vise.runtime.registry import AgentRegistry, AgentSpec, capability_hint
 from vise.runtime.routing import ModelRouter, RoutingDecision
 
 
@@ -214,7 +214,7 @@ def plan(
                 resolution = registry.resolve(
                     role,
                     writes=True if getattr(task, "writes", True) else None,
-                    capability=_capability_hint(task),
+                    capability=capability_hint(task),
                 )
                 agent = resolution.agent
                 if agent is None:
@@ -252,29 +252,3 @@ def plan(
         problems=tuple(problems),
         unschedulable=tuple(unschedulable),
     )
-
-
-def _capability_hint(task: Any) -> str | None:
-    """A capability to prefer when several agents share a role.
-
-    Read off the task id and name — ``backend-python-auth`` should reach
-    ``backend-python``. Deliberately a hint and nothing more: ``select`` falls
-    back to the role when no agent carries the capability, because a task naming
-    a language nobody registered should run on the generic agent rather than not
-    run at all.
-    """
-    haystack = f"{getattr(task, 'id', '')} {getattr(task, 'name', '')}".lower()
-    for word in haystack.replace("/", " ").replace("-", " ").replace("_", " ").split():
-        if word in _KNOWN_CAPABILITY_WORDS:
-            return word
-    return None
-
-
-#: Capability words a task id may carry. Kept explicit rather than matched
-#: against every registered capability: a task called "review-python-parser"
-#: names a subject, not a routing instruction, and guessing from arbitrary
-#: substrings routes on coincidence.
-_KNOWN_CAPABILITY_WORDS = frozenset({
-    "python", "typescript", "go", "rust", "java", "kotlin", "swift", "ruby",
-    "php", "csharp", "cpp", "lua",
-})

@@ -15,6 +15,7 @@ from vise.runtime.registry import (
     AgentRegistry,
     RegistryError,
     bundled_agents_dir,
+    capability_hint,
     derive_capabilities,
     derive_role,
     load_agent,
@@ -116,3 +117,38 @@ def test_an_empty_registry_answers_rather_than_raising():
     reg = AgentRegistry()
     assert reg.select("backend") is None
     assert reg.roles() == set()
+
+
+# --- capability hint ------------------------------------------------------
+
+
+class _Task:
+    def __init__(self, id: str, name: str = ""):
+        self.id = id
+        self.name = name
+
+
+def test_a_capability_survives_any_punctuation_around_it():
+    """Found by writing a workflow by hand.
+
+    The tokeniser split on a hand-written list of separators, so a task named
+    "Money value type (python)" tokenised to "(python)" and matched nothing.
+    Every backend task in that workflow came back UNROUTABLE, with an error
+    telling the author to name the capability — which they had.
+    """
+    for name in ("Money value type (python)", "parser [python]", "report — python",
+                 "cli/python", "tests_python", "docs: python!"):
+        assert capability_hint(_Task("t", name)) == "python", name
+
+
+def test_the_id_is_read_as_well_as_the_name():
+    assert capability_hint(_Task("backend-python-auth")) == "python"
+
+
+def test_a_task_naming_no_capability_gets_no_hint():
+    assert capability_hint(_Task("money", "Money value type")) is None
+
+
+def test_a_subject_that_is_not_a_language_is_not_a_hint():
+    """"parser" and "ledger" are subjects; only registered languages route."""
+    assert capability_hint(_Task("parser", "Ledger file parser")) is None

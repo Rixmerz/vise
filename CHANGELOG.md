@@ -145,6 +145,40 @@ you may already depend on, it says so under **Behaviour change**.
   table is asserted row by row, and a test pins that a default which is not a
   ladder rung survives routing intact.
 
+### Fixed — found by installing it and running a real build
+
+Three bugs the test suite could not have found, because each needed a real
+worker, a real repo, and a person watching. A six-task build of a small Python
+CLI in a scratch repo surfaced all three in one run.
+
+- **Notes filed as a `verification` artifact shadowed the verdict, and stalled
+  the run.** `parse_verification` preferred an artifact of kind `verification`
+  over the result's own verdict, and read "no `verdict` key in its payload" as
+  "unreadable". But `verification` is one of the artifact kinds
+  `RESULT_INSTRUCTIONS` offers every worker, so a verifier that files a criteria
+  table or a test list under it is following the contract. The live `pass` it
+  had already given was discarded, the task was blocked as *inconclusive*, and
+  the five tasks behind it stalled — after which isolation cleanup deleted the
+  correct, evidence-backed code the worker had written.
+
+  An artifact whose `verdict` field cannot be read still stays inconclusive and
+  still never falls through: that is a verifier that tried to answer and failed,
+  and the honesty rule holds. An artifact with no `verdict` field at all is
+  notes, and notes no longer outrank an answer.
+
+- **The run state file was written on the first collection, not the first
+  dispatch.** For the whole of the first task — the one moment someone who has
+  just started a run looks at it — `vise runtime status` answered "no such run",
+  and a process killed in that window left nothing behind, against the promise
+  in `state.py`'s own docstring that a dead run says which tasks were in flight.
+
+- **The capability tokeniser split on a hand-written list of separators.** A
+  task named `Money value type (python)` tokenised to `(python)`, matched no
+  capability, and came back `UNROUTABLE` with an error telling the author to
+  name the capability in the task — which they had. It now splits on any run of
+  non-alphanumeric characters, and the tokeniser lives in `registry.py` instead
+  of in two identical private copies in `planner.py` and `scheduler.py`.
+
 ### Notes
 
 - **Four bugs found by writing the tests, each fixed with the test that caught

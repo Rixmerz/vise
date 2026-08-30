@@ -355,6 +355,33 @@ def test_the_run_state_is_written_and_reads_back(tmp_path: Path):
     assert reloaded.events
 
 
+def test_the_state_file_exists_while_the_first_task_is_still_running(tmp_path: Path):
+    """Found by watching a real run.
+
+    The file used to be written on the first *collection*, so for the whole of
+    the first task `vise runtime status` answered "no such run" — the one moment
+    someone who just started a run looks at it — and a process killed in that
+    window left nothing to say what had been dispatched.
+    """
+    seen: dict[str, object] = {}
+
+    class Watcher:
+        def run(self, brief):
+            mid = RunState.load(tmp_path, "r1")
+            seen["exists"] = mid is not None
+            if mid is not None:
+                seen["state"] = mid.tasks["a"].state
+                seen["model"] = mid.tasks["a"].model
+            return MockWorker().run(brief)
+
+    _run([Task(id="a", name="a", role="backend", ownership=["src/**"])],
+         worker=Watcher(), state_root=tmp_path)
+
+    assert seen["exists"] is True
+    assert seen["state"] is TaskState.RUNNING
+    assert seen["model"] == "sonnet"
+
+
 def test_loading_an_unknown_run_returns_none(tmp_path: Path):
     assert RunState.load(tmp_path, "never-ran") is None
 

@@ -88,24 +88,34 @@ class Verification:
 def parse_verification(result: TaskResult) -> Verification:
     """Read a verifier's result into a verdict the scheduler can act on.
 
-    Two sources, in order: a ``verification`` artifact, then the result's own
-    verdict. The artifact wins because it is structured — a verifier that
-    produced one has answered the question in a shape nobody has to interpret.
+    Two sources, in order: a ``verification`` artifact carrying a verdict, then
+    the result's own verdict. A verdict-carrying artifact wins because it is
+    structured — a verifier that produced one has answered the question in a
+    shape nobody has to interpret.
 
-    An unparseable artifact becomes ``inconclusive``, never ``pass``. A verifier
-    whose answer we cannot read has not verified anything, and defaulting to
-    pass would make a broken verifier indistinguishable from a working one that
-    always agrees.
+    An artifact carrying a ``verdict`` field that cannot be read stays
+    ``inconclusive`` and never falls through. That is a verifier that tried to
+    answer and produced something unreadable, and reading past it to the bare
+    verdict would make a broken verifier indistinguishable from a working one.
+
+    An artifact with no ``verdict`` field at all is a different thing: not a
+    broken answer but notes. ``verification`` is one of the artifact kinds the
+    worker contract offers, so a verifier that files a criteria table or a test
+    list under it has done nothing wrong — and letting those notes shadow the
+    verdict it *did* give on the result turned a live ``pass`` into
+    ``inconclusive``, blocked the task, and stalled every task behind it.
     """
-    artifact = next((a for a in result.artifacts if a.kind == "verification"), None)
-    if artifact is not None:
+    for artifact in result.artifacts:
+        if artifact.kind != "verification":
+            continue
         parsed = _from_payload(artifact.payload)
         if parsed is not None:
             return parsed
-        return Verification(
-            Verdict.INCONCLUSIVE,
-            ("the verification artifact could not be read as a verdict",),
-        )
+        if "verdict" in artifact.payload:
+            return Verification(
+                Verdict.INCONCLUSIVE,
+                ("the verification artifact could not be read as a verdict",),
+            )
     return Verification(
         result.verdict,
         (result.summary,) if result.summary else (),

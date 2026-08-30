@@ -22,6 +22,7 @@ to it.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -309,3 +310,36 @@ class AgentRegistry:
                 f"distinguishes them"
             ),
         )
+
+
+#: Capability words a task id or name may carry. Kept explicit rather than
+#: matched against every registered capability: a task called
+#: "review-python-parser" names a subject, not a routing instruction, and
+#: guessing from arbitrary substrings routes on coincidence.
+CAPABILITY_WORDS = frozenset({
+    "python", "typescript", "go", "rust", "java", "kotlin", "swift", "ruby",
+    "php", "csharp", "cpp", "lua",
+})
+
+#: Every run of characters that is not a letter or a digit separates words.
+#: Splitting on a hand-written list of separators missed the ones nobody
+#: thought of: "Money value type (python)" tokenised to "(python)", which
+#: matches nothing, and every backend task in the workflow came back
+#: UNROUTABLE with an error telling the author to do what they had done.
+_WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def capability_hint(task: object) -> str | None:
+    """A capability to prefer when several agents share a role.
+
+    Read off the task id and name — ``backend-python-auth`` should reach
+    ``backend-python``. Deliberately a hint and nothing more: ``resolve`` falls
+    back to the role when no agent carries the capability, because a task naming
+    a language nobody registered should run on the generic agent rather than not
+    run at all.
+    """
+    haystack = f"{getattr(task, 'id', '')} {getattr(task, 'name', '')}".lower()
+    for word in _WORD_SPLIT.split(haystack):
+        if word in CAPABILITY_WORDS:
+            return word
+    return None

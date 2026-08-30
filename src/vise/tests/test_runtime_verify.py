@@ -117,6 +117,36 @@ def test_an_unreadable_artifact_becomes_inconclusive_never_pass():
     assert parse_verification(result).verdict is Verdict.INCONCLUSIVE
 
 
+def test_notes_filed_as_a_verification_artifact_do_not_shadow_the_verdict():
+    """Found by running the scheduler against a real repo.
+
+    ``verification`` is one of the artifact kinds RESULT_INSTRUCTIONS offers, so
+    a verifier that files a test list under it is following the contract. Reading
+    that as a failed verdict parse turned a live pass into inconclusive, blocked
+    the task, and stalled the five tasks behind it — for a $0.39 run that
+    produced correct, evidence-backed code and then deleted it.
+    """
+    result = TaskResult(
+        task_id="v", verdict=Verdict.PASS, summary="every criterion met",
+        artifacts=(Artifact("r1", "money", "verification",
+                            {"result": "all passed", "tests_run": ["decimal", "mismatch"]}),),
+    )
+    parsed = parse_verification(result)
+    assert parsed.verdict is Verdict.PASS
+
+
+def test_a_later_artifact_still_supplies_the_verdict():
+    """The notes need not come last. Only the first *readable* one decides."""
+    result = TaskResult(
+        task_id="v", verdict=Verdict.PASS,
+        artifacts=(
+            Artifact("r1", "money", "verification", {"tests_run": ["a"]}),
+            Artifact("r1", "money", "verification", {"verdict": "fail", "unmet": ["no test"]}),
+        ),
+    )
+    assert parse_verification(result).verdict is Verdict.FAIL
+
+
 def test_without_an_artifact_the_bare_verdict_is_used():
     result = TaskResult(task_id="v", verdict=Verdict.FAIL, summary="no")
     assert parse_verification(result).verdict is Verdict.FAIL
