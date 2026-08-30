@@ -52,6 +52,22 @@ of another change.
   logging is measured to matter
 - `go vet` plus `staticcheck` in CI
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToImplementation`, `findReferences`, `goToDefinition`, `documentSymbol`)
+resolves bindings; grep matches text. Two Go-specific reasons that gap bites:
+
+- **Interface satisfaction is implicit.** Nothing in a Go source file says
+  "implements". `goToImplementation` on an interface method is the *only*
+  reliable way to find its implementors — grep on the method name returns every
+  unrelated type that happens to have one.
+- **Embedded structs promote methods.** A method a type appears not to have may
+  be promoted from an embedded field, so grep inside the type's own file finds
+  nothing while the call site is perfectly valid.
+
+Anything reached through `reflect` or a `map[string]func` registry is beyond
+gopls. Grep those too.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

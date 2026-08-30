@@ -44,6 +44,22 @@ stated below.
 - Don't add `#[inline]` without profiling data
 - Don't ignore `cargo audit` results in CI
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToImplementation`, `findReferences`, `goToDefinition`, `hover`)
+resolves bindings; grep matches text. Three Rust-specific reasons that gap bites:
+
+- **Trait impls live anywhere.** `impl Trait for Type` can sit in any module.
+  `goToImplementation` finds them; grep needs you to guess the file.
+- **Blanket impls exist in no file you would think to search.**
+  `impl<T: Bound> Trait for T` gives a type an implementation nobody wrote for
+  it.
+- **Macros generate the code you are looking for.** Grep sees the macro
+  invocation; `goToDefinition` resolves through the expansion.
+
+`hover` is worth more in Rust than almost anywhere else: it prints the inferred
+type and the resolved lifetimes, neither of which appears in the source.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

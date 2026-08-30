@@ -37,6 +37,23 @@ stated below.
 - Don't cast away `const`; don't C-cast in C++ — use `static_cast`/`reinterpret_cast`
 - Don't ignore compiler warnings — build with `-Wall -Wextra` and a sanitizer in CI
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `documentSymbol`, `hover`)
+resolves bindings; grep matches text. Three C/C++-specific reasons that gap
+bites:
+
+- **Declaration and definition are in different files.** Grep for a name returns
+  the header and the translation unit and cannot tell you which one a caller
+  binds to.
+- **Overloads share a name.** `findReferences` on the specific declaration you
+  are changing returns only the calls that resolve to it.
+- **The preprocessor rewrites the code before the compiler sees it.** A name
+  produced by a macro is not in any file grep will search.
+
+`hover` resolves `auto` and template parameters to concrete types, which the
+source does not state.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

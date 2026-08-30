@@ -36,6 +36,21 @@ stated below.
 - Don't overuse metaprogramming when a plain method is clearer
 - Don't ignore `rubocop` offenses without an inline disable + reason
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `documentSymbol`) resolves bindings;
+grep matches text. In Ruby the honest guidance runs both ways:
+
+- **Use it for ordinary definitions.** Modules included into a class put methods
+  far from the class body, and `goToDefinition` follows that where grep cannot.
+- **Do not trust it alone.** `define_method`, `method_missing`, `send`, and
+  every DSL that builds methods at load time are invisible to ruby-lsp. In Ruby
+  more than any other language here, a `findReferences` result is a floor on the
+  caller set, not the caller set.
+
+So: language server first, grep second, and say in your report that the caller
+list is unverified whenever metaprogramming is in play.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

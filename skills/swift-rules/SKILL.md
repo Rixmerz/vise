@@ -34,6 +34,20 @@ stated below.
 - Don't ignore compiler warnings or leave `print()` diagnostics in shipping code
 - Don't subclass `NSObject`/use `@objc` unless interop actually requires it
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToImplementation`, `findReferences`, `goToDefinition`, `documentSymbol`)
+resolves bindings; grep matches text. Two Swift-specific reasons that gap bites:
+
+- **Protocol conformance is often declared in an extension in another file.**
+  The type's own definition may say nothing about the protocol you are changing.
+  `goToImplementation` finds the conformances; grep needs you to guess.
+- **Protocol extensions supply default implementations.** A method a call site
+  uses may exist in no conforming type at all.
+
+`@objc`, `#selector` and `NSClassFromString` are beyond sourcekit-lsp. Grep
+those too.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

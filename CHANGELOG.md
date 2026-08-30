@@ -178,6 +178,53 @@ you may already depend on, it says so under **Behaviour change**.
   and leaves no trace is not a gate, it is a default — and an overridden run
   records `spec_gate_overridden` rather than reporting itself as passed.
 
+### Added — guidance on *when* to use a language server, where the decision happens
+
+Fixing the servers made them work. It did not make anything use them, which was
+the actual complaint: no mode of Claude reaches for `LSP` on its own.
+
+The reason is not subtle. An agent about to change code reaches for `Grep`,
+because grep is the habit and it always returns something. Handing every agent
+the tool does not compete with that; naming the moment does. And the moment a
+`*-rules` skill loads *is* the moment — those are keyed to the extension under
+edit.
+
+This README claimed the work was already done — *"each `*-rules` skill states
+the circumstance that requires a lookup"*. Zero of the fifteen mentioned `LSP`.
+All the guidance in the product was one line in `engineering-baseline` and three
+in `orchestration`, both about the same narrow case.
+
+- `engineering-baseline` now carries the language-agnostic decision once: a
+  table of four questions — who calls this, where does this come from, what
+  implements this, what does this file contain — each against **the search you
+  would otherwise run**, because "use the language server" loses to habit while
+  "`findReferences`, not grep, and here is what grep misses" does not. With both
+  limits stated, since a rule with no limit gets applied where it does not hold
+  and then distrusted everywhere: dynamic dispatch is invisible to every
+  language server, and no server installed means no answer rather than an empty
+  caller list.
+
+- The twelve rules skills whose languages have a declared server each state what
+  grep gets wrong *in that language*: `__init__.py` re-exports and decorator
+  renaming in Python, barrel files and aliased imports in TypeScript, implicit
+  interface satisfaction in Go, blanket impls and macro expansion in Rust,
+  partial classes and explicit interface implementations in C#, traits in PHP,
+  extension functions in Kotlin, protocol conformance declared in another file
+  in Swift, header/definition split and preprocessor rewriting in C++. Ruby and
+  Lua say the opposite where it is true: metaprogramming makes a
+  `findReferences` result a floor on the caller set, not the caller set.
+
+- `bash-rules`, `sql-rules` and `web-ui-rules` deliberately say nothing. No
+  declared server covers `.sh`, `.sql`, `.css` or `.html`, and advice that
+  cannot work is worse than none — it spends a call and teaches the agent the
+  tool is useless.
+
+`test_lsp_guidance_sync.py` pins both halves against `plugin.json` rather than
+against a list: adding a server for shell or SQL fails the suite until that
+skill gains its section. It also checks that every LSP operation named in any
+asset is one the tool actually has, the same rule `test_asset_honesty.py`
+applies to vise's own tools.
+
 ### Fixed — the LSP servers were declared, not usable
 
 Reported as "the LSPs we added can't actually be used". They could not, and

@@ -34,6 +34,20 @@ stated below.
 - Don't write Java-style getters/setters — use properties
 - Don't ignore platform types from Java interop — annotate/assert nullability at the boundary
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToImplementation`, `findReferences`, `goToDefinition`, `documentSymbol`)
+resolves bindings; grep matches text. Two Kotlin-specific reasons that gap bites:
+
+- **Extension functions are declared away from the type they extend.** A call
+  that reads like a member may be defined in an unrelated file, which is exactly
+  the case grep cannot follow from the call site.
+- **Overrides across a hierarchy share a name.** `goToImplementation` separates
+  the real overrides from every same-named function in the repo.
+
+Reflection and annotation-driven wiring are invisible to the server. Grep those
+too.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

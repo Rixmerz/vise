@@ -55,6 +55,22 @@ an unrelated change.
   `mypy --strict` in CI (one tool instead of Flake8 + Black + isort)
 - New project needing machine-readable logs: `structlog` with JSON output
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `goToImplementation`, `documentSymbol`)
+resolves bindings; grep matches text. Three Python-specific reasons that gap bites:
+
+- **`__init__.py` re-exports.** The module a caller imports from is usually not
+  where the thing is defined. `goToDefinition` lands on the definition; grep on
+  the import path lands on the re-export.
+- **Decorators rename the callable.** A `@app.route`-style wrapper means the
+  name at the call site and the name in the `def` need not match.
+- **Method calls resolve by type.** `client.send(...)` tells grep nothing about
+  which `send` — `goToDefinition` on the call site does.
+
+`getattr`, `**kwargs` dispatch and string-keyed registries are invisible to
+pyright. Grep those too, and say the caller list is unverified.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

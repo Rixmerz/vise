@@ -114,6 +114,32 @@ language's own footguns live in that language's `*-rules` skill.
 - Every spawned task is owned by something that cancels it. No orphans.
 - Respect cancellation — a task that ignores its cancellation signal leaks.
 
+### Finding things — the language server before grep
+
+`grep` matches text. A language server resolves bindings. When the thing you
+are looking for is a *symbol* — a function, type, method, field — reach for
+`LSP` first; when it is a string, a config key, a log message or a TODO, grep
+is correct and the server has nothing to say.
+
+The four that pay for themselves, each against the search you would otherwise
+run:
+
+| Question | `LSP` | why not grep |
+|---|---|---|
+| who calls this? | `findReferences` | grep finds the name; it misses aliased imports and re-exports, and it hits comments, strings and unrelated same-named symbols |
+| where does this come from? | `goToDefinition` | the import path is often a barrel or a re-export, not the definition |
+| what implements this? | `goToImplementation` | implementations rarely name the thing they implement |
+| what does this file contain? | `documentSymbol` | reading 800 lines to find three methods |
+
+`hover` answers "what type is this actually" for anything inferred or generic,
+which is a question the source text cannot answer at all.
+
+Two honest limits. **Dynamic dispatch is invisible to every language server** —
+reflection, `send`, `getattr`, string-keyed DSLs — so in those languages grep
+the name as well. And **no server, no answer**: if the language has none
+installed, `LSP` returns nothing, and that is a reason to fall back to text
+search and say so, never to report a caller list as complete.
+
 ### Changing a signature
 - Before changing a public signature, resolve the caller set with `LSP`
   (`findReferences`, plus `goToImplementation` for an interface member).

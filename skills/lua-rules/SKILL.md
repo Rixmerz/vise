@@ -32,6 +32,20 @@ stated below.
 - Don't `error()` with a bare string across module boundaries without context
 - Don't leave `print` debugging in committed code — use the host's logger
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToDefinition`, `findReferences`, `documentSymbol`) resolves bindings;
+grep matches text. In Lua the honest guidance runs both ways:
+
+- **Use it for ordinary module functions.** `require`-returned tables and
+  `M.fn = function()` definitions resolve, and that is most of a normal file.
+- **Do not trust it alone.** Everything is a table at runtime: methods assigned
+  through a variable, `setmetatable` dispatch, and string-keyed lookups are
+  invisible to the server.
+
+So: language server first, grep second, and say the caller list is unverified
+whenever the call goes through a table built at runtime.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

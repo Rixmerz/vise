@@ -35,6 +35,20 @@ stated below.
 - Don't return mixed `false`-or-value sentinels — throw or return null with a nullable type
 - Don't ignore `phpstan`/`psalm` findings without justification
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `documentSymbol`)
+resolves bindings; grep matches text. Two PHP-specific reasons that gap bites:
+
+- **Traits compose methods into classes.** The method a call site uses is
+  defined in a trait, not in the class it is called on, so grep inside the class
+  finds nothing.
+- **Namespaced `use` aliases rename the symbol.** `use A\B as C` means the name
+  at the call site is not the name at the declaration.
+
+`__call`, `__get` and container-resolved services are invisible to intelephense.
+Grep those too, and say the caller list is unverified.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

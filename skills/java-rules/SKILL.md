@@ -37,6 +37,22 @@ stated below.
 - Don't use checked exceptions for control flow
 - Don't leave `System.out.println` in production code — use a logger (SLF4J)
 
+## Navigation — the language server, not grep
+
+`LSP` (`goToImplementation`, `findReferences`, `goToDefinition`, `documentSymbol`)
+resolves bindings; grep matches text. Two Java-specific reasons that gap bites:
+
+- **Overrides are indistinguishable by name.** Grep for `process(` returns every
+  unrelated `process` in the repo; `findReferences` on the declaration returns
+  the callers that actually bind to it, and `goToImplementation` returns the
+  overrides.
+- **The declaration and the callers are in different packages by design.**
+  Interface-first code puts the thing you are changing far from everything that
+  uses it.
+
+Reflection, `ServiceLoader`, and annotation-driven wiring are invisible to
+jdtls. Grep the name too, and say the caller list is unverified.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

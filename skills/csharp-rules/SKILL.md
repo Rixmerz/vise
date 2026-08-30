@@ -34,6 +34,21 @@ stated below.
 - Don't use `string` concatenation in loops — use `StringBuilder`/`string.Join`
 - Don't leave `Console.WriteLine` for diagnostics — use `ILogger`
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `goToImplementation`, `documentSymbol`)
+resolves bindings; grep matches text. Two C#-specific reasons that gap bites:
+
+- **Partial classes split a type across files.** `documentSymbol` on one file
+  shows you a fraction of the type; the members you are looking for may be in a
+  generated partial you would never open.
+- **Explicit interface implementations do not carry the plain name.**
+  `void IFoo.Bar()` is invisible to a grep for `Bar(` at the call sites that use
+  it through the interface.
+
+Reflection and DI-container registration are invisible to the server. Grep those
+too.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

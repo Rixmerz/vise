@@ -44,6 +44,22 @@ incumbent wins. Never migrate a toolchain as a side effect of another change.
 - A schema validator (Zod/Valibot) at the boundaries, not hand-written guards
 - `Result`-style error values only where adopted module-wide
 
+## Navigation — the language server, not grep
+
+`LSP` (`findReferences`, `goToDefinition`, `goToImplementation`, `documentSymbol`)
+resolves bindings; grep matches text. Three TypeScript-specific reasons that gap
+bites:
+
+- **Barrel files.** `export * from './x'` means the path an import names is
+  almost never the definition site. `goToDefinition` goes through the barrel.
+- **Aliased and type-only imports.** `import { a as b }` and
+  `import type { T }` both defeat a grep for the original name.
+- **Overloads share one name.** `findReferences` on the signature you are
+  changing separates the callers that bind to it from the ones that do not.
+
+Types are erased at runtime, so anything reached through `any`, a string index
+or a dynamic `import()` is beyond the server. Grep those too.
+
 ## Security — outranks every rule above
 
 `engineering-baseline` is the general floor and `security-baseline` says how to

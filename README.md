@@ -371,12 +371,31 @@ client reads this map (extension → server) to give agents `hover` /
 does **not** install these toolchains; it only declares which binary to
 launch per file extension. Install what you need:
 
-Declaring a server is not the same as using one, and until recently vise only
-did the first: no agent listed the `LSP` tool, so nothing could call it. Now the
-18 code-touching agents carry it, each `*-rules` skill states the circumstance
-that requires a lookup, and `skills/orchestration/SKILL.md` has the engineer
-resolve a symbol's caller set before dispatching a wave that changes its
-signature. Note what the tool does **not** do: its nine operations are all
+Declaring a server is not the same as using one, and vise has been wrong about
+this twice. First no agent listed the `LSP` tool, so nothing could call it.
+Then 19 agents carried the tool and **nothing told them when to reach for it** —
+an agent about to change code reaches for `Grep`, because grep is the habit and
+it always returns something. This README claimed each `*-rules` skill named the
+circumstance that required a lookup; none of them did.
+
+Guidance now sits at the moment of the decision, which is when a `*-rules` skill
+loads, because those are keyed to the extension under edit.
+`engineering-baseline` carries the language-agnostic version once — a table of
+four questions against the search you would otherwise run — plus its two limits:
+dynamic dispatch is invisible to every language server, and no server means no
+answer rather than an empty caller list. The twelve rules skills whose languages
+have a declared server each add what grep gets wrong *in that language*: barrel
+files and aliased imports in TypeScript, implicit interface satisfaction in Go,
+blanket impls and macro expansion in Rust, `__init__.py` re-exports in Python,
+partial classes in C#, traits in PHP, protocol conformance declared in another
+file in Swift. Ruby and Lua say the opposite where it is true — metaprogramming
+makes a `findReferences` result a floor on the caller set, not the caller set.
+
+`bash-rules`, `sql-rules` and `web-ui-rules` deliberately say nothing: no
+declared server covers `.sh`, `.sql` or `.css`, and advice that cannot work is
+worse than none. `test_lsp_guidance_sync.py` pins both halves against
+`plugin.json`, so adding a server for one of those languages fails the suite
+until its skill gains the section. Note what the tool does **not** do: its nine operations are all
 navigation, and none of them is diagnostics — error checking is `lsp_clean`'s
 job, and that validator shells out to per-language checkers rather than
 speaking LSP at all.
