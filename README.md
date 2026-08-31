@@ -279,6 +279,7 @@ Environment variables (all optional):
 | `VISE_WORKFLOW_SUGGEST` | Toggle the workflow suggester hook |
 | `VISE_NODE_GATE_OVERRIDE` | One-shot bypass of a red node gate. Honoured by **both** the node gate and a `validators_green` edge — guarding only the first made it a no-op on `feature-dev`'s `spec` phase, whose exit edge is exactly that. Each gate it actually gets you past is recorded once; `vise insights` reports the rate |
 | `VISE_SNAPSHOT_ON_EDIT` | Enable per-edit snapshot capture (off by default; phase-transition snapshots always fire) |
+| `VISE_TRUST_PROJECT_TOOLS` | Run a linter or type checker that the audited repository *committed* into its own `.venv/bin/`. Off by default: the edit-feedback hook fires on every `.py` write with no other guard, so a freshly cloned repo could get its own binary executed before you had run a single vise command. A `.venv` git is not tracking is assumed to be one you built, and is used without this |
 > **New repo?** Run `vise bootstrap` first. Installing the plugin ships the
 > agents, skills, commands and hooks; it cannot ship the part that is about
 > *your* repo — which command runs its tests, what `sast` means in a Go

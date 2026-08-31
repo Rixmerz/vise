@@ -90,6 +90,10 @@ def _severity_for_ruff(code: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: A single indexed path lookup; anything slower than this is a broken repo.
+_GIT_PROVENANCE_TIMEOUT_S = 10
+
+
 def _find_checker(name: str, project_dir: str | Path | None = None) -> str | None:
     """Return the path to *name*, preferring the active venv's bin directory.
 
@@ -112,15 +116,17 @@ def _find_checker(name: str, project_dir: str | Path | None = None) -> str | Non
     have nothing to do with the repo being validated. That is how this gate came
     to report missing stubs for a numpy the project has installed.
     """
-    if project_dir is not None:
-        candidate = Path(project_dir) / ".venv" / "bin" / name
-        if candidate.exists():
+    audited = Path(project_dir).resolve() if project_dir is not None else None
+
+    if audited is not None:
+        candidate = audited / ".venv" / "bin" / name
+        if _runnable(candidate) and _is_locally_built(candidate, audited):
             return str(candidate)
 
     virtual_env = os.environ.get("VIRTUAL_ENV")
     if virtual_env:
         candidate = Path(virtual_env) / "bin" / name
-        if candidate.exists():
+        if _runnable(candidate):
             return str(candidate)
 
     # A checkout's own .venv, which is what CLAUDE.md tells contributors to
@@ -128,14 +134,14 @@ def _find_checker(name: str, project_dir: str | Path | None = None) -> str | Non
     cwd = Path.cwd().resolve()
     for base in (cwd, *cwd.parents):
         candidate = base / ".venv" / "bin" / name
-        if candidate.exists():
+        if _runnable(candidate) and _is_locally_built(candidate, audited):
             return str(candidate)
 
     # Walk up from this module's location looking for a sibling bin/<name>
     # (covers the vise venv layout: <venv>/lib/pythonX.Y/site-packages/...).
     for parent in Path(__file__).resolve().parents:
         candidate = parent / "bin" / name
-        if candidate.exists():
+        if _runnable(candidate):
             return str(candidate)
 
     found = shutil.which(name)
@@ -143,6 +149,53 @@ def _find_checker(name: str, project_dir: str | Path | None = None) -> str | Non
         return found
 
     return None
+
+
+def _runnable(candidate: Path) -> bool:
+    """A file that can actually be executed.
+
+    ``.exists()`` was the whole test, so a *directory* named ``ruff`` — or a
+    non-executable file — was returned as the checker and every later call
+    failed somewhere less obvious.
+    """
+    return candidate.is_file() and os.access(candidate, os.X_OK)
+
+
+def _is_locally_built(candidate: Path, audited: Path | None) -> bool:
+    """False when this binary arrived with the repository under audit.
+
+    ``edit_feedback`` is registered under ``PostToolUse`` for
+    ``Edit|Write|MultiEdit`` with no env guard, so the first ``.py`` edit in a
+    freshly cloned repository executed whatever that repository had committed at
+    ``.venv/bin/ruff``. No vise command, no workflow, no prompt.
+
+    Provenance rather than a blanket opt-in, because the reason project-local
+    checkers come first is real: it is the only environment holding the
+    dependencies the code under check imports. A ``.venv`` git is tracking came
+    *with* the clone; one git does not know about was built by the person
+    running vise, which is every ordinary case and stays preferred.
+
+    What this does not cover: a tree that arrived some other way — an unpacked
+    archive, a shared mount — is indistinguishable from one built in place.
+    ``VISE_TRUST_PROJECT_TOOLS=1`` is the escape hatch for a repository that
+    really does vendor its toolchain.
+    """
+    if audited is None:
+        return True
+    try:
+        candidate.relative_to(audited)
+    except ValueError:
+        return True  # not inside the tree under audit, so not shipped with it
+    if os.environ.get("VISE_TRUST_PROJECT_TOOLS") == "1":
+        return True
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", str(candidate)],
+            cwd=str(audited), capture_output=True, timeout=_GIT_PROVENANCE_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True  # cannot tell, and refusing every checker helps nobody
+    return tracked.returncode != 0
 
 
 # ---------------------------------------------------------------------------

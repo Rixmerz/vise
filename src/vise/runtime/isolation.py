@@ -37,16 +37,40 @@ class GitResult:
     ok: bool
     stdout: str = ""
     stderr: str = ""
+    #: git's stdout unchanged. A patch has to be written from these, not from
+    #: `stdout` re-encoded — see `_git`.
+    stdout_bytes: bytes = b""
 
 
 def _git(cwd: Path | str, *args: str, timeout: int = GIT_TIMEOUT_S) -> GitResult:
+    """Run one git command. Reports; never raises.
+
+    Output is captured as bytes and decoded with ``surrogateescape`` rather than
+    with ``text=True``, which decodes strict. git base64-encodes a diff only for
+    files it considers *binary* — meaning NUL-containing — so a latin-1 source
+    file is diffed as text and its raw bytes reach the decoder. The resulting
+    ``UnicodeDecodeError`` is a ``ValueError``, so it passed straight through the
+    old ``except`` and out of ``Scheduler.run``, skipping ``cleanup()`` and
+    stranding a worktree and a branch. ``stdout_bytes`` is kept beside the text
+    because re-encoding a surrogateescape'd diff as strict UTF-8 corrupts the
+    patch — the writer wants the bytes git produced, unchanged.
+
+    The ``except`` is broad for the same reason: a helper whose contract is
+    "report, never raise" cannot have a list of failures it makes an exception
+    for.
+    """
     try:
         proc = subprocess.run(
-            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout
+            ["git", *args], cwd=str(cwd), capture_output=True, timeout=timeout
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except Exception as exc:  # noqa: BLE001 - the contract is report, never raise
         return GitResult(False, "", str(exc))
-    return GitResult(proc.returncode == 0, proc.stdout, proc.stderr)
+    return GitResult(
+        proc.returncode == 0,
+        proc.stdout.decode("utf-8", "surrogateescape"),
+        proc.stderr.decode("utf-8", "surrogateescape"),
+        proc.stdout,
+    )
 
 
 @dataclass(frozen=True)
@@ -240,7 +264,7 @@ class WorktreePool:
         changed = self.changed_paths(task_id)
         patch = self.root / "patches" / f"{_slug(task_id)}.patch"
         patch.parent.mkdir(parents=True, exist_ok=True)
-        patch.write_text(diff.stdout, encoding="utf-8")
+        patch.write_bytes(diff.stdout_bytes)
 
         # Snapshot exactly the paths this patch touches, so a failure can be
         # backed out without touching anything else. `git checkout -- .` would

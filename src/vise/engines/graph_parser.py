@@ -209,7 +209,19 @@ def parse_yaml_simple(content: str) -> dict:
                             elif not ival:
                                 # Could be nested structure
                                 start_idx += 1
-                                # Look ahead
+                                # Look ahead, past anything that carries no
+                                # value. A comment or a blank line between a key
+                                # and its block used to fall through both
+                                # branches, which dropped the value *and* every
+                                # sibling key after it — `security-audit`'s
+                                # `fix-criticals` shipped with no validators, no
+                                # name and no prompt because of one comment. The
+                                # dict branch below already skips these.
+                                while start_idx < len(lines):
+                                    peek = lines[start_idx].strip()
+                                    if peek and not peek.startswith('#'):
+                                        break
+                                    start_idx += 1
                                 if start_idx < len(lines):
                                     next_line = lines[start_idx]
                                     next_stripped = next_line.strip()

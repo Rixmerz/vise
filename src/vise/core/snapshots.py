@@ -121,11 +121,18 @@ def _targets_vise_dir(line: str) -> bool:
 def _ensure_state_dir_gitignored(project: Path) -> None:
     """Ensure `.vise/` is ignored in the target project's .gitignore.
 
-    Idempotent: appends `.vise/` only when the project has a `.git` dir and
-    no existing .gitignore line already covers it. Never raises.
+    Idempotent: appends `.vise/` only when the project is a repository and no
+    existing .gitignore line already covers it. Never raises.
+
+    Asks `_is_git_repo`, not `(project / ".git").is_dir()`. In a `git worktree
+    add` checkout and in every submodule `.git` is a regular *file* holding
+    `gitdir: ...`, so the directory test bailed, the rule was never written, and
+    `create()`'s `git add -A` swept `.vise/` into the snapshot. Restoring that
+    snapshot then wrote vise's own state directory back over itself and the next
+    `create()` failed outright.
     """
     try:
-        if not (project / ".git").is_dir():
+        if not _is_git_repo(project):
             return
         gitignore = project / ".gitignore"
         if gitignore.exists():
@@ -310,6 +317,40 @@ def diff(project: Path, a: str, b: str) -> str:
     return _git(project, "diff", ra, rb)
 
 
+def _current_tree(project: Path) -> str | None:
+    """A tree object for the working tree as it stands, or None.
+
+    Same technique as ``create``: stage everything into a scratch index so the
+    comparison sees untracked files, and touch neither the real index nor the
+    working tree. Used by the restore preview; None means "could not build one",
+    and the caller falls back rather than refusing to preview at all.
+    """
+    tmp_index = paths.ensure(paths.project_state_dir(project)) / "preview.index"
+    real_index = Path(
+        _git(project, "rev-parse", "--path-format=absolute", "--git-path", "index")
+    )
+    try:
+        if real_index.exists():
+            shutil.copyfile(real_index, tmp_index)
+        elif tmp_index.exists():
+            tmp_index.unlink()
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = str(tmp_index)
+        for args in (["add", "-A"], ["write-tree"]):
+            done = subprocess.run(
+                ["git", "-C", str(project), *args],
+                env=env, capture_output=True, text=True, check=False,
+            )
+            if done.returncode != 0:
+                return None
+        return done.stdout.strip() or None
+    except OSError:
+        return None
+    finally:
+        with contextlib.suppress(OSError):
+            tmp_index.unlink(missing_ok=True)
+
+
 def restore(project: Path, snap_id: str, *, dry_run: bool = True) -> str:
     """Preview (or perform) a restore from the given snapshot.
 
@@ -330,7 +371,22 @@ def restore(project: Path, snap_id: str, *, dry_run: bool = True) -> str:
     if ref is None:
         raise RuntimeError(f"unknown snapshot: {snap_id}")
     if dry_run:
-        return _git(project, "diff", "HEAD", ref)
+        # Against the working tree, not HEAD: the apply below writes the
+        # *worktree* (`git checkout <ref> -- .`), so HEAD-vs-ref described a
+        # change nobody had asked for and omitted the uncommitted edits the
+        # restore was about to overwrite — which is the state everyone is in
+        # when they reach for a rollback.
+        #
+        # Via a tree rather than a plain `git diff <ref>`, because a snapshot
+        # holds untracked files (`create` stages with `add -A`) and `git diff`
+        # only considers tracked paths — so every untracked file in the
+        # snapshot was previewed as a deletion that was not going to happen.
+        # `-R` then orients it the way it reads: what is there now on the left,
+        # what the restore puts there on the right.
+        current = _current_tree(project)
+        if current is None:
+            return _git(project, "diff", "-R", ref)
+        return _git(project, "diff", "-R", ref, current)
 
     real_index = Path(_git(project, "rev-parse", "--path-format=absolute", "--git-path", "index"))
     tmp_index = paths.ensure(paths.project_state_dir(project)) / "restore.index"
