@@ -1,10 +1,27 @@
 """Pluggable validators that produce ValidatorRecords from a Goal.
 
-Kept intentionally small. The HTTP/HTML/contrast/screenshot validators were
-removed along with the swarm/workflow-synth pieces — they were exceeding the
-scope of the auto-clear + assign-next-task loop. The four below cover the
-``tests pass``, ``lint pass``, ``arbitrary command exits 0``, and ``files
-exist`` cases that the loop actually depends on.
+Fourteen of them, in ``_REGISTRY`` at the bottom of this file, which is the
+list — not this sentence. It said four and named the contrast and screenshot
+validators as removed, while defining both, because it was written when there
+were four and never read again.
+
+They fall into three groups, and which group a validator is in decides what it
+does when it cannot run:
+
+* **Repo checks** — ``tests_pass``, ``lint_pass``, ``lsp_clean``,
+  ``quality_check``, ``dead_code`` via ruff, ``no_new_deps``, ``diff_scope``,
+  ``files_exist``, ``tests_fail``, ``openspec``, ``capability``. Most skip-pass
+  when their binary is absent, reporting ``source="asserted"`` and
+  ``outcome="unverified"`` rather than a clean bill: blocking a repo for
+  lacking a tool it does not use would be wrong, and so would calling that a
+  pass.
+* **Design gates** — ``design_tokens``, ``ui_contrast``, ``ui_layout``. These
+  drive a real browser and **fail closed**: a gate that cannot evaluate must
+  never report success. ``quality-gate-graph.yaml`` documents why the two
+  halves differ.
+* **Command** — ``command_exit``, which fails closed for the same reason.
+
+When adding one, decide which side it is on and say so in its docstring.
 """
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ classification rather than from whoever is writing the log line.
 
 Everything here is a pure function of a result and its history. No model call,
 no I/O, no clock — the decision has to be reproducible from the record, or
-``vise explain`` is reconstructing a guess.
+``vise runtime explain`` is reconstructing a guess.
 """
 from __future__ import annotations
 

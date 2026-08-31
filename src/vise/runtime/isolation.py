@@ -509,4 +509,11 @@ def _slug(value: str) -> str:
     while "--" in out:
         out = out.replace("--", "-")
     out = out.strip("-")[:40].strip("-") or "task"
-    return f"{out}-{hashlib.sha1(value.encode('utf-8', 'surrogateescape')).hexdigest()[:8]}"
+    # `usedforsecurity=False`: this is a uniqueness suffix, not a digest anyone
+    # relies on. Without the flag it is a bandit B324/CWE-327 finding, and it
+    # raises outright under a FIPS provider — the same fix this repo already
+    # applied to its other SHA1.
+    digest = hashlib.sha1(
+        value.encode("utf-8", "surrogateescape"), usedforsecurity=False
+    ).hexdigest()[:8]
+    return f"{out}-{digest}"

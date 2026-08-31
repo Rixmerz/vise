@@ -366,9 +366,25 @@ class ExperienceMemoryStore:
             self.entries = []
 
     def save(self) -> None:
-        """Write entries to JSON, applying eviction if over MAX_ENTRIES."""
+        """Write the union of what is on disk and what is in memory.
+
+        Merging, not replacing, because this store has two writers in two
+        processes. `get_experience_store()` loads once per process and the MCP
+        server is long-lived, so its `self.entries` is a snapshot from whenever
+        it booted — while `experience_recorder` runs as its own interpreter on
+        every commit and appends to the same file. Writing the snapshot back
+        was a clean, atomic, unrecoverable replacement of everything recorded
+        since, which is the shape of data loss that leaves no evidence.
+
+        In-memory wins per dedup key: this process has just recorded or bumped
+        those, so they are the newer of the two. Everything on disk under a key
+        this process does not hold is kept. Eviction applies to the union, so
+        the cap still means what it says.
+        """
         if self._file_path is None:
             return
+
+        self.entries = self._merged_with_disk()
 
         # Eviction: remove lowest confidence + oldest entries
         if len(self.entries) > MAX_ENTRIES:
@@ -410,6 +426,35 @@ class ExperienceMemoryStore:
             maybe_nudge_gc(len(self.entries), self._file_path)
         except Exception:
             pass
+
+    def _merged_with_disk(self) -> list[ExperienceEntry]:
+        """This process's entries, plus any on disk it does not already hold.
+
+        An unreadable file is treated as no file: refusing to write would lose
+        what is in memory too, and this store is a cache of judgements rather
+        than a system of record.
+        """
+        if self._file_path is None or not self._file_path.exists():
+            return list(self.entries)
+        try:
+            raw = json.loads(self._file_path.read_text()).get("entries", [])
+            on_disk = [ExperienceEntry.from_dict(e) for e in raw]
+        except Exception:
+            return list(self.entries)
+
+        merged = list(self.entries)
+        held = {self._dedup_key(e) for e in merged}
+        for entry in on_disk:
+            key = self._dedup_key(entry)
+            if key in held:
+                continue
+            # The hook writes no `id`. An entry nobody can address cannot be
+            # bumped, gc'd or reported against.
+            if not entry.id:
+                entry.id = str(uuid.uuid4())[:8]
+            held.add(key)
+            merged.append(entry)
+        return merged
 
     def _dedup_key(self, entry: ExperienceEntry) -> tuple:
         """Deduplication key: same type + file_pattern + domain = same experience."""

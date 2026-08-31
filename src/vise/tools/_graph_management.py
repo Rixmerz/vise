@@ -39,7 +39,9 @@ def register_graph_management_tools(mcp):
 
         Args:
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -189,7 +191,9 @@ def register_graph_management_tools(mcp):
         Args:
             graph_name: Name of the graph file (without -graph.yaml extension)
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -289,7 +293,9 @@ def register_graph_management_tools(mcp):
 
         Args:
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
         result = deactivate_graph_state(resolved_dir)
@@ -316,7 +322,9 @@ def register_graph_management_tools(mcp):
 
         Args:
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -359,7 +367,9 @@ def register_graph_management_tools(mcp):
             since: ISO timestamp to filter events from (default: workflow start)
             limit: Maximum number of events to return (default: 50)
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -453,7 +463,9 @@ def register_graph_management_tools(mcp):
 
         Args:
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -505,7 +517,9 @@ def register_graph_management_tools(mcp):
             node_id: ID of the node to override
             new_max: New maximum visits (must be > current visits)
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 

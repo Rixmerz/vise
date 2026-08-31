@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from vise.core.atomic import write_atomic
 from vise.runtime.budget import BudgetLedger
 from vise.runtime.contracts import (
     TERMINAL_STATES,
@@ -152,7 +153,7 @@ class RunState:
     human_gate: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
 
-    #: The narrative `vise explain` reads back. Bounded, because a run that
+    #: The narrative `vise runtime explain` reads back. Bounded, because a run that
     #: escalates and replans can emit hundreds and the state file is read on
     #: every resume — an unbounded log turns a resume into a large parse.
     MAX_EVENTS: int = 2000
@@ -299,7 +300,7 @@ class RunState:
         """
         path = Path(root) / "runs" / self.spec.run_id / "state.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+        write_atomic(path, json.dumps(self.to_dict(), indent=2, sort_keys=True))
         return path
 
     @classmethod
@@ -307,7 +308,17 @@ class RunState:
         path = Path(root) / "runs" / run_id / "state.json"
         if not path.is_file():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # A run whose state file cannot be read is reported as no such run,
+        # which every caller already handles. `run_status` and `run_budget`
+        # serve this from the MCP server process while the CLI is still
+        # writing it, and a traceback out of an MCP tool is a worse answer
+        # than "nothing here".
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
         spec_data = data.get("spec") or {}
         budget_data = (data.get("budget") or {}).get("budget") or {}
         spec = RunSpec(

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+from vise.core.atomic import write_atomic
 
 
 class GoalStatus(str, Enum):
@@ -191,10 +192,7 @@ def mark_abandoned(project_dir: str) -> Optional[Goal]:
 
 
 def _write(g: Goal) -> None:
-    p = _path_for(g.project_dir)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(asdict(g), indent=2, default=str), encoding="utf-8")
-    tmp.replace(p)
+    write_atomic(_path_for(g.project_dir), json.dumps(asdict(g), indent=2, default=str))
 
 
 def _from_dict(d: dict) -> Goal:

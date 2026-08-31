@@ -140,7 +140,7 @@ writing asserts is mechanical. Seeing that a green test pins a bug is not.
 ## Explainability
 
 Every routing decision is recorded with the inputs that produced it, and
-`vise explain <run>` renders them:
+`vise runtime explain <run>` renders them:
 
 ```
 task 17  backend-auth   sonnet/high

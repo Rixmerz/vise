@@ -134,7 +134,7 @@ class ClaudeCodeWorker:
     #: has removed the one check a human still had.
     permission_mode: str | None = None
     extra_args: tuple[str, ...] = ()
-    #: Recorded for `vise explain`: the argv of every dispatch, in order.
+    #: Recorded for `vise runtime explain`: the argv of every dispatch, in order.
     calls: list[list[str]] = field(default_factory=list)
 
     # --- the protocol ----------------------------------------------------

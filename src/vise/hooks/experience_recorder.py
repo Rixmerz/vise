@@ -139,6 +139,39 @@ def _save_store(path: Path, data: dict) -> None:
         pass
 
 
+#: A command that runs `git commit`, not one that mentions it. Anchored at the
+#: start of the command or after a shell separator, so a quoted mention in an
+#: echo, a grep pattern or a comment does not fire the recorder.
+_RUNS_GIT_COMMIT = re.compile(
+    r"(?:^|[;&|]|&&|\|\||\bthen\b|\bdo\b)\s*(?:sudo\s+)?git\b[^;&|]*\bcommit\b"
+)
+
+#: How much of an untrusted string is worth keeping.
+_MAX_UNTRUSTED = 200
+
+
+def _untrusted(text: str, limit: int = _MAX_UNTRUSTED) -> str:
+    """Flatten text that came from a repository before it is stored globally.
+
+    A commit subject is written by whoever wrote the repository, and this hook
+    files it into the *global* cross-project store — where `experience_injector`
+    later surfaces it, as prose, into sessions working on unrelated projects.
+    That is a path from "clone a repo" to "text of the repo author's choosing
+    appears in your next session's context", so what crosses it is data and has
+    to look like data.
+
+    Collapses to a single line, drops control characters, and caps the length.
+    Not an attempt at sanitising prose — there is no such thing — but it removes
+    the shapes that stop it reading as a quoted value: line breaks, ANSI escapes,
+    and unbounded length.
+    """
+    if not text:
+        return ""
+    flat = " ".join(str(text).split())
+    flat = "".join(ch for ch in flat if ch.isprintable())
+    return flat[:limit]
+
+
 def _find_duplicate(entries: list, commit_type: str, file_pattern: str, description: str) -> int:
     """Return index of matching entry or -1 if not found."""
     for i, entry in enumerate(entries):
@@ -190,8 +223,11 @@ def main():
     tool_input = hook_input.get("tool_input", {})
     command = tool_input.get("command", "")
 
-    # Only trigger on git commit commands
-    if "git commit" not in command:
+    # Only trigger on a command that actually *runs* git commit. The test used
+    # to be `"git commit" in command`, so `echo "run git commit next"` or a
+    # grep whose pattern contained the words fired the whole recorder — and
+    # what it records goes into a store every other project reads.
+    if not _RUNS_GIT_COMMIT.search(command):
         print(_APPROVE)
         return
 
@@ -285,8 +321,8 @@ def main():
             "file_pattern": file_pattern,
             "keywords": extract_keywords(file_path),
             "domain": guess_domain(file_path),
-            "description": commit_subject,
-            "resolution": commit_body,
+            "description": _untrusted(commit_subject, 200),
+            "resolution": _untrusted(commit_body, 1000),
             "severity": "medium",
             "confidence": 0.5,
             "occurrences": 1,

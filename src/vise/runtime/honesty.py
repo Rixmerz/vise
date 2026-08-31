@@ -170,10 +170,18 @@ def check_result(
     # tree, and a diff cannot tell whose file is whose — so without this, every
     # parallel run refuses both writers for each other's work.
     #
-    # The cost is real and bounded: a task that writes into a concurrent peer's
-    # territory is excused for exactly as long as that peer is in flight. The
-    # fix that removes the cost rather than bounding it is per-task worktree
-    # isolation, where the diffs never share a tree.
+    # State the cost accurately, because it is wider than it sounds. The excuse
+    # covers every non-conflicting *writing* peer in the node, for the whole
+    # run — not only the ones running at this moment. `_foreign_ownership` is
+    # deliberately built that way and says why: two peers dispatched in the same
+    # pass each miss the other, since the first starts before the second exists
+    # to be seen, and an end-to-end run refused both writers for each other's
+    # work. So in a shared tree, rule 4 is only as strong as the narrowest
+    # ownership declaration in the node.
+    #
+    # The fix that removes the cost rather than widening the excuse is per-task
+    # worktree isolation, where the diffs never share a tree and this branch is
+    # never taken — `--isolate` passes no foreign ownership at all.
     escaped = _own.escaped(result.changed_paths, brief.ownership)
     if escaped and foreign_ownership:
         escaped = tuple(p for p in escaped if not _own.matches(p, foreign_ownership))

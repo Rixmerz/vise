@@ -5,8 +5,25 @@
 # map skip-passes with source="asserted", so the gate stays honest about what
 # it did not look at rather than blocking a repo for lacking a tool.
 #
-# Only list what this repo really has. Everything here is already installed and
-# already runs in CI (.github/workflows/ci.yml).
+# Only list what this repo really has. Everything here is installed in .venv.
+#
+# What CI does with each one, per check, because a blanket claim is a claim
+# nobody can check:
+#   gated in CI    lint, unit, coverage, sast, secrets, dead_code
+#                  dead_code is F401/F841 and therefore already inside the
+#                  `lint` run; it is listed on its own so a node gating on it
+#                  alone gets a real answer instead of a skip
+#   reported only  sca — a dependency advisory needs reachability triage by a
+#                  person before it means anything (see security-baseline), and
+#                  a gate that goes red on a transitive advisory nobody has read
+#                  is how an override habit starts
+#   not in CI      spec — openspec is a Node CLI and is not installed there
+#
+# This header used to make one blanket assertion covering all eight. Four were
+# not run at all and a fifth ran at a different threshold, so the file whose job
+# is to state what a merge has passed was the one saying it had passed more than
+# it had. `test_quality_profile_claims_match_ci.py` now fails when this list and
+# the workflow disagree.
 #
 # Every command runs through .venv/bin/python. A bare `pytest` resolves against
 # the MCP SERVER's PATH, not this project's — which found the system pytest, ran
@@ -46,9 +63,10 @@ checks:
   dead_code: [".venv/bin/python", "-m", "ruff", "check", ".", "--exclude", ".claude",
               "--select", "F401,F841"]
 
-  # Medium and up. bandit reports 89 Low against this tree and all 89 are
-  # B110/B112 (try/except/pass) on the deliberate fail-open handlers that every
-  # vise hook is contractually required to have — the same ~95%-noise shape as
+  # Medium and up. bandit reports 129 Low against this tree, and they are
+  # B110/B112 (try/except/pass) plus B404/B603/B607 (subprocess) — the
+  # deliberate fail-open handlers every vise hook is contractually required to
+  # have, and the git calls the snapshot and isolation layers are made of — the same ~95%-noise shape as
   # ruff's BLE001, which is why [tool.ruff.lint] does not select it either.
   # Gating on Low would mean either 89 permanent findings or 89 #nosec comments;
   # neither is a security control. Medium+ was one real finding (a SHA1 without

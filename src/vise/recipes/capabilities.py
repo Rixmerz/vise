@@ -108,6 +108,16 @@ CAPABILITIES: frozenset[str] = frozenset({
 # meta.list, meta.notion_drift and validate.integration.e2e are deliberately
 # absent: they resolve unbound until the user binds a real MCP.
 # ---------------------------------------------------------------------------
+#: Capabilities vise executes itself, in this process, with no MCP tool behind
+#: them. They belong here rather than in INTERNAL_BINDINGS because the comment
+#: above is right: a binding to a tool that does not exist reports a false green.
+#: But leaving them out entirely was the other error — the resolver answered
+#: "unbound", `capability_audit` reported a GAP, and any tier requiring them was
+#: unsatisfiable, while `runner` dispatched them directly the whole time. Being
+#: satisfied by vise is a third answer, and it is the true one.
+BUILTIN_CAPABILITIES: frozenset[str] = frozenset({"meta.assert"})
+
+
 INTERNAL_BINDINGS: dict[str, tuple[str, str]] = {
     "meta.record_experience": ("experience", "experience_record"),
     "meta.health": ("vise", "vise_version"),
