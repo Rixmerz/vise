@@ -94,3 +94,35 @@ def test_partition_is_stable_across_calls():
     """Greedy, not optimal — but a grouping that shifts between runs is worse."""
     claims = {"a": ["x/**"], "b": ["x/y.py"], "c": ["z/**"]}
     assert own.partition(claims) == own.partition(claims)
+
+
+# --- the bare-directory claim: admission and refusal must agree -----------
+
+
+def test_matches_and_conflicts_agree_on_a_bare_directory():
+    """`conflicts` reads `src/auth` as the subtree; `matches` must too.
+
+    When they disagree, admission control lets the task in on the strength of
+    the subtree reading and the honesty gate then refuses its every write on
+    the strength of the other one. The task cannot succeed at anything.
+    """
+    assert own.conflicts(["src/auth"], ["src/auth/token.py"])
+    assert own.matches("src/auth/token.py", ["src/auth"])
+
+
+@pytest.mark.parametrize("claim", ["src/auth", "src/auth/", "src/auth/**"])
+def test_a_write_inside_a_claimed_directory_never_escapes(claim):
+    assert own.escaped(["src/auth/token.py"], [claim]) == ()
+    assert own.escaped(["src/auth/deep/nested/thing.py"], [claim]) == ()
+
+
+def test_a_bare_directory_claim_still_refuses_a_sibling():
+    """Widening the claim must not widen it past the directory named."""
+    assert own.escaped(["src/authz/token.py"], ["src/auth"]) == ("src/authz/token.py",)
+    assert own.escaped(["src/other.py"], ["src/auth"]) == ("src/other.py",)
+
+
+def test_a_bare_directory_claim_does_not_match_its_own_prefix():
+    """`src/auth` is a claim on what is under it, not on `src` itself."""
+    assert not own.matches("src", ["src/auth"])
+    assert not own.matches("src/app.py", ["src/auth"])

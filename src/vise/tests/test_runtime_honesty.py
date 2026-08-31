@@ -234,3 +234,55 @@ def test_execute_tolerates_a_project_dir_that_is_not_a_repo(tmp_path):
 @pytest.mark.parametrize("role", ["test", "verify", "qa"])
 def test_every_evidence_role_is_gated(role):
     assert not check_result(_brief(role=role), _pass(evidence="")).accepted
+
+
+# --- rule 3: the hash has to see content, not git's summary of it ---------
+
+
+def test_a_second_edit_to_an_already_dirty_file_moves_the_tree_hash(tmp_path):
+    """`git status --porcelain` prints ` M app.py` no matter how much changed.
+
+    Hashing that line means the second task to touch a file another task left
+    dirty reads as "nothing was written" — the refusal that stops a run dead.
+    """
+    repo = _git_repo(tmp_path)
+    app = repo / "app.py"
+    app.write_text("one\n", encoding="utf-8")
+    dirty = tree_hash(repo)
+
+    app.write_text("one\ntwo\n", encoding="utf-8")
+
+    assert tree_hash(repo) != dirty
+
+
+def test_editing_an_untracked_file_twice_moves_the_tree_hash(tmp_path):
+    """`?? new.py` is likewise identical across two writes to a new file."""
+    repo = _git_repo(tmp_path)
+    new = repo / "new.py"
+    new.write_text("first\n", encoding="utf-8")
+    first = tree_hash(repo)
+
+    new.write_text("first\nsecond\n", encoding="utf-8")
+
+    assert tree_hash(repo) != first
+
+
+def test_a_staged_edit_that_is_then_extended_moves_the_tree_hash(tmp_path):
+    """Staged content moves the index, so the hash must read the index too."""
+    repo = _git_repo(tmp_path)
+    app = repo / "app.py"
+    app.write_text("one\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, capture_output=True, check=True)
+    staged = tree_hash(repo)
+
+    app.write_text("one\ntwo\n", encoding="utf-8")
+    subprocess.run(("git", "add", "-A"), cwd=repo, capture_output=True, check=True)
+
+    assert tree_hash(repo) != staged
+
+
+def test_the_tree_hash_is_stable_when_truly_nothing_changed(tmp_path):
+    """The rule only works if the hash is quiet on a tree that did not move."""
+    repo = _git_repo(tmp_path)
+    (repo / "app.py").write_text("one\n", encoding="utf-8")
+    assert tree_hash(repo) == tree_hash(repo)

@@ -103,20 +103,27 @@ def _path_intersect(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
     return _path_intersect(a[1:], b[1:])
 
 
+def _prefixes(short: tuple[str, ...], long_: tuple[str, ...]) -> bool:
+    """True when ``short`` names a directory that contains ``long_``.
+
+    Directional on purpose. ``src/auth`` covers ``src/auth/token.py``; the
+    reverse is not true, and a claim on ``src/auth`` is not a claim on ``src``.
+    """
+    if len(short) >= len(long_):
+        return False
+    return all(_segment_intersect(x, y) for x, y in zip(short, long_))
+
+
 def _is_prefix(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
-    """True when one segment list is a plain prefix of the other.
+    """True when either segment list names a directory containing the other.
 
     This is the bare-directory case: ``src/auth`` versus ``src/auth/token.py``.
     Glob intersection alone says no — one is a file path and the other is not a
     subtree pattern — but a task claiming ``src/auth`` plainly means the
-    directory. Resolved toward conflict, per the module docstring.
+    directory. Symmetric because two *patterns* conflict whichever way round
+    they are given. Resolved toward conflict, per the module docstring.
     """
-    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
-    if len(short) == len(long_):
-        return False
-    return all(
-        _segment_intersect(x, y) for x, y in zip(short, long_)
-    )
+    return _prefixes(a, b) or _prefixes(b, a)
 
 
 def patterns_conflict(a: str, b: str) -> bool:
@@ -144,7 +151,13 @@ def matches(path: str, patterns: object) -> bool:
     p = str(path).replace("\\", "/").lstrip("/")
     segments = tuple(p.split("/"))
     for pattern in normalize(patterns):
-        if _path_intersect(segments, tuple(pattern.split("/"))):
+        pat = tuple(pattern.split("/"))
+        # `_prefixes`, not `_is_prefix`: admission is symmetric between two
+        # patterns, but a concrete path is only inside a claim one way round.
+        # Without this the two questions disagree — admission reads `src/auth`
+        # as the subtree and lets the task in, then every write it makes is
+        # refused as an escape and the task cannot succeed at anything.
+        if _path_intersect(segments, pat) or _prefixes(pat, segments):
             return True
     return False
 

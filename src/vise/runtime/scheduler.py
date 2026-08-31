@@ -257,6 +257,11 @@ class Scheduler:
                     if replan:
                         by_id = self._replan(state, by_id, tasks)
 
+        # The executor has joined every thread by here, so anything still in
+        # `pending` has in fact finished — the loop just broke before collecting
+        # it. Its cost is real whether or not anyone read the result.
+        self._drain(state, pending)
+
         if state.succeeded():
             self._review(state)
         self._finalise(state)
@@ -996,6 +1001,65 @@ class Scheduler:
                 state.set_state(task_id, parked, f"{reason} (the run had already stopped)")
                 return
         state.set_state(task_id, new_state, reason)
+
+    def _drain(
+        self,
+        state: RunState,
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+    ) -> None:
+        """Settle every future the loop stopped before collecting.
+
+        A cancel, a wall-clock ceiling or a budget stop breaks the loop with
+        work in flight. Leaving those futures alone did not save the money —
+        the API was already billed — it only stopped the run from *saying* so,
+        and a ledger reporting $0.00 for a run that spent $7.77 is the one
+        number nobody can catch by reading the output.
+
+        Deliberately not a second collection pass: nothing here retries,
+        verifies, escalates or replans. The run is over. What is owed is the
+        accounting and an honest note on the record; deciding is
+        ``recovery.decide``'s job and there is nothing left to decide.
+        """
+        for future, (task_id, kind) in list(pending.items()):
+            try:
+                result, _ = future.result(timeout=0)
+            except Exception as exc:  # noqa: BLE001 - a stopped run reports, never raises
+                # No usage to settle, so the estimate has to come off the books
+                # by hand or the run ends holding a reservation forever.
+                state.ledger.release(task_id)
+                record = state.record(task_id)
+                record.note = record.note or (
+                    f"the run stopped while this was in flight and it "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                # Emitted, not only noted: a task that already carries a note
+                # from the stop itself would otherwise swallow this entirely,
+                # and a worker that crashed on the way out is exactly what a
+                # stopped run must not hide.
+                state.emit(
+                    "drain_failed", task=task_id, future_kind=kind,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                continue
+            if kind == "verify":
+                state.ledger.spend(f"{task_id}::verify", result.usage)
+                state.record(task_id).note = state.record(task_id).note or (
+                    "the run stopped while this task was being verified; the "
+                    "verification cost is on the record, its verdict is not"
+                )
+                continue
+            record = state.finish(task_id, result)
+            record.note = record.note or (
+                f"the run stopped before this was collected; the worker had "
+                f"finished and reported {result.verdict.value}"
+            )
+            state.emit(
+                "drained",
+                task=task_id,
+                verdict=result.verdict.value,
+                cost_usd=round(result.usage.cost_usd, 4),
+            )
+        pending.clear()
 
     def _sweep(self, state: RunState) -> None:
         """Nothing may still be pending or running once the loop is over.
