@@ -26,6 +26,7 @@ ALLOWED = {
     "test_edit_feedback_hook.py": ["ruff not installed"],
     "test_isolation_encoding.py": ["filesystem refuses non-UTF-8 filenames"],
     "test_snapshot_fault_injection.py": ["filesystem refuses non-UTF-8 filenames"],
+    "test_hostile_repo.py": ["filesystem refuses a newline in a filename"],
     "test_lsp_clean_validator.py": ["ruff not on PATH"] * 3,
     "test_lsp_guidance_sync.py": ["not running from a plugin checkout"],
     "test_plugin_lsp_manifest.py": ["not running from a plugin checkout"],

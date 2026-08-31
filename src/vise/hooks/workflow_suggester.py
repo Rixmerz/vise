@@ -28,6 +28,14 @@ from vise.hooks import _xdg
 MIN_PROMPT_CHARS = 60
 
 
+#: What a workflow name may contain to be listed. The stem reaches the user's
+#: prompt context verbatim, so this is a syntax boundary, not a style rule.
+_SAFE_STEM = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+#: A repo cannot make the hint arbitrarily long either.
+_MAX_LISTED = 40
+
+
 def _prompt_hash(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()[:12]
 
@@ -166,9 +174,17 @@ def _available_workflows(project_dir: str) -> list[str]:
             if not workflows_dir.exists():
                 continue
             for path in sorted(workflows_dir.glob("*.yaml")):
+                # A filename is chosen by whoever wrote the repository, and this
+                # stem is printed verbatim into UserPromptSubmit context on the
+                # first prompt after a clone — before any tool call, under a
+                # matcher of `*` with no env guard. A name carrying a newline
+                # adds lines to that block. Nothing about a workflow needs a
+                # character outside this set.
+                if not _SAFE_STEM.fullmatch(path.stem):
+                    continue
                 if path.stem not in seen:
                     seen.append(path.stem)
-        return sorted(seen)
+        return sorted(seen)[:_MAX_LISTED]
     except Exception:
         return []
 

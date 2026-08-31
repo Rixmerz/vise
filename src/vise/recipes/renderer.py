@@ -20,7 +20,10 @@ _TEMPLATE_RE = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
 _LONE_REF_RE = re.compile(r"^\{\{\s*([^}]+?)\s*\}\}$")
 
 
-def _resolve_ref(ref: str, inputs: dict[str, Any], step_outputs: dict[str, Any]) -> Any:
+def _resolve_ref(
+    ref: str, inputs: dict[str, Any], step_outputs: dict[str, Any],
+    *, env_literal: bool = False,
+) -> Any:
     """Resolve a single template reference like 'inputs.X' or 'steps.A.output.B'.
 
     Returns the NATIVE resolved value (dict/list/scalar) — callers that embed
@@ -34,7 +37,31 @@ def _resolve_ref(ref: str, inputs: dict[str, Any], step_outputs: dict[str, Any])
         key = parts[1]
         if key not in inputs:
             raise KeyError(f"template ref '{ref}': input '{key}' not provided")
-        return inputs[key]
+        # Walk the rest of the path. `split(".", 2)` computed it and then threw
+        # it away, so `{{ inputs.cfg.url }}` returned the whole of `cfg` — no
+        # error, the wrong value, and where `cfg` also held a token, a leak.
+        current = inputs[key]
+        for segment in (parts[2].split(".") if len(parts) > 2 and parts[2] else []):
+            if isinstance(current, dict):
+                if segment not in current:
+                    raise KeyError(
+                        f"template ref '{ref}': no key '{segment}' at that path"
+                    )
+                current = current[segment]
+                continue
+            if isinstance(current, list) and segment.isdigit():
+                index = int(segment)
+                if index >= len(current):
+                    raise KeyError(
+                        f"template ref '{ref}': index {segment} is past the end"
+                    )
+                current = current[index]
+                continue
+            raise KeyError(
+                f"template ref '{ref}': cannot look up '{segment}' in a "
+                f"{type(current).__name__}"
+            )
+        return current
 
     if parts[0] == "steps":
         if len(parts) < 3:
@@ -57,7 +84,19 @@ def _resolve_ref(ref: str, inputs: dict[str, Any], step_outputs: dict[str, Any])
     if parts[0] == "env":
         if len(parts) < 2:
             raise KeyError(f"template ref '{ref}': expected env.<VAR>")
+        if len(parts) > 2 and parts[2]:
+            # An environment variable name cannot contain a dot, so this is a
+            # mistake — and silently reading `parts[1]` would hand back a value
+            # the author did not ask for.
+            raise KeyError(
+                f"template ref '{ref}': env var names contain no dots; "
+                f"expected env.<VAR>"
+            )
         var_name = parts[1]
+        if env_literal:
+            # The caller wants a copy safe to persist. Hand back the reference,
+            # never the value — see `render_value`.
+            return f"{{{{ {ref} }}}}"
         value = os.environ.get(var_name)
         if value is None:
             raise KeyError(f"template ref '{ref}': env var '{var_name}' is not set")
@@ -66,8 +105,21 @@ def _resolve_ref(ref: str, inputs: dict[str, Any], step_outputs: dict[str, Any])
     raise KeyError(f"template ref '{ref}': unknown namespace '{parts[0]}' (expected inputs, steps, env)")
 
 
-def render_value(value: Any, inputs: dict[str, Any], step_outputs: dict[str, Any]) -> Any:
+def render_value(
+    value: Any, inputs: dict[str, Any], step_outputs: dict[str, Any],
+    *, env_literal: bool = False,
+) -> Any:
     """Recursively render template expressions in *value*.
+
+    ``env_literal=True`` resolves ``inputs`` and ``steps`` normally and returns
+    the ``{{ env.VAR }}`` token itself for the env namespace. That is how the
+    telemetry copy is built.
+
+    It has to be *built* that way rather than un-built afterwards. The old path
+    rendered first and then called `redact_env_refs` on the result — which only
+    rewrites strings that still contain a literal `{{ env.X }}` token, and after
+    rendering none do. So the redaction was a no-op and the secret went to
+    `runs.jsonl` in plaintext, under three docstrings promising the opposite.
 
     Strings:
       - A string that is EXACTLY one ``{{ ref }}`` (no surrounding text)
@@ -80,17 +132,21 @@ def render_value(value: Any, inputs: dict[str, Any], step_outputs: dict[str, Any
     if isinstance(value, str):
         lone = _LONE_REF_RE.match(value)
         if lone is not None:
-            return _resolve_ref(lone.group(1).strip(), inputs, step_outputs)
+            return _resolve_ref(lone.group(1).strip(), inputs, step_outputs,
+                                env_literal=env_literal)
 
         def replace(m: re.Match) -> str:  # type: ignore[type-arg]
-            return str(_resolve_ref(m.group(1).strip(), inputs, step_outputs))
+            return str(_resolve_ref(m.group(1).strip(), inputs, step_outputs,
+                                    env_literal=env_literal))
         return _TEMPLATE_RE.sub(replace, value)
 
     if isinstance(value, dict):
-        return {k: render_value(v, inputs, step_outputs) for k, v in value.items()}
+        return {k: render_value(v, inputs, step_outputs, env_literal=env_literal)
+                for k, v in value.items()}
 
     if isinstance(value, list):
-        return [render_value(item, inputs, step_outputs) for item in value]
+        return [render_value(item, inputs, step_outputs, env_literal=env_literal)
+                for item in value]
 
     return value
 

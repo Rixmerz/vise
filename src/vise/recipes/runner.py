@@ -33,7 +33,6 @@ from vise.recipes.telemetry import (
     BudgetTracker,
     StepTelemetryWriter,
     count_tokens,
-    redact_for_telemetry,
 )
 
 log = logging.getLogger(__name__)
@@ -260,7 +259,18 @@ async def run_recipe(
             }
 
         arg_tokens = count_tokens(rendered_args if isinstance(rendered_args, dict) else {})
-        rendered_args_redacted = redact_for_telemetry(rendered_args) if isinstance(rendered_args, dict) else {}
+        # Built from `step.args`, not from `rendered_args`. Redacting after
+        # rendering only rewrites strings that still hold a literal
+        # `{{ env.X }}` token, and after rendering none do — so the redaction
+        # was a no-op and the secret reached runs.jsonl in plaintext.
+        try:
+            rendered_args_redacted = render_value(
+                step.args, inputs, step_outputs, env_literal=True)
+        except KeyError:
+            # The same ref that failed above. Nothing safe to record.
+            rendered_args_redacted = {}
+        if not isinstance(rendered_args_redacted, dict):
+            rendered_args_redacted = {}
         budget.add(arg_tokens)
 
         budget_error = budget.check()

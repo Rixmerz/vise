@@ -160,10 +160,18 @@ def _load_recipes_from_dir(recipes_dir: Path, scope: str) -> dict[str, Recipe]:
                 continue
             recipe = _parse_recipe(raw, yaml_path, scope)
             result[recipe.name] = recipe
-        except ValueError as e:
-            log.error("[recipes] skipping %s: %s", yaml_path, e)
         except yaml.YAMLError as e:
             log.error("[recipes] YAML parse error in %s: %s", yaml_path, e)
+        except Exception as e:  # noqa: BLE001 - one bad file, not every recipe
+            # Broad on purpose. A recipe file comes from the repository, so its
+            # *shape* is attacker-chosen, and `_parse_recipe` reaches list(),
+            # attribute access and indexing on values it did not check. The
+            # handler caught ValueError and YAMLError; `inputs: 5` raises
+            # TypeError, which escaped and took `recipe_list`, `recipe_describe`
+            # and `recipe_run` down for every *other* recipe as well. Skipping
+            # one malformed file is the whole contract of this loop.
+            log.error("[recipes] skipping %s: %s: %s", yaml_path,
+                      type(e).__name__, e)
     return result
 
 
