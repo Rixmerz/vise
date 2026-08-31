@@ -296,9 +296,17 @@ def test_a_cancelled_run_stops_and_marks_the_rest_cancelled():
 
 
 def test_a_spec_bug_with_no_replanner_stops_for_a_person():
+    """`replanner=None` is now something a caller asks for, not the default.
+
+    It used to be the default, which meant `recovery` could return REPLAN, the
+    swap logic existed and was tested, and every spec failure in production
+    still ended here because nothing was on the other end of the hook.
+    """
     worker = MockWorker(scripted={"a": [_fail("a", FailureKind.SPEC_BUG)] * 4})
-    state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])], worker)
+    state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])],
+                 worker, config=SchedulerConfig(replanner=None))
     assert state.human_gate
+    assert any(e["kind"] == "replan_unavailable" for e in state.events)
     assert any(e["kind"] == "replan_unavailable" for e in state.events)
 
 

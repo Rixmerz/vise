@@ -195,7 +195,10 @@ PROJECT_SUPPLIED_ROLES = {
     "classify": "cheapest tier; the taxonomy is project-specific",
     "integration": "what 'integrated' means is a property of the deployment",
     "architecture": "the `architecture` skill exists; no agent carries it yet",
-    "replan": "the scheduler's replanner hook is unwired, so nothing calls it",
+    "replan": "priced as a tier, not staffed as a fleet: the bundled "
+              "replanner routes its remediation task to `design` at this "
+              "row's model and effort, so the price is used and no agent "
+              "answers to the name",
 }
 
 

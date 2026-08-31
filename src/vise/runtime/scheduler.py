@@ -43,6 +43,7 @@ from vise.runtime.contracts import (
     Verdict,
 )
 from vise.runtime.honesty import GateOutcome, tree_hash
+from vise.runtime.replan import default_replanner
 from vise.runtime.recovery import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_REPLANS,
@@ -85,10 +86,23 @@ class SchedulerConfig:
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     max_replans: int = DEFAULT_MAX_REPLANS
     #: Called with (state, tasks) when a failure says the plan was wrong.
-    #: Returns a new task list, or None to stop for a person. Absent by
-    #: default: inventing a new plan is a model's job, and a scheduler that
-    #: silently reshuffles the graph is worse than one that stops and says so.
-    replanner: Callable[[RunState, Sequence[Any]], Sequence[Any] | None] | None = None
+    #: Returns a new task list, or None to stop for a person.
+    #:
+    #: Defaults to `replan.default_replanner`, which puts a `design` task in
+    #: front of every task whose failure said the *plan* was wrong and lets the
+    #: same ladder judge the result. It was `None` for a long time, which meant
+    #: `recovery` could return REPLAN, the swap logic below was written and
+    #: tested, and in production every spec or architecture failure still ended
+    #: at `stop_for_human` because nothing was on the other end of the hook.
+    #:
+    #: What a replanner may do is bounded on purpose: it composes *tasks* from
+    #: roles the registry staffs. It never authors a validator or an acceptance
+    #: criterion, because a planner that writes the condition it is judged by is
+    #: grading its own homework. Pass `replanner=None` explicitly to go back to
+    #: stopping for a person.
+    replanner: Callable[[RunState, Sequence[Any]], Sequence[Any] | None] | None = (
+        default_replanner
+    )
     #: Consulted before each dispatch. True stops the run. The hook a caller
     #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
     should_cancel: Callable[[], bool] | None = None
