@@ -283,3 +283,77 @@ def test_a_gradient_background_is_declined_rather_than_guessed() -> None:
         "there is no single colour behind a gradient, so there is no ratio to "
         "report — inventing one is worse than declining"
     )
+
+
+# --- the state walk is the same walk ------------------------------------
+
+GRADIENT_BUTTON_PAGE = """<html><body style="margin:0">
+<div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px">
+  <button id="cta" style="color:#fff;background:transparent;border:0;font-size:14px">
+    Hover me
+  </button>
+</div></body></html>"""
+
+TRANSLUCENT_BUTTON_PAGE = """<html><body style="margin:0;background:#2b2b2b">
+<div style="background:rgba(255,255,255,0.15);padding:20px">
+  <button id="cta" style="color:#fff;background:transparent;border:0;font-size:14px">
+    Hover me
+  </button>
+</div></body></html>"""
+
+
+def _hover_nodes(page: str) -> dict:
+    from vise.engines.render_harness import INTERACTIVE_STATES, extract_states
+    from vise.engines.ui_contrast import REQUIRED_STYLE_PROPS
+
+    return extract_states(
+        page, {"cta": "#cta"},
+        states=INTERACTIVE_STATES,
+        extra_style_props=list(REQUIRED_STYLE_PROPS),
+    )
+
+
+def test_a_gradient_is_declined_in_hover_state_too() -> None:
+    """The state walk carried a stale copy of the default-state walk.
+
+    The copy predated both fixes the original documents — the gradient case and
+    the translucent stack — so a hover measurement reproduced verbatim the
+    "white on white, 1.0:1" the comments describe as already fixed.
+    """
+    from vise.engines.ui_contrast import check_nodes
+
+    by_state = _hover_nodes(GRADIENT_BUTTON_PAGE)
+
+    for state, nodes in by_state.items():
+        assert nodes, f"{state} produced no measurement at all"
+        assert all(n["styles"].get("background_uncertain") for n in nodes), (
+            f"{state}: a control over a gradient must be marked uncertain, "
+            f"got {[n['styles'].get('effective_background') for n in nodes]}"
+        )
+        assert not check_nodes(nodes, state=state), (
+            f"{state}: there is no single colour behind a gradient to compare "
+            f"against, so there is no ratio to report"
+        )
+
+
+def test_a_translucent_layer_is_composited_in_hover_state_too() -> None:
+    from vise.engines.ui_contrast import check_nodes
+
+    by_state = _hover_nodes(TRANSLUCENT_BUTTON_PAGE)
+
+    for state, nodes in by_state.items():
+        stack = nodes[0]["styles"].get("background_stack")
+        assert stack and len(stack) >= 2, (
+            f"{state}: the overlay and the ground must both be captured; got {stack}"
+        )
+        assert not check_nodes(nodes, state=state), (
+            f"{state}: white on a 15% overlay above #2b2b2b is legible"
+        )
+
+
+def test_the_state_walk_reports_a_text_signal() -> None:
+    """`has_own_text` has to reach the checker from both harness paths."""
+    by_state = _hover_nodes(TRANSLUCENT_BUTTON_PAGE)
+
+    for state, nodes in by_state.items():
+        assert nodes[0]["styles"]["has_own_text"] is True, state

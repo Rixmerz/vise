@@ -38,32 +38,31 @@ if TYPE_CHECKING:
 # unresolved = ids whose selector matched nothing, or threw (invalid CSS) —
 # the original layoutlint extractor dropped these silently; that is exactly
 # the failure mode a quality gate must not have.
-_EXTRACTOR_JS = r"""
-(args) => {
-  const { selectorsById, styleProps } = args;
-  const px = (v) => {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  const elements = {};
-  const unresolved = [];
-  for (const [id, sel] of Object.entries(selectorsById)) {
-    try {
-      const el = document.querySelector(sel);
-      elements[id] = el;
-      if (!el) unresolved.push(id);
-    } catch (e) {
-      elements[id] = null;
-      unresolved.push(id);
-    }
-  }
-
+#: The colour helpers both page scripts need, defined once.
+#:
+#: `_STATE_COLOR_JS` used to carry its own copy of the background walk, and
+#: the copy predated the two fixes the original carries — the gradient case
+#: and the translucent stack. So a hover state reproduced the exact bug the
+#: comments below describe as already fixed: "white on white, 1.0:1" for
+#: text that reads fine. Two implementations of one rule is one too many.
+_COLOR_JS = r"""
   // Alpha channel of a computed color string ("rgb(...)" / "rgba(...)").
   // A plain rgb() has no alpha component and is fully opaque.
   const alphaOf = (colorStr) => {
     const m = /rgba?\([^)]*,\s*([\d.]+)\s*\)/.exec(colorStr || "");
     return m ? parseFloat(m[1]) : 1;
+  };
+
+  // Text this element renders *itself*, not text a descendant renders. The
+  // contrast of a wrapper is a question about its child's colours, not its own,
+  // and `ui_contract` deliberately promotes empty positioned boxes to
+  // candidates for the geometry checks — so without this the contrast check
+  // judged the inherited `color` of a div that paints no glyph at all.
+  const hasOwnText = (el) => {
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3 && node.textContent.trim()) return true;
+    }
+    return false;
   };
 
   const describe = (el) => {
@@ -128,6 +127,32 @@ _EXTRACTOR_JS = r"""
     };
   };
 
+"""
+
+
+_EXTRACTOR_JS = r"""
+(args) => {
+  const { selectorsById, styleProps } = args;
+  const px = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const elements = {};
+  const unresolved = [];
+  for (const [id, sel] of Object.entries(selectorsById)) {
+    try {
+      const el = document.querySelector(sel);
+      elements[id] = el;
+      if (!el) unresolved.push(id);
+    } catch (e) {
+      elements[id] = null;
+      unresolved.push(id);
+    }
+  }
+
+  __COLOR_HELPERS__
+
   const nodes = [];
   for (const [id, sel] of Object.entries(selectorsById)) {
     const el = elements[id];
@@ -184,6 +209,7 @@ _EXTRACTOR_JS = r"""
     styles.effective_background_from = bg.from;
     styles.background_stack = bg.stack;
     styles.background_uncertain = bg.uncertain;
+    styles.has_own_text = hasOwnText(el);
 
     const node = {
       id,
@@ -340,37 +366,19 @@ _STATE_COLOR_JS = r"""
   let el = null;
   try { el = document.querySelector(selector); } catch (e) { el = null; }
   if (!el) return null;
-  const alphaOf = (c) => {
-    const m = /rgba?\([^)]*,\s*([\d.]+)\s*\)/.exec(c || "");
-    return m ? parseFloat(m[1]) : 1;
-  };
-  const describe = (n) => {
-    if (!n) return "";
-    let d = n.tagName;
-    if (n.id) d += "#" + n.id;
-    else if (n.className && typeof n.className === "string" && n.className.trim())
-      d += "." + n.className.trim().split(/\s+/).join(".");
-    return d;
-  };
+  __COLOR_HELPERS__
+
   const cs = getComputedStyle(el);
   const r = el.getBoundingClientRect();
-  let bgEl = el, bgColor = null;
-  while (bgEl) {
-    const b = bgEl === el ? cs : getComputedStyle(bgEl);
-    if (alphaOf(b.backgroundColor) > 0) { bgColor = b.backgroundColor; break; }
-    if (bgEl === document.documentElement) break;
-    bgEl = bgEl.parentElement;
-  }
-  if (bgColor === null) {
-    const body = document.body ? getComputedStyle(document.body) : null;
-    if (body && alphaOf(body.backgroundColor) > 0) { bgColor = body.backgroundColor; bgEl = document.body; }
-    else { bgColor = "rgb(255, 255, 255)"; bgEl = null; }
-  }
+  const bg = effectiveBackground(el, cs);
   const styles = {
     color: cs.color,
     background_color: cs.backgroundColor,
-    effective_background: bgColor,
-    effective_background_from: bgEl ? describe(bgEl) : "default",
+    effective_background: bg.color,
+    effective_background_from: bg.from,
+    background_stack: bg.stack,
+    background_uncertain: bg.uncertain,
+    has_own_text: hasOwnText(el),
   };
   for (const prop of styleProps) {
     const camel = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -379,6 +387,17 @@ _STATE_COLOR_JS = r"""
   return { rect: { x: r.x, y: r.y, width: r.width, height: r.height }, styles };
 }
 """
+
+
+# One definition, two page scripts. Substituted at import rather than at call
+# time so a template that forgets the placeholder fails loudly here.
+for _name in ("_EXTRACTOR_JS", "_STATE_COLOR_JS"):
+    _src = globals()[_name]
+    if "__COLOR_HELPERS__" not in _src:
+        raise AssertionError(f"{_name} lost its __COLOR_HELPERS__ placeholder")
+    globals()[_name] = _src.replace("__COLOR_HELPERS__", _COLOR_JS.strip())
+del _name, _src
+
 
 INTERACTIVE_STATES: tuple[str, ...] = ("hover", "focus")
 
