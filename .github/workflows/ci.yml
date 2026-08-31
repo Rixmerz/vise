@@ -15,7 +15,14 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e '.[dev]'
+        run: pip install -e '.[dev,design]'
+      # vise ships three design gates that drive a real browser, and CI had no
+      # browser — so `test_design_gates_render.py` skipped every run and the
+      # gates shipped exercised by nobody. `browser_status()` degrades to a skip
+      # rather than a failure, which is right for a contributor without
+      # chromium and wrong for the pipeline that is supposed to be the check.
+      - name: Install chromium for the render gates
+        run: python -m playwright install --with-deps chromium
       # vise ships a lint_pass validator and gates other repos on it; run it on
       # ourselves. Same command the validator defaults to.
       - name: Lint
