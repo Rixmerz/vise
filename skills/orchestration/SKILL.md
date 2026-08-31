@@ -32,6 +32,7 @@ entirely — so orchestrated work skipped every phase gate on the repo.
    | schema, index, data backfill | `migration` |
    | cut a release | `release` |
    | security surface | `security-audit` |
+   | establish what is true before building or deciding | `research` |
    | a multi-day slice, end to end | `sprint-e2e` |
 
    `graph_list_available` has the full list with descriptions when none of
@@ -124,6 +125,7 @@ agent carries nothing. Pass its name as `subagent_type`.
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |
 | Unit / integration tests for landed code | `vise:tester` |
 | README, changelog, API docs | `vise:docs-writer` |
+| Establish facts with sources — prior art, an API's real behaviour, the case against a plan | `vise:researcher` (read-only) |
 | Does finished work meet its acceptance criteria | `vise:verifier` (read-only) |
 | Adversarial review before commit/merge | `vise:reviewer` (read-only) |
 | Security surface (auth, input, secrets) | `vise:security-auditor` (read-only) |

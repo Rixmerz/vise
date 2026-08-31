@@ -61,12 +61,21 @@ def _charter(name: str, role: str, *, model: str = "haiku",
 
 
 def test_a_project_can_staff_a_role_nobody_bundled(tmp_path: Path):
-    """`research` is one of the seven the policy prices and the fleet cannot take."""
-    assert AgentRegistry.bundled().resolve("research").agent is None
-    root = _project(tmp_path, researcher=_charter("researcher", "research"))
-    resolved = AgentRegistry.for_project(root).resolve("research")
+    """A role the policy prices and the fleet cannot take.
+
+    Uses whichever role is still unstaffed today rather than naming one: this
+    test asserts the *mechanism*, and it used to name `research`, which then
+    gained a bundled charter and turned a real capability into a red test.
+    """
+    unstaffed = sorted(set(PROJECT_SUPPLIED_ROLES) - AgentRegistry.bundled().roles())
+    assert unstaffed, "nothing is unstaffed any more; pick another gap or drop this"
+    role = unstaffed[0]
+
+    assert AgentRegistry.bundled().resolve(role).agent is None
+    root = _project(tmp_path, **{"local-hire": _charter("local-hire", role)})
+    resolved = AgentRegistry.for_project(root).resolve(role)
     assert resolved.agent is not None
-    assert resolved.agent.id == "researcher"
+    assert resolved.agent.id == "local-hire"
 
 
 def test_a_project_with_no_agents_directory_is_unchanged(tmp_path: Path):
@@ -110,10 +119,10 @@ def test_shadowing_is_recorded_rather_than_silent(tmp_path: Path):
 
 
 def test_an_agent_nobody_shadows_keeps_its_origin(tmp_path: Path):
-    root = _project(tmp_path, researcher=_charter("researcher", "research"))
+    root = _project(tmp_path, **{"local-hire": _charter("local-hire", "research")})
     reg = AgentRegistry.for_project(root)
     assert reg.shadowed == ()
-    assert reg.origins["researcher"] == "project"
+    assert reg.origins["local-hire"] == "project"
     assert reg.origins["docs-writer"] == "bundled"
 
 
@@ -189,7 +198,6 @@ def test_a_refusal_carries_its_reason(tmp_path: Path):
 #: This list is a statement of the current gap, not permission for it to grow.
 #: A new priced role must either ship an agent or be added here on purpose.
 PROJECT_SUPPLIED_ROLES = {
-    "research": "cheapest tier; a project's sources differ too much to bundle one",
     "extract": "cheapest tier; shape of the extraction is project-specific",
     "inventory": "cheapest tier; what counts as inventory is project-specific",
     "classify": "cheapest tier; the taxonomy is project-specific",

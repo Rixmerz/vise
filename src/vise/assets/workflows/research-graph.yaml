@@ -1,0 +1,230 @@
+metadata:
+  name: "Research"
+  description: "Establish what is true about a question: scope, gather in parallel, verify every citation, hunt the contradictions, then synthesize — with the gaps named."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+# The first bundled workflow whose output is an answer rather than a diff, and
+# the first to use a `dag` node — the runtime's parallel fan-out shipped with no
+# bundled graph that reached it.
+#
+# The shape is not the engineering shape with different words. An implementation
+# workflow gates on "do the checks pass"; there is no test suite for a claim
+# about the world. What replaces it is citation: `verify` re-reads every source
+# a finding rests on and drops the finding if the source does not say it. That
+# is the only mechanical check available here, so it is the one that gates.
+#
+# `contradict` exists because agreement is the failure mode of parallel
+# research. Four agents given one question and no instruction to disagree return
+# four versions of the first plausible answer, and the run reports high
+# confidence for it.
+
+nodes:
+  - id: "scope"
+    name: "Scope"
+    is_start: true
+    prompt_injection: |
+      PHASE: SCOPE
+      Turn the request into a question that can be answered wrongly.
+      1. State the question in one sentence. If it is ambiguous, say which
+         reading you took and why — half of bad research is a good answer to
+         the wrong question.
+      2. Write down what an answer would have to contain to be useful here.
+         Not "information about X" — the specific things a reader must be able
+         to do or decide afterwards.
+      3. Split it into sub-questions that can be pursued independently. If two
+         sub-questions cannot be answered without each other, they are one
+         sub-question; say so rather than splitting them for the parallelism.
+      4. Say what would make the answer *not matter* — the condition under
+         which nobody needs this. If you cannot name one, the question is
+         probably too broad to answer.
+      Signal: say "scoped" when the sub-questions are written down.
+
+  - id: "gather"
+    name: "Gather"
+    node_type: "dag"
+    tasks:
+      - id: "primary"
+        name: "Primary sources"
+        role: "research"
+        writes: false
+        prompt: |
+          Go to the thing itself, not to writing about the thing. The code, the
+          RFC, the actual API response, the spec section. Where you can run
+          something to find out, run it and quote the output verbatim — that is
+          the strongest evidence available and it costs one command.
+          Cite everything: file:line, URL, or the command and its real output.
+      - id: "secondary"
+        name: "Prior art and literature"
+        role: "research"
+        writes: false
+        prompt: |
+          What has already been written, decided or tried about this. Include
+          the project's own history — commits, changelogs, issues, ADRs — which
+          is prior art nobody thinks to search. Cite everything, and prefer a
+          dated source over an undated one; say when a source is old enough
+          that it may no longer hold.
+      - id: "against"
+        name: "The case against"
+        role: "research"
+        writes: false
+        # The hardest pass in the set and the one that carries the workflow.
+        # Finding what makes the obvious answer wrong is not a search; a cheap
+        # model returns "no counter-evidence found" and is believed.
+        complexity: "high"
+        criticality: "elevated"
+        prompt: |
+          Your task is to find what would make the obvious answer wrong. Look
+          for the counter-case deliberately: the known failure mode, the
+          dissenting source, the condition under which the common advice does
+          not apply. "No counter-evidence found" is a finding only if you can
+          name where you looked for it.
+          You are not required to be balanced. The other tasks cover the case
+          for.
+      - id: "adjacent"
+        name: "Adjacent constraints"
+        role: "research"
+        writes: false
+        prompt: |
+          What else this answer has to survive that nobody asked about:
+          licensing, performance, security exposure, operational cost, the
+          platforms and versions actually in use here. Read the project's own
+          config and manifests for what it really targets rather than assuming.
+          Cite everything.
+    prompt_injection: |
+      PHASE: GATHER
+      Four independent passes at the same question, each blind to the others.
+      They run in parallel on purpose: an agent that has read another's answer
+      is confirming it, not checking it.
+      Every finding carries its source. A claim with no source is not a finding;
+      it belongs under the researcher's own conclusions, separately labelled.
+      Signal: say "gathered" when all four have reported.
+
+  - id: "verify"
+    name: "Verify sources"
+    prompt_injection: |
+      PHASE: VERIFY SOURCES
+      Re-read every source a finding rests on, and ask one question of each:
+      does it actually say this?
+      1. Open the citation. Not the summary of it — the line, the page, the
+         output. A citation nobody re-opened is a claim wearing a costume.
+      2. Drop any finding whose source does not support it, and say which and
+         why. This is the phase's output, not a side effect of it.
+      3. Flag any identifier that cannot be resolved — a CVE, an RFC, a
+         version, a function signature. An invented identifier is the most
+         convincing wrong thing a research report can contain, because it is
+         precisely formatted.
+      4. Mark findings that rest on a single source as single-sourced. That is
+         not a defect; it is a fact the reader needs.
+      This is the only mechanical check this workflow has. There is no test
+      suite for a claim about the world, so a finding that survives here is
+      exactly a finding whose source was re-read.
+      Signal: say "sources verified" when every citation has been opened.
+
+  - id: "contradict"
+    name: "Contradictions"
+    prompt_injection: |
+      PHASE: CONTRADICTIONS
+      Agreement is the failure mode of parallel research. Four agents given one
+      question return four versions of the first plausible answer unless
+      something makes the disagreement visible.
+      1. Put the four reports side by side and find every place they disagree,
+         including disagreements of emphasis and of scope.
+      2. For each: do NOT average them, do NOT pick the one you prefer, and do
+         NOT resolve it silently. Report both readings with their citations and
+         say what would settle it — a version difference, a command you could
+         run, a source neither has read.
+      3. Where they agree, ask whether they agree because it is true or because
+         they read the same source. Two findings citing one document are one
+         finding. Say so.
+      4. Name what nobody established. An unanswered sub-question reported as
+         unanswered is useful; one quietly omitted is how a plan gets built on
+         a gap.
+      Signal: say "contradictions mapped" when this is written down.
+
+  - id: "synthesize"
+    name: "Synthesize"
+    is_end: true
+    prompt_injection: |
+      PHASE: SYNTHESIZE
+      Write the answer, in two parts that never blend.
+      1. WHAT THE SOURCES SAY — each item cited, quoted where the exact wording
+         carries the weight. A reader must be able to check every line of this
+         without trusting you.
+      2. WHAT I CONCLUDE — your reading, labelled as yours, with the confidence
+         you actually have and the reason for it. A reader must be able to
+         accept part 1 and reject part 2.
+      Then, and not optionally:
+      3. NOT ESTABLISHED — the sub-questions that went unanswered, by name.
+      4. WHAT WOULD CHANGE THIS — the specific finding that would overturn the
+         conclusion. If nothing would, say that and explain why, because a
+         conclusion nothing could refute is not a conclusion.
+      Do not compute a confidence percentage. You cannot know the denominator,
+      and a number carries more authority than the evidence behind it.
+      Signal: say "synthesized" when the report is written.
+
+edges:
+  - id: "scope-to-gather"
+    from: "scope"
+    to: "gather"
+    condition:
+      type: "phrase"
+      phrases:
+        - "scoped"
+        - "next phase"
+        - "advance"
+
+  - id: "gather-to-verify"
+    from: "gather"
+    to: "verify"
+    condition:
+      type: "phrase"
+      phrases:
+        - "gathered"
+        - "next phase"
+        - "advance"
+
+  - id: "verify-to-contradict"
+    from: "verify"
+    to: "contradict"
+    condition:
+      type: "phrase"
+      phrases:
+        - "sources verified"
+        - "next phase"
+        - "advance"
+
+  # Verification can empty the evidence out from under the question. Going back
+  # to gather is the honest move; writing a synthesis on what is left is not.
+  - id: "verify-to-gather"
+    from: "verify"
+    to: "gather"
+    condition:
+      type: "phrase"
+      phrases:
+        - "sources do not support this"
+        - "gather again"
+    priority: 2
+
+  - id: "contradict-to-synthesize"
+    from: "contradict"
+    to: "synthesize"
+    condition:
+      type: "phrase"
+      phrases:
+        - "contradictions mapped"
+        - "next phase"
+        - "advance"
+
+  # A contradiction nobody can settle from what is on the table is a gap in the
+  # gathering, not a thing to note and move past.
+  - id: "contradict-to-gather"
+    from: "contradict"
+    to: "gather"
+    condition:
+      type: "phrase"
+      phrases:
+        - "unsettled without new sources"
+        - "gather again"
+    priority: 2

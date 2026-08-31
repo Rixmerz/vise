@@ -8,7 +8,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 
 ## Features
 
-- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 9 bundled workflows (feature-dev, debug, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own. Validators that cannot run — no linter on PATH, no checker installed, nothing in scope — still pass, because blocking a repo over tooling it doesn't use would be wrong. They report that pass as **unverified** rather than clean, so a green gate that verified nothing is visibly not the same as one that did.
+- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 10 bundled workflows (feature-dev, debug, research, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own. Validators that cannot run — no linter on PATH, no checker installed, nothing in scope — still pass, because blocking a repo over tooling it doesn't use would be wrong. They report that pass as **unverified** rather than clean, so a green gate that verified nothing is visibly not the same as one that did.
 - **Cross-project experience memory** — learnings recorded per file/topic, semantically indexed (fastembed) with FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand.
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal. Like per-edit snapshots, the gate is **opt-in** — off by default, enable with `VISE_GOAL_GATE=1`. The `goal_*` tools work regardless; only the blocking behaviour is gated.
@@ -80,7 +80,7 @@ uv venv && uv pip install -e .
 
 Inside a Claude Code session with vise loaded:
 
-1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 9 bundled workflows.
+1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 10 bundled workflows.
 2. **Work the phases** — `graph_traverse` advances between nodes. The enforcer blocks tools the current phase forbids; validator gates (tests, lint, capabilities) must pass before a gated transition.
 3. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
 4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
@@ -120,7 +120,7 @@ src/vise/
 ├── hooks/         # Claude Code hook entry points (see table above)
 ├── runtime/       # agent execution plane — contracts, registry, model router,
 │                  # ownership, budget, artifacts, planner (see docs/)
-├── assets/        # bundled workflows (9), recipes (11)
+├── assets/        # bundled workflows (10), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
 └── cli/           # `vise` CLI (graph/experience/insights/runtime, offline)
 ```
