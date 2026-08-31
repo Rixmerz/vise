@@ -45,7 +45,9 @@ BASELINE = "engineering-baseline"
 # Agents that write or review code, and therefore need language conventions —
 # either preloaded in frontmatter or loaded on demand via the `Skill` tool.
 # docs-writer is the one deliberate exclusion: it edits prose, not code.
-NON_CODE_AGENTS = {"docs-writer"}
+#: Agents that never write production code, so "which language's
+#: conventions apply" is not a question they have to answer.
+NON_CODE_AGENTS = {"docs-writer", "researcher"}
 
 # Charters over this are unreadable and stop being followed; the autoheal skill
 # enforces the same number when it decides between a charter edit and a runbook.

@@ -73,6 +73,25 @@ include = [
 # `coverage run -m pytest -q` and local runs measure the same thing CI does.
 source = ["src/vise"]
 omit = ["*/tests/*"]
+# Every hook is tested by launching it as its own interpreter — that is the
+# only way to test a thing whose contract is "must never take the session
+# down". Without `parallel` plus the `sitecustomize` shim on PYTHONPATH, those
+# children run uninstrumented and the whole `hooks/` package reports 0%, which
+# is the reverse of the truth: it is the best-covered part of the codebase.
+# `coverage combine` merges the per-process data files.
+parallel = true
+concurrency = ["thread", "multiprocessing"]
+
+[tool.coverage.report]
+# One floor, in one file. It lived in four — CI said 70, .vise/quality.yaml
+# said 71, CLAUDE.md said 74 — so "the coverage gate" meant a different number
+# depending on which one you ran, and the one that actually gated was the
+# lowest. Every caller now runs a bare `coverage report`.
+fail_under = 78
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

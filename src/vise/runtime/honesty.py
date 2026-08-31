@@ -21,7 +21,10 @@ can be talked out of its finding.
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -53,7 +56,20 @@ class GateOutcome:
 
 
 def tree_hash(directory: str | Path | None) -> str | None:
-    """Hash of ``git status --porcelain`` plus ``HEAD`` in ``directory``.
+    """Content hash of the working tree in ``directory``, plus ``HEAD``.
+
+    Built by writing a real git tree object from a *scratch* index: copy the
+    repo's index to a temp file (which keeps git's stat cache, so this stays
+    cheap), ``git add -A`` into that copy, and ``git write-tree``. The result is
+    a SHA over the actual bytes of every tracked and untracked-but-not-ignored
+    file. Neither the working tree nor the repo's real index is touched.
+
+    Hashing ``git status --porcelain`` instead — which is what this did — hashes
+    git's *summary* of the tree. Status prints ``  M app.py`` no matter how much
+    of app.py changed, so a task editing a file another task had already dirtied
+    produced a hash identical to its own baseline, and rule 3 read real work as
+    "nothing was written". Content is the only thing that answers the question
+    rule 3 asks.
 
     HEAD is in the hash so that a worker which commits its work still moves it.
     Without HEAD the tree goes clean on commit, a commit becomes
@@ -67,20 +83,47 @@ def tree_hash(directory: str | Path | None) -> str | None:
     if not directory:
         return None
     try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=str(directory), capture_output=True, text=True, timeout=_GIT_TIMEOUT_S,
-        )
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(directory), capture_output=True, text=True, timeout=_GIT_TIMEOUT_S,
+        with tempfile.TemporaryDirectory() as scratch:
+            index = Path(scratch) / "index"
+            real = _git(directory, "rev-parse", "--git-path", "index")
+            if real is None:
+                return None
+            source = Path(directory) / real.strip() if real.strip() else None
+            if source is not None and source.is_file():
+                # Carry the stat cache over; without it git re-hashes every file
+                # in the repo on every call.
+                shutil.copyfile(source, index)
+            env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+            if _git(directory, "add", "-A", env=env) is None:
+                return None
+            tree = _git(directory, "write-tree", env=env)
+            if tree is None:
+                return None
+        head = _git(directory, "rev-parse", "HEAD")
+    except OSError:
+        return None
+    return hashlib.sha256((tree + (head or "")).encode()).hexdigest()
+
+
+def _git(
+    directory: str | Path, *args: str, env: dict[str, str] | None = None
+) -> str | None:
+    """Run one git command for the hash. None on any failure — never raises.
+
+    Output is read as bytes and decoded with ``surrogateescape``: a repository
+    holding a latin-1 source file is not a reason for the honesty gate to blow
+    up the run.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(directory), capture_output=True, timeout=_GIT_TIMEOUT_S, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if status.returncode != 0:
+    if proc.returncode != 0:
         return None
-    head_out = head.stdout if head.returncode == 0 else ""
-    return hashlib.sha256((status.stdout + head_out).encode()).hexdigest()
+    return proc.stdout.decode("utf-8", "surrogateescape")
 
 
 def check_result(

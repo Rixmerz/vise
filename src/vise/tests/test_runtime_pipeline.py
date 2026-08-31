@@ -99,9 +99,15 @@ def test_the_debuggers_classification_decides_what_happens_next():
 
 
 def test_a_spec_bug_from_the_debugger_triggers_a_replan_not_an_escalation():
+    """What the name always said. It used to assert `replan_unavailable`,
+    which measured the unwired hook rather than the routing decision."""
     worker = _Undiagnosed("spec_bug")
     state = _run([_task()], worker, _registry(DEBUGGER))
-    assert any(e["kind"] == "replan_unavailable" for e in state.events)
+    assert state.replans >= 1, [e["kind"] for e in state.events]
+    assert any(e["kind"] == "replanned" for e in state.events)
+    assert not any(e["kind"] == "escalated" for e in state.events), (
+        "a spec bug must not spend a bigger model on the same wrong question"
+    )
 
 
 def test_a_failure_that_names_its_own_kind_is_not_sent_to_a_debugger():

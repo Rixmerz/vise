@@ -15,8 +15,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parents[3]
 
 
@@ -51,6 +49,9 @@ def test_asset_honesty_allowlist_matches_registry():
 def test_readme_tool_count_matches_registry():
     readme = (REPO / "README.md").read_text(encoding="utf-8")
     m = re.search(r"exposes \*\*(\d+) tools\*\*", readme)
-    if m is None:
-        pytest.skip("README no longer states an exact tool count")
+    assert m is not None, (
+        "the README must state an exact tool count — this test exists because "
+        "it once said 50 while the registry had 49, and a test that skips when "
+        "the claim it guards is deleted guards nothing"
+    )
     assert int(m.group(1)) == len(_registered_tool_names())

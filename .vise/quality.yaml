@@ -24,7 +24,21 @@ checks:
   # stale .coverage happened to be on disk — a green threshold measured against
   # an unrelated run from hours earlier. Same fold as the CI step.
   unit: [".venv/bin/python", "-m", "coverage", "run", "-m", "pytest", "-q"]
-  coverage: [".venv/bin/python", "-m", "coverage", "report", "--fail-under=71"]
+
+  # `combine` before `report`, and therefore a shell, because a check is one
+  # argv and these are two commands. Under [tool.coverage.run] parallel — which
+  # is what makes a hook launched as its own interpreter measurable at all —
+  # the run writes .coverage.<host>.<pid> and nothing writes .coverage, so a
+  # bare `report` finds no data and the gate goes red for a reason that has
+  # nothing to do with the code.
+  #
+  # `;` and not `&&`: combine exits 1 when there is nothing left to combine,
+  # which is the state right after a previous run of this same check. `report`
+  # is the judge here — it fails on absent data too, so nothing is hidden, and
+  # running the check twice no longer goes red for a reason that is not about
+  # the code. The string is a fixed literal; nothing in it is interpolated.
+  coverage: ["/bin/sh", "-c",
+             ".venv/bin/python -m coverage combine >/dev/null 2>&1; .venv/bin/python -m coverage report"]
 
   # dead_code is ruff's F401/F841, already inside the `lint` run above — listed
   # separately so a node gating on dead_code alone gets a real answer instead

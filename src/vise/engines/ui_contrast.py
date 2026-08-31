@@ -212,13 +212,21 @@ def _check_one(node: dict, state: str) -> ContrastFinding | None:
     rect = node.get("content_rect") or node.get("rect")
     if not isinstance(rect, dict):
         return None
-    # The harness reports no text-content signal, so this can only rule out
-    # elements with zero visible area, not confirm one actually has text.
     if float(rect.get("width", 0)) <= 0 or float(rect.get("height", 0)) <= 0:
         return None
 
     styles = node.get("styles")
     if not isinstance(styles, dict):
+        return None
+
+    # Contrast is a claim about text against its background. `ui_contract`
+    # deliberately promotes text-free positioned boxes to candidates — an empty
+    # absolute div that lands on top of its sibling is exactly what its geometry
+    # checks look for — and the same candidate list is fed here. Judging the
+    # inherited `color` of a box that paints no glyph produces a finding about
+    # nothing. Absent signal keeps the old behaviour: only a harness that
+    # positively reports "no text of its own" gets to skip a node.
+    if styles.get("has_own_text") is False:
         return None
 
     fg = styles.get("color")

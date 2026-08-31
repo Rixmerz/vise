@@ -51,9 +51,15 @@ TIER_COST_USD: tuple[float, ...] = (0.05, 0.85, 1.20, 2.10)
 #: haiku/medium — inexpressible, and quietly rewrote it to the nearest rung.
 #: A policy that cannot state its own defaults is not a policy.
 POLICY: dict[str, tuple[str, str]] = {
-    # extraction, simple research, classification
+    # extraction and classification
     "extract": ("haiku", "low"),
-    "research": ("haiku", "low"),
+    # research. Priced at haiku/low while it meant "look something up and no
+    # charter exists for it". It has a charter now, and that charter's contract
+    # is citation discipline — never report a fact from memory, never invent an
+    # identifier, quote rather than paraphrase. A model cheap enough to
+    # paraphrase confidently is the wrong tool for a rule like that, and the
+    # failure is invisible: a fabricated citation is precisely formatted.
+    "research": ("sonnet", "medium"),
     "inventory": ("haiku", "low"),
     "classify": ("haiku", "low"),
     # documentation

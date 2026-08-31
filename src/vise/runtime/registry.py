@@ -44,6 +44,7 @@ _ROLE_BY_NAME: dict[str, str] = {
     "security-auditor": "security",
     "verifier": "verify",
     "frontend": "frontend",
+    "researcher": "research",
 }
 
 _ROLE_BY_PREFIX: tuple[tuple[str, str], ...] = (

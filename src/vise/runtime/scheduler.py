@@ -43,6 +43,7 @@ from vise.runtime.contracts import (
     Verdict,
 )
 from vise.runtime.honesty import GateOutcome, tree_hash
+from vise.runtime.replan import default_replanner
 from vise.runtime.recovery import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_REPLANS,
@@ -85,10 +86,23 @@ class SchedulerConfig:
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     max_replans: int = DEFAULT_MAX_REPLANS
     #: Called with (state, tasks) when a failure says the plan was wrong.
-    #: Returns a new task list, or None to stop for a person. Absent by
-    #: default: inventing a new plan is a model's job, and a scheduler that
-    #: silently reshuffles the graph is worse than one that stops and says so.
-    replanner: Callable[[RunState, Sequence[Any]], Sequence[Any] | None] | None = None
+    #: Returns a new task list, or None to stop for a person.
+    #:
+    #: Defaults to `replan.default_replanner`, which puts a `design` task in
+    #: front of every task whose failure said the *plan* was wrong and lets the
+    #: same ladder judge the result. It was `None` for a long time, which meant
+    #: `recovery` could return REPLAN, the swap logic below was written and
+    #: tested, and in production every spec or architecture failure still ended
+    #: at `stop_for_human` because nothing was on the other end of the hook.
+    #:
+    #: What a replanner may do is bounded on purpose: it composes *tasks* from
+    #: roles the registry staffs. It never authors a validator or an acceptance
+    #: criterion, because a planner that writes the condition it is judged by is
+    #: grading its own homework. Pass `replanner=None` explicitly to go back to
+    #: stopping for a person.
+    replanner: Callable[[RunState, Sequence[Any]], Sequence[Any] | None] | None = (
+        default_replanner
+    )
     #: Consulted before each dispatch. True stops the run. The hook a caller
     #: uses to implement Ctrl-C, a timeout, or a UI cancel button.
     should_cancel: Callable[[], bool] | None = None
@@ -256,6 +270,11 @@ class Scheduler:
                         )
                     if replan:
                         by_id = self._replan(state, by_id, tasks)
+
+        # The executor has joined every thread by here, so anything still in
+        # `pending` has in fact finished — the loop just broke before collecting
+        # it. Its cost is real whether or not anyone read the result.
+        self._drain(state, pending)
 
         if state.succeeded():
             self._review(state)
@@ -996,6 +1015,65 @@ class Scheduler:
                 state.set_state(task_id, parked, f"{reason} (the run had already stopped)")
                 return
         state.set_state(task_id, new_state, reason)
+
+    def _drain(
+        self,
+        state: RunState,
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+    ) -> None:
+        """Settle every future the loop stopped before collecting.
+
+        A cancel, a wall-clock ceiling or a budget stop breaks the loop with
+        work in flight. Leaving those futures alone did not save the money —
+        the API was already billed — it only stopped the run from *saying* so,
+        and a ledger reporting $0.00 for a run that spent $7.77 is the one
+        number nobody can catch by reading the output.
+
+        Deliberately not a second collection pass: nothing here retries,
+        verifies, escalates or replans. The run is over. What is owed is the
+        accounting and an honest note on the record; deciding is
+        ``recovery.decide``'s job and there is nothing left to decide.
+        """
+        for future, (task_id, kind) in list(pending.items()):
+            try:
+                result, _ = future.result(timeout=0)
+            except Exception as exc:  # noqa: BLE001 - a stopped run reports, never raises
+                # No usage to settle, so the estimate has to come off the books
+                # by hand or the run ends holding a reservation forever.
+                state.ledger.release(task_id)
+                record = state.record(task_id)
+                record.note = record.note or (
+                    f"the run stopped while this was in flight and it "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                # Emitted, not only noted: a task that already carries a note
+                # from the stop itself would otherwise swallow this entirely,
+                # and a worker that crashed on the way out is exactly what a
+                # stopped run must not hide.
+                state.emit(
+                    "drain_failed", task=task_id, future_kind=kind,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                continue
+            if kind == "verify":
+                state.ledger.spend(f"{task_id}::verify", result.usage)
+                state.record(task_id).note = state.record(task_id).note or (
+                    "the run stopped while this task was being verified; the "
+                    "verification cost is on the record, its verdict is not"
+                )
+                continue
+            record = state.finish(task_id, result)
+            record.note = record.note or (
+                f"the run stopped before this was collected; the worker had "
+                f"finished and reported {result.verdict.value}"
+            )
+            state.emit(
+                "drained",
+                task=task_id,
+                verdict=result.verdict.value,
+                cost_usd=round(result.usage.cost_usd, 4),
+            )
+        pending.clear()
 
     def _sweep(self, state: RunState) -> None:
         """Nothing may still be pending or running once the loop is over.

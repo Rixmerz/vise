@@ -46,8 +46,23 @@ _COGNITIVO = "fase de lectura y juicio: no produce artefacto que una máquina pu
 _PROSA = "el artefacto es prosa para humanos; su calidad no es comprobable por exit code"
 _EXTERNO = "el efecto vive fuera del repo (GitHub, red), no en el árbol de trabajo"
 _PROYECTO = "comprobable en principio, pero solo contra convenciones del proyecto que vise no conoce"
+_INVESTIGACION = (
+    "el artefacto es una afirmación sobre el mundo, no un árbol de trabajo: "
+    "no hay suite que corra ni exit code que consultar. La comprobación real "
+    "de este workflow es la cita reabierta en `verify`, y ningún validador del "
+    "registro puede confirmar que alguien la abrió"
+)
 
 UNVERIFIED_BY_DESIGN: dict[tuple[str, str], str] = {
+    # --- research ------------------------------------------------------------
+    # vise's gates are built for repositories. Este es el primer workflow
+    # cuyo producto es una respuesta y no un diff, y decirlo aquí es más
+    # honesto que inventar un validador que finja comprobarlo.
+    ("research", "scope"): _INVESTIGACION,
+    ("research", "gather"): _INVESTIGACION,
+    ("research", "verify"): _INVESTIGACION,
+    ("research", "contradict"): _INVESTIGACION,
+    ("research", "synthesize"): _PROSA,
     # --- debug ---------------------------------------------------------------
     ("debug", "understand"): _COGNITIVO,
     ("debug", "classify"): _COGNITIVO,

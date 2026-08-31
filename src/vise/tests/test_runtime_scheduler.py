@@ -8,6 +8,7 @@ budget stops instead of finishing cheaply.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,13 @@ from vise.runtime.contracts import (
     Verdict,
 )
 from vise.runtime.registry import AgentRegistry, AgentSpec
-from vise.runtime.scheduler import Scheduler, SchedulerConfig, new_run_id, run_tasks
+from vise.runtime.scheduler import (
+    WAIT_SLICE_S,
+    Scheduler,
+    SchedulerConfig,
+    new_run_id,
+    run_tasks,
+)
 from vise.runtime.state import RunState
 from vise.runtime.worker import MockWorker
 
@@ -289,9 +296,17 @@ def test_a_cancelled_run_stops_and_marks_the_rest_cancelled():
 
 
 def test_a_spec_bug_with_no_replanner_stops_for_a_person():
+    """`replanner=None` is now something a caller asks for, not the default.
+
+    It used to be the default, which meant `recovery` could return REPLAN, the
+    swap logic existed and was tested, and every spec failure in production
+    still ended here because nothing was on the other end of the hook.
+    """
     worker = MockWorker(scripted={"a": [_fail("a", FailureKind.SPEC_BUG)] * 4})
-    state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])], worker)
+    state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])],
+                 worker, config=SchedulerConfig(replanner=None))
     assert state.human_gate
+    assert any(e["kind"] == "replan_unavailable" for e in state.events)
     assert any(e["kind"] == "replan_unavailable" for e in state.events)
 
 
@@ -427,3 +442,101 @@ def test_run_tasks_builds_a_spec_when_none_is_given():
 def test_the_event_log_narrates_the_run(kind):
     state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])])
     assert any(e["kind"] == kind for e in state.events)
+
+
+# --- what a stopped run owes: the money is real whether or not it finished ---
+
+
+class _BlockingWorker:
+    """Blocks until released, then reports a real cost.
+
+    Models the only case that matters for the ledger: the worker was dispatched,
+    it did work, the API was billed for it, and the loop stopped before the
+    result was collected.
+    """
+
+    def __init__(self, gate, cost_usd: float = 7.77):
+        self.gate = gate
+        self.cost_usd = cost_usd
+        self.started = threading.Event()
+
+    def run(self, brief):
+        self.started.set()
+        self.gate.wait(timeout=10)
+        return TaskResult(
+            task_id=brief.task_id, verdict=Verdict.PASS, summary="done",
+            evidence="$ pytest\n1 passed", checks="$ ruff\nAll checks passed!",
+            usage=Usage(cost_usd=self.cost_usd, tokens_in=10, tokens_out=20),
+        )
+
+
+def test_a_cancel_still_settles_what_the_in_flight_worker_spent():
+    """A stopped run's cost report must name money that was really spent.
+
+    The loop breaks out with futures in flight; the executor then joins them, so
+    the results exist. Discarding them makes the ledger report $0.00 for a run
+    that was billed.
+    """
+    gate = threading.Event()
+    worker = _BlockingWorker(gate)
+
+    def should_cancel():
+        # Let the task be dispatched and reach the worker, then cancel.
+        if worker.started.wait(timeout=5):
+            gate.set()
+            return True
+        return False
+
+    state = _run([Task(id="a", name="A", role="backend")], worker,
+                 config=SchedulerConfig(should_cancel=should_cancel))
+
+    assert state.cancelled
+    assert state.ledger.spent.cost_usd == pytest.approx(7.77)
+    assert state.tasks["a"].attempt_count == 1
+
+
+def test_a_stopped_run_leaves_no_money_sitting_in_a_reservation():
+    """A reservation is an estimate. Nothing may end a run still holding one."""
+    gate = threading.Event()
+    worker = _BlockingWorker(gate)
+
+    def should_cancel():
+        if worker.started.wait(timeout=5):
+            gate.set()
+            return True
+        return False
+
+    state = _run([Task(id="a", name="A", role="backend")], worker,
+                 config=SchedulerConfig(should_cancel=should_cancel))
+
+    assert state.ledger.reserved == {}
+
+
+def test_a_wall_clock_stop_settles_the_in_flight_cost_too():
+    """The other way the loop breaks with work in flight.
+
+    The ceiling sits under one `WAIT_SLICE_S`, so the first pass dispatches and
+    the second trips it. `should_cancel` is only a release valve here — it never
+    cancels; it lets the blocked worker return once the ceiling is certain to
+    have passed, which is what puts a *finished* future in `pending` at break.
+    """
+    gate = threading.Event()
+    worker = _BlockingWorker(gate, cost_usd=3.5)
+    calls = []
+
+    def should_cancel():
+        calls.append(1)
+        if len(calls) > 1:
+            gate.set()
+        return False
+
+    state = _run(
+        [Task(id="a", name="A", role="backend")], worker,
+        spec=_spec(budget=RunBudget(max_parallel=1,
+                                    max_wall_time_s=WAIT_SLICE_S / 2)),
+        config=SchedulerConfig(should_cancel=should_cancel),
+    )
+
+    assert state.human_gate, "the wall clock stops for a person, it does not cancel"
+    assert state.ledger.spent.cost_usd == pytest.approx(3.5)
+    assert state.tasks["a"].attempt_count == 1

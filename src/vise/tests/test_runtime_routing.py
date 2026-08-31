@@ -183,7 +183,7 @@ def test_an_unknown_role_starts_at_the_implementation_rung():
 
 @pytest.mark.parametrize("role,expected", [
     ("extract", ("haiku", "low")),
-    ("research", ("haiku", "low")),
+    ("research", ("sonnet", "medium")),
     ("classify", ("haiku", "low")),
     ("docs", ("haiku", "medium")),
     ("backend", ("sonnet", "medium")),

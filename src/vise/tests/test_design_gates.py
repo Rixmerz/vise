@@ -529,3 +529,39 @@ def test_rejected_targets_are_reported_not_silently_dropped(
 
     assert config.targets == ("https://ok.example/",)
     assert config.rejected_targets == ("not-a-url",)
+
+
+# --- contrast is a claim about text -------------------------------------
+
+
+def _contrast_node(node_id: str, *, has_own_text: bool) -> dict:
+    """Two identically-failing nodes; only the text signal differs."""
+    return {
+        "id": node_id,
+        "selector": f"#{node_id}",
+        "rect": {"x": 0, "y": 0, "width": 100, "height": 40},
+        "styles": {
+            "color": "rgb(255, 255, 255)",
+            "effective_background": "rgb(255, 255, 255)",
+            "font_size": "16px",
+            "font_weight": "400",
+            "has_own_text": has_own_text,
+        },
+    }
+
+
+def test_check_nodes_skips_a_box_that_renders_no_text_of_its_own():
+    nodes = [_contrast_node("texted", has_own_text=True),
+             _contrast_node("empty", has_own_text=False)]
+
+    findings = check_nodes(nodes)
+
+    assert [f.node_id for f in findings] == ["texted"]
+
+
+def test_a_node_with_no_text_signal_is_still_judged():
+    """Absent is not False — an older harness payload must not go unchecked."""
+    node = _contrast_node("legacy", has_own_text=True)
+    del node["styles"]["has_own_text"]
+
+    assert len(check_nodes([node])) == 1
