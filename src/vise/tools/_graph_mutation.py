@@ -152,7 +152,9 @@ def register_graph_mutation_tools(mcp):
 
         Args:
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 
@@ -194,7 +196,9 @@ def register_graph_mutation_tools(mcp):
         Args:
             node_id: ID of the node to jump to
             project_dir: Absolute path to the project directory (optional after set_session)
-            session_id: Optional session ID for parallel session isolation
+            session_id: Optional session ID. Remembers which project_dir this
+                session last used so later calls can omit it; it does NOT
+                isolate state — two sessions on one project share a graph
         """
         resolved_dir, sid = resolve_project_dir(project_dir, session_id)
 

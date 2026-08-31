@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from vise.recipes.capabilities import INTERNAL_BINDINGS
+from vise.recipes.capabilities import BUILTIN_CAPABILITIES, INTERNAL_BINDINGS
 
 if TYPE_CHECKING:
     pass
@@ -34,6 +34,11 @@ def resolve_capability(
     Returns:
         (mcp_name, tool_name) tuple or None if unresolved.
     """
+    # 0. Executed by vise itself, in this process. Reported as satisfied rather
+    # than as a gap, and with no tool named, because there is no tool.
+    if capability in BUILTIN_CAPABILITIES:
+        return ("vise", "builtin")
+
     # 1. User pin overrides everything
     if capability in user_pins:
         pinned = user_pins[capability]

@@ -100,14 +100,14 @@ def register_experience(mcp):
         # Keyed by id() because the stores are not hashable; holding the object
         # itself means each dirty store is saved exactly once without a second
         # pass re-deriving it from `top`.
-        _dirty_stores: dict[int, object] = {}
+        # Bumped in memory and deliberately not persisted here. This tool is
+        # annotated `readOnlyHint`, and it has to mean it: saving from a read
+        # path made *querying* the store a way to rewrite it. The bump reaches
+        # disk on the next real write, which merges rather than replaces.
         for entry, _score in top:
             store = stores_by_entry.get(entry.id)
             if store is not None:
                 store._bump_recall(entry)  # type: ignore[attr-defined]
-                _dirty_stores[id(store)] = store
-        for store in _dirty_stores.values():
-            store.save()  # type: ignore[attr-defined]
 
         return {
             "file_path": file_path,

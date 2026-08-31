@@ -55,3 +55,21 @@ def test_readme_tool_count_matches_registry():
         "the claim it guards is deleted guards nothing"
     )
     assert int(m.group(1)) == len(_registered_tool_names())
+
+
+def test_the_readme_states_the_tool_count_exactly_once():
+    """A second copy is a second thing to forget.
+
+    The README carried two counts 94 lines apart — 57 in the sentence the sync
+    test reads, and 49 in the tree diagram it does not. The regex above only
+    ever saw the first, so the second was free to drift and did.
+    """
+    import re
+
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    counts = re.findall(r"\b(\d+)\s+tools\b", readme)
+
+    assert len(counts) == 1, (
+        f"the tool count appears {len(counts)} times ({counts}); a doc-sync "
+        f"test can only hold one of them, so the others drift silently"
+    )

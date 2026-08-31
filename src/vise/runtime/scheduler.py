@@ -409,6 +409,13 @@ class Scheduler:
             trees[task_id] = tree
             if task_id not in baselines:
                 baselines[task_id] = tree_hash(tree) if brief.writes else None
+            # Persisted *before* the future is submitted, not after the batch.
+            # The worker starts on another thread the moment submit returns, so
+            # a `vise runtime status` racing it — or the worker reading the file
+            # itself — could see the task still PENDING inside a run that was
+            # already spending money on it. Writing here costs one file write
+            # per dispatch and removes the window rather than narrowing it.
+            self._persist(state)
             future = pool.submit(
                 execute, brief, self.worker,
                 project_dir=tree,

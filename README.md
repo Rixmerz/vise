@@ -112,7 +112,7 @@ All hooks fail open: on any internal error they exit 0 and never block the sessi
 
 ```
 src/vise/
-├── server.py      # FastMCP stdio server (49 tools)
+├── server.py      # FastMCP stdio server (the tool surface; the count is stated once, above)
 ├── engines/       # graph engine, experience memory + FSRS, goal gate,
 │                  # validators, snapshots, telemetry
 ├── tools/         # MCP tool surfaces (graph, experience, goal, snapshot,

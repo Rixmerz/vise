@@ -13,6 +13,7 @@ from typing import Optional
 
 from vise.core import state_paths as _state_paths
 from .graph_engine import GraphState, PathEntry, Graph
+from vise.core.atomic import write_atomic
 
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
@@ -192,7 +193,7 @@ def save_graph_state(project_dir: str, state: GraphState):
         **({'baseline_smells': state.baseline_smells} if state.baseline_smells is not None else {}),
     }
 
-    state_file.write_text(json.dumps(data, indent=2))
+    write_atomic(state_file, json.dumps(data, indent=2))
 
 
 def initialize_graph_state(project_dir: str, graph: Graph, graph_name: str) -> GraphState:

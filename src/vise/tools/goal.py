@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from vise.core.atomic import write_atomic
 from vise.core.session import resolve_project_dir
 from vise.engines import goal_state as engine
 from vise.engines import validators as val_engine
@@ -27,11 +28,13 @@ def _read_settings(settings_path: Path) -> dict:
 
 
 def _write_settings_atomic(settings_path: Path, data: dict) -> None:
-    """Write settings atomically via tmp + rename."""
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = settings_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(settings_path)
+    """Write settings atomically. Targets the user's real .claude/settings.json.
+
+    Via `write_atomic` rather than a fixed `.json.tmp`: two sessions bootstrapping
+    at once shared that one temp path, so one published the other's half-written
+    bytes over a file the user owns.
+    """
+    write_atomic(settings_path, json.dumps(data, indent=2))
 
 
 def _synthesize_and_activate_workflow(goal, resolved_dir: str) -> str:

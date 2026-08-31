@@ -43,3 +43,21 @@ jobs:
           python -m coverage run -m pytest -q
           python -m coverage combine
           python -m coverage report
+      # `.vise/quality.yaml` says every check in it "already runs in CI". That
+      # was false for four of its eight, and the file whose whole job is to
+      # state what this repo really verifies was the one saying it. These are
+      # the two that are deterministic, about vise's own code, and clean today,
+      # so they gate.
+      - name: SAST (bandit, medium and up)
+        run: python -m bandit -q -r src/vise -x src/vise/tests --severity-level medium
+      - name: Secret scan
+        run: python -m detect_secrets scan
+      # Reporting, not gating, and the reason is in security-baseline: a
+      # dependency advisory needs reachability triage by a person before it
+      # means anything, and an SCA gate that goes red on a transitive advisory
+      # nobody has read is how an override habit starts. Today's findings are
+      # all against pip and setuptools — the venv's own build tooling, which
+      # vise never imports.
+      - name: Dependency advisories (report only)
+        continue-on-error: true
+        run: python -m pip_audit
