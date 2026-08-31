@@ -60,19 +60,43 @@ class Snapshot:
 # ---------------------------------------------------------------------------
 
 
+#: No git operation on a working tree should take minutes. A hung git here is a
+#: hung MCP server, since these run in the request path.
+GIT_TIMEOUT_S = 120
+
+
 def _git(project: Path, *args: str, input: str | None = None, check: bool = True) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(project), *args],
-        capture_output=True,
-        text=True,
-        input=input,
-        check=False,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(
-            f"git {' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}"
+    """Run one git command and return its stdout. Raises RuntimeError on failure.
+
+    Decodes explicitly rather than via ``text=True``, which decodes strict: a
+    single latin-1 tracked file made ``snapshot_diff`` and the restore preview
+    raise ``UnicodeDecodeError`` out of the MCP tool, past callers that catch
+    only ``RuntimeError``. A repository is allowed to hold bytes Python cannot
+    read as UTF-8, and the snapshot layer is what someone reaches for when
+    something has already gone wrong.
+
+    ``surrogateescape`` rather than ``replace``, so a path or diff that round
+    trips back into a git command survives it unchanged.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project), *args],
+            capture_output=True,
+            input=input.encode("utf-8", "surrogateescape") if input is not None else None,
+            check=False,
+            timeout=GIT_TIMEOUT_S,
         )
-    return result.stdout.rstrip("\n")
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"git {' '.join(args)} timed out after {GIT_TIMEOUT_S}s"
+        ) from exc
+    stdout = result.stdout.decode("utf-8", "surrogateescape")
+    if check and result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", "surrogateescape")
+        raise RuntimeError(
+            f"git {' '.join(args)} failed ({result.returncode}): {stderr.strip()}"
+        )
+    return stdout.rstrip("\n")
 
 
 def _is_git_repo(project: Path) -> bool:
@@ -200,6 +224,7 @@ def create(
             ["git", "-C", str(project), "add", "-A"],
             env=env,
             check=True,
+            timeout=GIT_TIMEOUT_S,
             capture_output=True,
             text=True,
         )
@@ -207,6 +232,7 @@ def create(
             ["git", "-C", str(project), "write-tree"],
             env=env,
             check=True,
+            timeout=GIT_TIMEOUT_S,
             capture_output=True,
             text=True,
         ).stdout.strip()
@@ -232,6 +258,7 @@ def create(
             commit_args,
             env=env,
             check=True,
+            timeout=GIT_TIMEOUT_S,
             capture_output=True,
             text=True,
         ).stdout.strip()
@@ -241,6 +268,7 @@ def create(
         subprocess.run(
             ["git", "-C", str(project), "update-ref", ref, commit],
             check=True,
+            timeout=GIT_TIMEOUT_S,
             capture_output=True,
             text=True,
         )
@@ -340,6 +368,7 @@ def _current_tree(project: Path) -> str | None:
             done = subprocess.run(
                 ["git", "-C", str(project), *args],
                 env=env, capture_output=True, text=True, check=False,
+                timeout=GIT_TIMEOUT_S,
             )
             if done.returncode != 0:
                 return None
@@ -403,6 +432,7 @@ def restore(project: Path, snap_id: str, *, dry_run: bool = True) -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=GIT_TIMEOUT_S,
         )
         if result.returncode != 0:
             raise RuntimeError(f"restore failed: {result.stderr.strip()}")

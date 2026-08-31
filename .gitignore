@@ -8,6 +8,9 @@ build/
 .ruff_cache/
 .mypy_cache/
 .coverage
+# `[tool.coverage.run] parallel` writes one data file per process, which is
+# what makes a hook launched as its own interpreter measurable.
+.coverage.*
 .vise/*
 !.vise/quality.yaml
 
