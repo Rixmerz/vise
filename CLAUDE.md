@@ -40,11 +40,22 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```bash
 .venv/bin/python -m ruff check . --exclude .claude
 .venv/bin/python -m coverage run -m pytest -q
-.venv/bin/python -m coverage report --fail-under=74
+.venv/bin/python -m coverage combine
+.venv/bin/python -m coverage report
 ```
 
+`combine` is not optional. Every hook is tested by launching it as its own
+interpreter — the only way to test something whose contract is "must never take
+the session down" — and those children write their own data files. Reporting
+without combining measures the parent process only, which is why `hooks/` used
+to read 0% while being among the best-covered code in the repo.
+
 The coverage floor is a ratchet: raise it when the real number rises, never
-lower it to make a change pass.
+lower it to make a change pass. It lives in **one** place, `[tool.coverage.report]
+fail_under` in `pyproject.toml`. It used to live in four — CI said 70,
+`.vise/quality.yaml` said 71, this file said 74 — so "the coverage gate" meant a
+different number depending on which command you ran, and the lowest one won.
+Never pass `--fail-under` on a command line.
 
 ## Conventions
 

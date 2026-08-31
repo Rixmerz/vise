@@ -23,10 +23,16 @@ jobs:
       # One instrumented run, not two: `coverage run -m pytest` IS the test run,
       # so a separate plain `pytest -q` step doubles CI time for no extra signal.
       # vise ships coverage-gate guidance and gates other repos on it; measure
-      # ourselves. Paths live in [tool.coverage.run]. The threshold is a ratchet
-      # meant to move upward — set below the 75% we hold today, because a gate
-      # nobody meets gets overridden and an override habit is worse than no gate.
+      # ourselves. Paths and the floor both live in pyproject.toml — passing
+      # --fail-under here is how the floor came to exist in four copies with
+      # four different numbers, of which the lowest silently won.
+      #
+      # `combine` is not optional: every hook is tested by launching it as its
+      # own interpreter, and those children write their own data files.
+      # Reporting without combining measures the parent only and puts the
+      # best-covered package in the repo at 0%.
       - name: Test + coverage
         run: |
           python -m coverage run -m pytest -q
-          python -m coverage report --fail-under=70
+          python -m coverage combine
+          python -m coverage report

@@ -1797,6 +1797,11 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
 }
 
 
+def _as_int(value: object) -> int:
+    """int(), but accepting the `900.0` and `"900"` a YAML round-trip produces."""
+    return int(float(value))  # type: ignore[arg-type]
+
+
 def build_validators(configs: list[dict]) -> list[Validator]:
     """Build validator instances from config dicts.
 
@@ -1834,10 +1839,19 @@ def build_validators(configs: list[dict]) -> list[Validator]:
         # Coerce weight to float at the boundary — YAML loaders or JSON
         # round-trips may deliver weight as int or str (e.g. '1.0').
         # aggregate_confidence does sum(r.weight ...) which crashes on str.
-        if "weight" in kwargs:
-            import contextlib
-            with contextlib.suppress(TypeError, ValueError):
-                kwargs["weight"] = float(kwargs["weight"])
+        # A value that cannot be coerced is *dropped*, so the dataclass default
+        # applies. Suppressing the error and leaving the original in place is
+        # what let `timeout: "soon"` reach subprocess.run as a str, where it
+        # raises TypeError inside the check — which a fail-closed validator then
+        # reports as the check having failed, with a traceback naming subprocess
+        # rather than the line of YAML that caused it.
+        for key, cast in (("weight", float), ("timeout", _as_int)):
+            if key not in kwargs:
+                continue
+            try:
+                kwargs[key] = cast(kwargs[key])
+            except (TypeError, ValueError):
+                del kwargs[key]
         out.append(_REGISTRY[t](**kwargs))
     return out
 

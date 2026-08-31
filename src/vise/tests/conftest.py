@@ -101,3 +101,31 @@ def _spec_gate_open(monkeypatch: pytest.MonkeyPatch) -> None:
         _scheduler, "spec_gate_check",
         lambda *a, **k: SpecGateVerdict(True, "gate opened by the test suite"),
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _instrument_subprocesses() -> None:
+    """Make coverage follow the interpreters the suite launches itself.
+
+    Every hook is tested by running it as its own process — the only honest way
+    to test something whose contract is "must never take the session down". Those
+    children inherit the environment but not the tracer, so without this
+    `hooks/codelayer_gate.py` and `hooks/workflow_post_traverse.py` measured 0%
+    while being among the most thoroughly exercised files in the repo.
+
+    Sets what `sitecustomize.py` in this directory looks for. No-ops when the
+    suite is not running under coverage, so a plain `pytest` is unaffected.
+    """
+    import os
+    import sys
+
+    if not os.environ.get("COVERAGE_RUN") and "coverage" not in sys.modules:
+        return
+    here = str(Path(__file__).resolve().parent)
+    existing = os.environ.get("PYTHONPATH", "")
+    if here not in existing.split(os.pathsep):
+        os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (here, existing) if p)
+    os.environ.setdefault(
+        "COVERAGE_PROCESS_START",
+        str(Path(__file__).resolve().parents[3] / "pyproject.toml"),
+    )

@@ -119,12 +119,20 @@ nodes:
     name: "Tests"
     # TIER A — seconds to a minute.
     validators:
+      # 900s, not the 120s default. This repo's own instrumented suite takes
+      # ~90s on unloaded hardware, i.e. 75% of that default, and a test suite
+      # is the one check whose runtime grows with the project. On timeout the
+      # `coverage` check below does not fail — it reads whatever data was on
+      # disk from an earlier run and grades that, so the visible symptom is a
+      # green coverage number describing a run that never finished.
       - type: quality_check
         check: unit
         weight: 1.0
+        timeout: 900
       - type: quality_check
         check: coverage
         weight: 0.5
+        timeout: 300
     prompt_injection: |
       PHASE: TESTS
       Tier A — still cheap. Checks: unit, coverage.
