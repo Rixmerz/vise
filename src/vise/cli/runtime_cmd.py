@@ -364,16 +364,38 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     from vise.runtime.scheduler import Scheduler, SchedulerConfig
     from vise.runtime.state import runtime_root
 
+    from vise.runtime.compose import classification_of
+    from vise.runtime.replan import REPLAN_KINDS
+
     state = _load_state(args, args.run_id)
     remaining = [
         r.task_id for r in state.tasks.values() if r.state is not TaskState.SUCCEEDED
     ]
     print(_render_state(state))
     if not remaining:
+        # Exit 3, the same code `compose` uses for the same condition, so a
+        # script can tell "this run is finished" from "the resume worked".
         print("\nevery task succeeded — nothing to resume.")
-        return 0
+        return 3
 
     print(f"\nwould retry {len(remaining)}: {', '.join(sorted(remaining))}")
+
+    # A task the runtime itself classified as the plan's fault is not made
+    # right by running it again — `compose` says so in as many words, and
+    # resume used to re-queue it without a word. Naming it is enough: the
+    # caller may have changed the graph, and refusing would make resume
+    # useless in exactly the case it is most needed.
+    replan_kinds = {k.value for k in REPLAN_KINDS}
+    mis_planned = sorted(
+        r.task_id for r in state.tasks.values()
+        if r.task_id in remaining and classification_of(r) in replan_kinds
+    )
+    if mis_planned:
+        print(
+            f"  {', '.join(mis_planned)} failed because the plan was wrong, not the "
+            f"work — retrying against the same graph will fail the same way.\n"
+            f"  `vise runtime compose {state.spec.run_id}` says what the next plan needs."
+        )
     if state.human_gate:
         print(f"clearing the human gate: {state.human_gate}")
     print(f"already spent ${state.ledger.spent.cost_usd:.2f}, which still counts "

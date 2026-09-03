@@ -156,6 +156,20 @@ def _reason(record) -> tuple[str, str]:
     return said, classification
 
 
+def classification_of(record) -> str:
+    """How a task that did not succeed was classified, or "" if it was not.
+
+    Public because `vise runtime resume` needs the same answer, and deriving it
+    a second time is how the two commands would come to disagree about whether
+    a failure was the plan's fault. The subtlety worth not duplicating: a
+    ``TaskRecord`` reloaded from disk has no ``result`` at all — results are
+    rebuilt from artifacts, by ``TaskRecord.from_dict``'s explicit choice — and
+    a later attempt overwrites it in memory. Either way the durable answer is
+    on the attempt that carried it.
+    """
+    return _reason(record)[1]
+
+
 def brief_from(state: RunState) -> ComposeBrief:
     """Read a run into the terms the next plan is written in.
 

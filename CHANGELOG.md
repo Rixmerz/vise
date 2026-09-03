@@ -10,6 +10,20 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Fixed
 
+- **`resume` and `compose` disagreed about the same failure.** `compose` says
+  a `spec_bug` means the plan was wrong and retrying cannot fix it; `resume`
+  offered the same task back with no comment. Two commands built for one loop
+  contradicting each other is worse than either answer alone. `resume` now
+  names those tasks and points at `vise runtime compose <run_id>` — it still
+  offers them, because the caller may have fixed the graph, which is exactly
+  when resume earns its keep. The classification comes from
+  `compose.classification_of`, shared rather than re-derived, since deriving it
+  twice is how the two would drift apart again.
+
+- **`resume` exited 0 on a run with nothing to resume.** `compose` exits 3 for
+  the same condition, deliberately, so a script can tell "this run is finished"
+  from "there is work here". `resume` now does too.
+
 - **A capped plan still claimed the width it could not use.** The shape line
   read the structural ceiling and ignored `max_parallel`, so
   `vise runtime plan --max-parallel 2` reported "at most 4 task(s) can run at

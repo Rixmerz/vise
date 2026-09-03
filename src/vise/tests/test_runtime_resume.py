@@ -319,5 +319,74 @@ def test_the_cli_says_when_there_is_nothing_to_resume(project, tmp_path, capsys)
         isolate=False, no_verify=False, change=None, state_dir=str(root), yes=True,
     ))
 
-    assert rc == 0
+    # Exit 3, not 0 — `compose` already distinguishes "this run is finished"
+    # from "here is work to do", and a script calling both should not have to
+    # know that only one of them says so.
+    assert rc == 3
     assert "nothing to resume" in capsys.readouterr().out
+
+
+def test_the_cli_says_when_retrying_cannot_help(project, tmp_path, capsys):
+    """A `spec_bug` is the plan's fault, and resume used to re-queue it silently.
+
+    `compose` states it plainly — "the plan was wrong, not the work" — while
+    `resume` offered the same task back with no comment. Two commands built for
+    the same loop disagreeing about the same failure is worse than either
+    answer alone. Found by running both against the recorded runs.
+
+    It names the task rather than refusing it: the caller may have fixed the
+    graph, which is exactly when resume is worth having.
+    """
+    import argparse
+
+    from vise.cli.runtime_cmd import _cmd_resume
+    from vise.runtime.contracts import FailureKind
+
+    root = tmp_path / "state"
+    state, _ = _parked(project, tmp_path)
+    # Through `finish`, not by assigning `.result`: results are rebuilt from
+    # artifacts and deliberately not persisted, so the durable record of a
+    # classification is the attempt `finish` appends.
+    state.finish("b", TaskResult(
+        task_id="b", verdict=Verdict.FAIL, summary="the spec contradicts itself",
+        classification=FailureKind.SPEC_BUG,
+    ))
+    state.tasks["b"].state = TaskState.FAILED
+    state.save(root)
+
+    rc = _cmd_resume(argparse.Namespace(
+        run_id="r", graph=None, project_dir=None, permission_mode=None,
+        isolate=False, no_verify=False, change=None, state_dir=str(root), yes=False,
+    ))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "would retry 1: b" in out, "it is still offered"
+    assert "the plan was wrong, not the work" in out
+    assert "vise runtime compose r" in out
+
+
+def test_a_failure_that_is_the_works_fault_gets_no_such_warning(project, tmp_path, capsys):
+    import argparse
+
+    from vise.cli.runtime_cmd import _cmd_resume
+    from vise.runtime.contracts import FailureKind
+
+    root = tmp_path / "state"
+    state, _ = _parked(project, tmp_path)
+    # Through `finish`, not by assigning `.result`: results are rebuilt from
+    # artifacts and deliberately not persisted, so the durable record of a
+    # classification is the attempt `finish` appends.
+    state.finish("b", TaskResult(
+        task_id="b", verdict=Verdict.FAIL, summary="a typo",
+        classification=FailureKind.CODE_BUG,
+    ))
+    state.tasks["b"].state = TaskState.FAILED
+    state.save(root)
+
+    _cmd_resume(argparse.Namespace(
+        run_id="r", graph=None, project_dir=None, permission_mode=None,
+        isolate=False, no_verify=False, change=None, state_dir=str(root), yes=False,
+    ))
+
+    assert "the plan was wrong" not in capsys.readouterr().out
