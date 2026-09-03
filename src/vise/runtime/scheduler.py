@@ -328,7 +328,7 @@ class Scheduler:
                             verifying, trees, baselines,
                         )
                     if replan:
-                        by_id = self._replan(state, by_id, tasks)
+                        by_id = self._replan(state, by_id, tasks, task_id)
 
         # The executor has joined every thread by here, so anything still in
         # `pending` has in fact finished — the loop just broke before collecting
@@ -936,18 +936,30 @@ class Scheduler:
     # --- replanning ------------------------------------------------------
 
     def _replan(
-        self, state: RunState, by_id: dict[str, Any], original: Sequence[Any]
+        self,
+        state: RunState,
+        by_id: dict[str, Any],
+        original: Sequence[Any],
+        trigger: str = "",
     ) -> dict[str, Any]:
+        """Recompose around a failure the plan caused.
+
+        ``trigger`` is the task whose failure asked for this. Both refusals
+        below record it and the reason: an event that says only that a replan
+        did not happen is a report a composer cannot act on, and these two
+        events are the strongest plan-level signal the runtime emits — they
+        are what `vise runtime compose` reads to say the plan was wrong.
+        """
         if self.config.replanner is None:
-            state.stop_for_human(
-                "a failure says the plan is wrong and no replanner is configured"
-            )
-            state.emit("replan_unavailable")
+            reason = "a failure says the plan is wrong and no replanner is configured"
+            state.stop_for_human(reason)
+            state.emit("replan_unavailable", task=trigger or None, reason=reason)
             return by_id
         replacement = self.config.replanner(state, original)
         if not replacement:
-            state.stop_for_human("the replanner declined to produce a new plan")
-            state.emit("replan_declined")
+            reason = "the replanner declined to produce a new plan"
+            state.stop_for_human(reason)
+            state.emit("replan_declined", task=trigger or None, reason=reason)
             return by_id
         state.replans += 1
         state.emit("replanned", tasks=len(replacement), replans=state.replans)

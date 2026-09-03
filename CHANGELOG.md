@@ -6,6 +6,31 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Fixed
+
+- **A replan that did not happen said so without saying why.** `_replan`
+  emitted `replan_unavailable` and `replan_declined` carrying the kind and
+  nothing else, while handing the human gate a full sentence. Those two events
+  are the strongest plan-level signal the runtime has — they are what
+  `vise runtime compose` reads to tell a composer the plan was wrong rather
+  than the work — so a composer got a report it could not act on. Both now
+  record the task whose failure asked for the replan and the same reason the
+  person is given.
+
+  Two renderers were writing a separator for a detail that might not exist.
+  `compose` printed `replan_unavailable:` — a label that claims something
+  happened and refuses to say what — and the run's memory entry read
+  `replan_unavailable in run ledger-3 — `, which is retrieved and shown to a
+  future agent looking exactly like a truncated record. Both build the detail
+  first and write the separator only when there is something after it, so runs
+  recorded before the emitter carried a reason still render honestly.
+
+  Found by running `vise runtime compose` against all nine recorded runs, not
+  by reading the code. The scheduler's own test asserted the same thing twice
+  by copy-paste, which is why nothing caught it.
+
 ## [0.1.0a22] — 2026-09-03
 
 ### Added

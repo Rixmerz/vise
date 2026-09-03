@@ -124,3 +124,26 @@ def test_a_memory_that_cannot_be_written_does_not_fail_the_run(tmp_path, monkeyp
     state.emit("human_gate", task="b", reason="r")
 
     assert record_run_lessons(state, str(tmp_path)) == 0
+
+
+def test_a_lesson_whose_whole_content_is_a_dash_is_not_written(tmp_path):
+    """A memory entry is retrieved and shown to a future agent like any other.
+
+    `replan_unavailable in run r1 — ` reads as a truncated record rather than
+    as an event with no detail, and the agent that reads it cannot tell which.
+    Found by running `vise runtime compose` against a run recorded before the
+    scheduler carried a reason on this event.
+    """
+    state = _state(tmp_path)
+    state.emit("replan_unavailable")
+    lesson = next(e for e in lessons_from(state) if "replan_unavailable" in e.description)
+    assert lesson.description == "replan_unavailable in run r1"
+
+
+def test_a_blocking_event_that_has_a_detail_still_carries_it(tmp_path):
+    state = _state(tmp_path)
+    state.emit("replan_unavailable", task="parser", reason="no replanner is configured")
+    lesson = next(e for e in lessons_from(state) if "replan_unavailable" in e.description)
+    assert lesson.description == (
+        "replan_unavailable in run r1 — task parser: no replanner is configured"
+    )

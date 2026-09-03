@@ -186,7 +186,15 @@ def brief_from(state: RunState) -> ComposeBrief:
         kind = str(event.get("kind", ""))
         if kind not in _PLAN_LEVEL or kind in ("human_gate", "cancelled"):
             continue
-        line = f"{kind}: {event.get('task', '')} {event.get('reason', '')}".strip()
+        # A label with an empty detail — `replan_unavailable:` — claims
+        # something happened and refuses to say what, which is worse for a
+        # composer than the bare kind. Build the detail first, and only then
+        # decide whether there is a separator to write.
+        detail = " ".join(
+            part for part in (str(event.get("task") or ""),
+                              str(event.get("reason") or "")) if part
+        ).strip()
+        line = f"{kind}: {detail}" if detail else kind
         if line not in seen:
             seen.add(line)
             plan_level.append(line)

@@ -76,12 +76,17 @@ def lessons_from(state: RunState) -> list[ExperienceEntry]:
             task = event.get("task")
             reason = str(event.get("reason") or event.get("future_kind") or "")
             where = f"task {task}: " if task else ""
+            # An entry whose whole content is a dangling em-dash is retrieved
+            # and shown to future agents exactly like a useful one. Write the
+            # separator only when there is something after it.
+            detail = f"{where}{reason}".strip()
+            said = f"{kind} in run {spec.run_id}"
             add(ExperienceEntry(
                 type="run_blocked",
                 file_pattern=pattern,
                 keywords=[kind, str(task or ""), spec.graph_name or ""],
                 domain="runtime",
-                description=f"{kind} in run {spec.run_id} — {where}{reason}"[:300],
+                description=(f"{said} — {detail}" if detail else said)[:300],
                 resolution="",
                 severity=_BLOCKING[kind],
                 scope="project",

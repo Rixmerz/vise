@@ -306,8 +306,14 @@ def test_a_spec_bug_with_no_replanner_stops_for_a_person():
     state = _run([Task(id="a", name="a", role="backend", ownership=["src/**"])],
                  worker, config=SchedulerConfig(replanner=None))
     assert state.human_gate
-    assert any(e["kind"] == "replan_unavailable" for e in state.events)
-    assert any(e["kind"] == "replan_unavailable" for e in state.events)
+    event = next(e for e in state.events if e["kind"] == "replan_unavailable")
+    # The event has to say which failure asked for a replan and why one did
+    # not happen. It used to carry the kind alone, so `vise runtime compose`
+    # rendered `replan_unavailable:` and the run's memory entry was an
+    # em-dash with nothing after it — found by running compose, not by
+    # reading it.
+    assert event["task"] == "a"
+    assert event["reason"] == state.human_gate
 
 
 def test_a_replanner_replaces_the_task_graph_and_keeps_succeeded_work():
@@ -336,7 +342,9 @@ def test_a_replanner_that_declines_stops_for_a_person():
         config=SchedulerConfig(replanner=lambda s, t: None),
     )
     assert state.human_gate
-    assert any(e["kind"] == "replan_declined" for e in state.events)
+    event = next(e for e in state.events if e["kind"] == "replan_declined")
+    assert event["task"] == "a"
+    assert event["reason"] == state.human_gate
 
 
 # --- artifacts ------------------------------------------------------------

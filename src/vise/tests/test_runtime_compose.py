@@ -295,3 +295,25 @@ def test_the_brief_is_constructible_without_a_run(tmp_path):
     """It is a dataclass, and its default allowlist must come from one place."""
     brief = ComposeBrief(run_id="x", goal="g", project_dir=str(tmp_path))
     assert set(brief.allowed_validators) == set(BUILDER_VALIDATORS)
+
+
+def test_a_plan_level_event_without_a_detail_does_not_render_a_dangling_label(tmp_path):
+    """`replan_unavailable:` claims something happened and refuses to say what.
+
+    Found by running `vise runtime compose` against a real recorded run rather
+    than by reading the code. The runs on disk predate the emitter carrying a
+    reason, so the brief has to render them honestly rather than decorate them
+    with a separator that leads nowhere.
+    """
+    state = _state(tmp_path)
+    state.emit("replan_unavailable")
+    brief = brief_from(state)
+    assert "replan_unavailable" in brief.plan_level
+    assert not any(line.endswith(":") for line in brief.plan_level)
+
+
+def test_a_plan_level_event_with_a_detail_still_names_it(tmp_path):
+    state = _state(tmp_path)
+    state.emit("replan_unavailable", task="parser", reason="no replanner is configured")
+    brief = brief_from(state)
+    assert "replan_unavailable: parser no replanner is configured" in brief.plan_level
