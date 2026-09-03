@@ -8,7 +8,60 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added
+
+- **A plan says how wide it can actually run.** Every one of the nine runs
+  vise has performed declared `max_parallel: 3`. Measured from their event
+  timelines, peak concurrency was **2** in the five that got that far and
+  **1** in the rest. That is not a scheduler bug: the workload's dependencies
+  are a chain (`money → parser → report → cli → {tests, docs}`) and only the
+  last two can overlap, so the scheduler reached exactly the maximum the graph
+  allows. The defect was that nobody was told — a reader saw `max_parallel: 3`
+  and six tasks and concluded the run would be wide.
+
+  `RunPlan` now reports `concurrency_ceiling` (the most tasks that can ever run
+  at once, given dependencies *and* ownership conflicts) and `critical_path`
+  (the longest chain, which is the run's floor in wall-clock terms), and adds
+  a **note** when the declared `max_parallel` exceeds the ceiling.
+
+  The ceiling is computed from the raw dependency waves with the cap lifted.
+  Reading it off the rendered waves would be circular — those are already
+  narrowed by `max_parallel`, so a graph capped at 3 would always report 3 and
+  the number would confirm the budget instead of testing it. Run against the
+  workload that started this, the planner now predicts 2 before anyone spends
+  anything.
+
+  `notes` is separate from `problems` on purpose: `problems` makes
+  `vise runtime plan` exit non-zero and `run` refuse to dispatch, and
+  over-declared parallelism describes a plan that is correct and will run fine.
+
+- **`vise runtime resume <run_id>`.** `RunState.MAX_EVENTS` carried the comment
+  *"the state file is read on every resume"*. There was no resume:
+  `RunState.load` existed and its only two callers were the read-only `status`
+  and `explain` commands, while the loop stops for a person at nine distinct
+  construction points. Three of the nine recorded runs are parked and were
+  unreachable.
+
+  Succeeded tasks keep their results, everything non-terminal returns to
+  pending, and the human gate and cancellation are cleared. **The spend carries
+  over** — a resumed run that forgot its cost would turn `--max-cost` into a
+  per-attempt limit a caller could bypass by resuming. Stale *reservations* are
+  the opposite case and are released: they hold budget for work about to be
+  attempted again.
+
+  The scheduler's dispatch loop is untouched. `run` gained one optional
+  parameter and `resume` prepares state and delegates; a second entry point
+  into that loop would risk the least testable part of the runtime for the
+  most testable part. The original run's `SchedulerConfig` is not in
+  `RunSpec`, so `--isolate`, `--no-verify` and `--change` are restated on
+  `resume` rather than silently dropped.
+
 ### Fixed
+
+- **Telemetry dropped the `resumed` event.** The same defect class as
+  `drained`/`drain_failed` earlier in this release: a new run event has to be
+  registered in `_VALID_RUN_EVENTS` or the cross-run log skips it with a
+  warning nobody reads. Caught by its own test run.
 
 - **The enforcer blocked less than the workflow declared, and said nothing.**
   `graph_enforcer.py` is the PreToolUse gate every `tools_blocked` relies on,

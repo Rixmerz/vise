@@ -175,10 +175,69 @@ class Scheduler:
 
     # --- the loop --------------------------------------------------------
 
-    def run(self, spec: RunSpec, tasks: Sequence[Any]) -> RunState:
-        """Dispatch until every task is terminal, parked, or the run stops."""
+    def resume(self, state: RunState, tasks: Sequence[Any]) -> RunState:
+        """Continue a stopped run, keeping what it already paid for.
+
+        A run stops for a person at nine construction points and cannot be
+        picked back up — ``RunState.MAX_EVENTS`` even says "the state file is
+        read on every resume", which was true of the design and never of the
+        code. This is that resume.
+
+        What carries over is the part that would be dishonest to reset.
+        ``ledger.spent`` above all: a resumed run that forgot its spend would
+        turn ``--max-cost`` into a per-attempt limit, and a loop could spend
+        without bound by resuming. ``replans`` likewise — a resume is not a
+        fresh replan budget.
+
+        Stale *reservations* are the opposite case. A reservation holds an
+        estimate for a task that started and never reported; after a stop it is
+        holding budget for work about to be attempted again, so it is released.
+
+        Succeeded work survives, for the same reason it survives a replan:
+        paying twice for the same answer is the thing this runtime exists to
+        avoid.
+        """
+        for task in tasks:
+            state.record(task.id)
+        resumable = [
+            record for record in state.tasks.values()
+            if record.state is not TaskState.SUCCEEDED
+        ]
+        for record in resumable:
+            record.state = TaskState.PENDING
+            record.note = ""
+            state.ledger.release(record.task_id)
+
+        state.human_gate = ""
+        state.cancelled = False
+        state.cancel_reason = ""
+        state.finished_at = ""
+        state.emit(
+            "resumed",
+            retrying=len(resumable),
+            kept=len(state.tasks) - len(resumable),
+            spent_usd=round(state.ledger.spent.cost_usd, 4),
+        )
+        return self.run(state.spec, tasks, resume_from=state)
+
+    def run(
+        self,
+        spec: RunSpec,
+        tasks: Sequence[Any],
+        *,
+        resume_from: RunState | None = None,
+    ) -> RunState:
+        """Dispatch until every task is terminal, parked, or the run stops.
+
+        ``resume_from`` continues a recorded run instead of starting a fresh
+        one — see ``resume``, which is the only caller that passes it. Nothing
+        after this line distinguishes the two cases on purpose: the spec gate
+        is re-checked (the repository may have moved since), the worktree pool
+        is re-opened, and the dispatch loop below is the part of this runtime
+        that is hardest to test, so it gets one entry point rather than two.
+        """
         by_id = {t.id: t for t in tasks}
-        state = RunState.for_tasks(spec, by_id)
+        state = resume_from if resume_from is not None else RunState.for_tasks(spec, by_id)
         if not self._registry_given:
             # `.vise/agents/` belongs to the tree the run is against, not to
             # wherever the scheduler was constructed.

@@ -87,6 +87,10 @@ _VALID_RUN_EVENTS = frozenset({
     # `drained` costs add up is a run whose ceilings are set wrong.
     "drained",
     "drain_failed",
+    # A run picked back up. Cross-run because the interesting question is how
+    # often runs stop and get continued rather than abandoned — a run that is
+    # resumed three times is telling you where its plan was wrong.
+    "resumed",
     "context_failed",
     "integrated",
     "isolation_enabled",

@@ -73,6 +73,22 @@ class RunPlan:
     problems: tuple[str, ...] = ()
     unschedulable: tuple[str, ...] = ()
 
+    #: The most tasks that can ever run at once, given the dependency edges and
+    #: the ownership claims. Not read off ``waves`` — those are already narrowed
+    #: by ``max_parallel``, so reading them would report the budget back to
+    #: itself and a graph capped at 3 would always "reach" 3.
+    concurrency_ceiling: int = 0
+
+    #: The longest dependency chain, which is the run's floor in wall-clock
+    #: terms however wide the budget is.
+    critical_path: int = 0
+
+    #: Observations that do not stop the run. Kept apart from ``problems``
+    #: because that field is load-bearing — ``vise runtime plan`` exits 1 on it
+    #: and ``run`` refuses to dispatch — and "you asked for three lanes and can
+    #: use two" describes a plan that is correct and will run fine.
+    notes: tuple[str, ...] = ()
+
     @property
     def estimated_cost_usd(self) -> float:
         return sum(w.estimated_cost_usd for w in self.waves)
@@ -95,6 +111,13 @@ class RunPlan:
                 for reason in t.decision.reasons:
                     out.append(f"      · {reason}")
         out.append(f"\ntotal: {self.task_count} task(s), ~${self.estimated_cost_usd:.2f}")
+        if self.concurrency_ceiling:
+            out.append(
+                f"shape: at most {self.concurrency_ceiling} task(s) can run at once; "
+                f"longest chain is {self.critical_path}"
+            )
+        if self.notes:
+            out += [f"  note: {n}" for n in self.notes]
         if self.problems:
             out.append("\nproblems — these must be fixed before the run can start:")
             out += [f"  ! {p}" for p in self.problems]
@@ -110,6 +133,9 @@ class RunPlan:
             "task_count": self.task_count,
             "problems": list(self.problems),
             "unschedulable": list(self.unschedulable),
+            "concurrency_ceiling": self.concurrency_ceiling,
+            "critical_path": self.critical_path,
+            "notes": list(self.notes),
         }
 
 
@@ -140,6 +166,42 @@ def dependency_waves(
         ready_ids = {t.id for t in ready}
         remaining = [t for t in remaining if t.id not in ready_ids]
     return waves, []
+
+
+#: A placeholder for the stand-in tasks the ceiling is measured on. Nothing
+#: reads it — `_split_on_ownership` only looks at `ownership` and `writes` —
+#: but `PlannedTask` requires a decision, and inventing a model here would put
+#: a routing claim into a number that is purely about shape.
+_NO_DECISION = RoutingDecision(model="", effort="", tier=0)
+
+
+def _concurrency_ceiling(raw_waves: Sequence[Sequence[Any]]) -> int:
+    """The most tasks that can ever be in flight at once.
+
+    Computed from the RAW dependency waves with the parallelism cap lifted.
+    Reading it off the rendered waves would be circular: those are already
+    split by ``max_parallel``, so a graph capped at 3 would always report 3 and
+    the number would confirm the budget instead of testing it.
+
+    Ownership counts because it is a real constraint, not a preference: two
+    tasks claiming the same path are never dispatched together, so a wave of
+    six that all write one file has a ceiling of one.
+    """
+    widest = 0
+    for raw in raw_waves:
+        stand_ins = [
+            PlannedTask(
+                task_id=t.id, name=getattr(t, "name", t.id), role="", agent_id=None,
+                decision=_NO_DECISION,
+                ownership=tuple(getattr(t, "ownership", ()) or ()),
+                writes=bool(getattr(t, "writes", True)),
+            )
+            for t in raw
+        ]
+        # `len(raw)` as the cap is the cap lifted: no group can exceed the wave.
+        groups = _split_on_ownership(stand_ins, len(raw) or 1)
+        widest = max(widest, max((len(g) for g in groups), default=0))
+    return widest
 
 
 def _split_on_ownership(planned: Sequence[PlannedTask], max_parallel: int) -> list[list[PlannedTask]]:
@@ -266,8 +328,20 @@ def plan(
             waves.append(PlannedWave(index=index, tasks=tuple(group)))
             index += 1
 
+    ceiling = _concurrency_ceiling(raw_waves)
+    declared = (budget or RunBudget()).max_parallel
+    notes: list[str] = []
+    if ceiling and declared > ceiling:
+        notes.append(
+            f"max_parallel is {declared}, but dependencies and ownership allow at "
+            f"most {ceiling} task(s) at once — the extra lane(s) buy nothing here"
+        )
+
     return RunPlan(
         waves=tuple(waves),
         problems=tuple(problems),
         unschedulable=tuple(unschedulable),
+        concurrency_ceiling=ceiling,
+        critical_path=len(raw_waves),
+        notes=tuple(notes),
     )

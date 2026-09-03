@@ -202,6 +202,27 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
                        help="actually dispatch; without it the plan is printed and nothing runs")
     run_p.set_defaults(func=_cmd_run)
 
+    resume_p = inner.add_parser("resume", help="continue a run that stopped")
+    resume_p.add_argument("run_id")
+    resume_p.add_argument("--graph", default=None,
+                          help="path to the graph, if it has moved since the run")
+    resume_p.add_argument("--project-dir", default=None,
+                          help="defaults to the project the run was against")
+    resume_p.add_argument("--permission-mode", default=None)
+    # The run's SchedulerConfig is not part of RunSpec, so it is not in the
+    # state file and cannot be recovered. Restate it rather than silently
+    # resuming an isolated run in the shared tree.
+    resume_p.add_argument("--isolate", action="store_true",
+                          help="as for `run`; NOT remembered from the original run")
+    resume_p.add_argument("--no-verify", action="store_true",
+                          help="as for `run`; NOT remembered from the original run")
+    resume_p.add_argument("--change", default=None,
+                          help="as for `run`; NOT remembered from the original run")
+    resume_p.add_argument("--state-dir", default=None)
+    resume_p.add_argument("--yes", action="store_true",
+                          help="actually dispatch; without it the remaining work is printed")
+    resume_p.set_defaults(func=_cmd_resume)
+
     status_p = inner.add_parser("status", help="where runs stand")
     status_p.add_argument("run_id", nargs="?", default=None)
     status_p.add_argument("--limit", type=int, default=5)
@@ -297,6 +318,88 @@ def _cmd_run(args: argparse.Namespace) -> int:
     from vise.runtime.lessons import record_run_lessons
 
     recorded = record_run_lessons(state, spec.project_dir)
+    if recorded:
+        print(f"\n{recorded} lesson(s) recorded in this project's experience memory")
+    return 0 if state.succeeded() else 1
+
+
+def _resolve_graph(state, override: str | None) -> Path:
+    """Find the graph a recorded run was planned from.
+
+    ``RunSpec`` stores the file stem and the node id, not the path — so the
+    same scope search ``graph_activate`` uses answers it, and a graph that has
+    since moved is named with ``--graph`` rather than guessed at.
+    """
+    if override:
+        return Path(override)
+    from vise.engines.workflow_scope import resolve_workflow_dirs
+
+    stem = state.spec.graph_name or ""
+    if not stem:
+        print("vise runtime: this run did not record a graph name; pass --graph",
+              file=sys.stderr)
+        raise SystemExit(2)
+    for _scope, directory in reversed(resolve_workflow_dirs(state.spec.project_dir)):
+        for name in (f"{stem}.yaml", f"{stem}-graph.yaml"):
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
+    print(f"vise runtime: cannot find the graph {stem!r} this run used — pass --graph",
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    from vise.runtime.adapters.claude_code import ClaudeCodeWorker
+    from vise.runtime.artifacts import ArtifactStore
+    from vise.runtime.context import ContextResolver
+    from vise.runtime.contracts import TaskState
+    from vise.runtime.scheduler import Scheduler, SchedulerConfig
+    from vise.runtime.state import runtime_root
+
+    state = _load_state(args, args.run_id)
+    remaining = [
+        r.task_id for r in state.tasks.values() if r.state is not TaskState.SUCCEEDED
+    ]
+    print(_render_state(state))
+    if not remaining:
+        print("\nevery task succeeded — nothing to resume.")
+        return 0
+
+    print(f"\nwould retry {len(remaining)}: {', '.join(sorted(remaining))}")
+    if state.human_gate:
+        print(f"clearing the human gate: {state.human_gate}")
+    print(f"already spent ${state.ledger.spent.cost_usd:.2f}, which still counts "
+          f"against this run's ceiling")
+    if not args.yes:
+        print("\nnothing dispatched. Re-run with --yes.")
+        return 0
+
+    graph_path = _resolve_graph(state, args.graph)
+    _node_id, tasks = _load_node_tasks(graph_path, state.spec.node_id)
+    project_dir = args.project_dir or state.spec.project_dir
+    root = Path(args.state_dir) if args.state_dir else runtime_root()
+
+    scheduler = Scheduler(
+        worker=ClaudeCodeWorker(
+            project_dir=project_dir, permission_mode=args.permission_mode,
+        ),
+        artifacts=ArtifactStore(root, state.spec.run_id),
+        context=ContextResolver(project_dir=project_dir),
+        state_root=root,
+        config=SchedulerConfig(
+            verify=not args.no_verify,
+            isolate=args.isolate,
+            spec_change=args.change or "",
+        ),
+    )
+    print(f"\nresuming {state.spec.run_id} — state in {root / 'runs' / state.spec.run_id}\n")
+    state = scheduler.resume(state, tasks)
+    print(_render_state(state))
+
+    from vise.runtime.lessons import record_run_lessons
+
+    recorded = record_run_lessons(state, project_dir)
     if recorded:
         print(f"\n{recorded} lesson(s) recorded in this project's experience memory")
     return 0 if state.succeeded() else 1
