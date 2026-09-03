@@ -8,6 +8,47 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added
+
+- **`vise runtime continue <run_id> --graph <composed-graph>`** — the last
+  mechanical link in the loop. Every other step existed: `compose` reads a
+  stopped run into the terms the next plan is written in, `graph_builder_*`
+  accepts that plan under an allowlist that stops it authoring its own gate,
+  `runtime plan` reads the composed graph back. Then running it meant
+  `runtime run`, which starts from nothing — a ledger at zero and no knowledge
+  of what the previous run paid for. The brief's first line, *"already done —
+  do not plan these again"*, was addressed to a person, and a person was the
+  only thing that could act on it.
+
+  The duplicated work is the smaller cost. The larger one is that `--max-cost`
+  on a follow-up bounded the follow-up, so a goal pursued across four runs was
+  under budget in each and unbounded overall. `resume` already refuses that
+  reasoning for one run — *"a resumed run that forgot its spend would turn
+  `--max-cost` into a per-attempt limit"* — and the same sentence is true of a
+  chain. A continuation's ledger opens at the prior run's spend, per task and
+  in total, and `plan` now takes `spent_usd` so the preview measures against
+  what is actually left rather than against the whole ceiling.
+
+  `RunSpec.parent_run_id` records the link, survives save and load, and shows
+  in `status`, so a chain can be added up by someone who was not there when it
+  started.
+
+  What deliberately does *not* carry is the succeeded records. Identity is
+  exactly what a new plan may have changed — a composed `cli-python` with new
+  ownership and new acceptance is not the one that failed — so a task the plan
+  declares runs, and the output names the ids that applies to instead of doing
+  it quietly. `--skip-done` is for the caller who knows they are the same work.
+
+  It dispatches nothing without `--yes`, prints the plan and the inherited
+  spend, refuses a plan with problems, and exits 3 when there is nothing left,
+  matching `compose` and `resume`.
+
+  One scenario was specced and then disproved by running it: a composed task
+  depending on a prior run's success without redeclaring it. `Graph.validate`
+  refuses a dependency on an id the node does not declare, and it is right to —
+  in a workflow file that is a typo. The design records the correction rather
+  than dropping it.
+
 ### Fixed
 
 - **A composed graph landed in every repository on the machine.**

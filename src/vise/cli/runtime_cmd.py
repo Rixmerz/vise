@@ -223,6 +223,36 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
                           help="actually dispatch; without it the remaining work is printed")
     resume_p.set_defaults(func=_cmd_resume)
 
+    continue_p = inner.add_parser(
+        "continue", help="run a composed plan as the continuation of a stopped run")
+    continue_p.add_argument("run_id", help="the run this one continues")
+    continue_p.add_argument("--graph", required=True,
+                            help="the composed graph to run")
+    continue_p.add_argument("--node", default=None,
+                            help="which dag node of the composed graph")
+    continue_p.add_argument("--goal", default=None,
+                            help="defaults to the goal of the run being continued")
+    continue_p.add_argument("--max-cost", type=float, default=0.0,
+                            help="ceiling for the CHAIN; the prior run's spend counts")
+    continue_p.add_argument("--max-parallel", type=int, default=4)
+    continue_p.add_argument("--skip-done", action="store_true",
+                            help="treat the prior run's successes as done, even "
+                                 "where this plan declares them again")
+    continue_p.add_argument("--project-dir", default=None,
+                            help="defaults to the project the prior run was against")
+    continue_p.add_argument("--permission-mode", default=None)
+    continue_p.add_argument("--isolate", action="store_true")
+    continue_p.add_argument("--no-verify", action="store_true")
+    continue_p.add_argument("--change", default=None)
+    continue_p.add_argument("--state-dir", default=None)
+    # NOT `--run-id`: the positional is already `run_id` (the run being
+    # continued) and argparse would have the option quietly overwrite it.
+    continue_p.add_argument("--new-run-id", dest="new_run_id", default=None,
+                            help="id for the continuation; generated when omitted")
+    continue_p.add_argument("--yes", action="store_true",
+                            help="actually dispatch; without it the plan is printed")
+    continue_p.set_defaults(func=_cmd_continue)
+
     compose_p = inner.add_parser(
         "compose", help="what a finished run says about the plan that should follow it")
     compose_p.add_argument("run_id")
@@ -434,6 +464,113 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return 0 if state.succeeded() else 1
 
 
+def _cmd_continue(args: argparse.Namespace) -> int:
+    """Run a composed plan as the continuation of a recorded one.
+
+    The bookkeeping the compose brief states but cannot act on: what the prior
+    run paid for, and how much it spent. Deciding what the next plan should be
+    is judgement and stays with whoever composed the graph.
+
+    Dispatches nothing without ``--yes``, exactly like ``run``. Closing the
+    loop's bookkeeping is not a reason to reopen its authority.
+    """
+    from vise.runtime.adapters.claude_code import ClaudeCodeWorker
+    from vise.runtime.artifacts import ArtifactStore
+    from vise.runtime.context import ContextResolver
+    from vise.runtime.contracts import RunBudget, RunSpec
+    from vise.runtime.planner import plan
+    from vise.runtime.scheduler import Scheduler, SchedulerConfig, new_run_id
+    from vise.runtime.state import runtime_root
+
+    prior = _load_state(args, args.run_id)
+    already_done = sorted(prior.completed_ids())
+    project_dir = str(Path(args.project_dir or prior.spec.project_dir).resolve())
+
+    graph_path = Path(args.graph)
+    node_id, tasks = _load_node_tasks(graph_path, args.node)
+    budget = RunBudget(max_cost_usd=args.max_cost or 0.0, max_parallel=args.max_parallel)
+
+    # A composed graph is self-contained. It cannot depend on a task the prior
+    # run ran — `Graph.validate` refuses a dependency on an id the node does
+    # not declare, and that check is right: in a workflow file an unknown
+    # dependency is a typo. What the prior run left behind is on disk, not in
+    # the schedule.
+    #
+    # So by default the plan runs what it declares, including a task whose id
+    # succeeded before: declaring it is what asking for it looks like, and
+    # nothing here can tell whether two tasks sharing an id are the same work.
+    # `--skip-done` is for the caller who knows they are.
+    preview = plan(
+        tasks, budget=budget,
+        completed=already_done if args.skip_done else (),
+        project_dir=project_dir, change=args.change or "",
+        spent_usd=prior.ledger.spent.cost_usd,
+    )
+    print(f"continuing {prior.spec.run_id} — node {node_id} of {graph_path.name}\n")
+    if already_done:
+        verb = "skipping" if args.skip_done else "paid for"
+        print(f"{verb} from {prior.spec.run_id}: {', '.join(already_done)}")
+        if not args.skip_done:
+            redeclared = sorted({t.id for t in tasks} & set(already_done))
+            if redeclared:
+                verb = "appears" if len(redeclared) == 1 else "appear"
+                print(
+                    f"  {', '.join(redeclared)} {verb} in this plan too and will "
+                    f"run again — pass --skip-done if that is not what you meant"
+                )
+    spent = prior.ledger.spent.cost_usd
+    print(f"inherited spend: ${spent:.2f} — a --max-cost bounds the chain, not this link\n")
+    print(preview.render())
+
+    if preview.problems:
+        print("\nrefusing to continue into a plan with problems.", file=sys.stderr)
+        return 1
+    if not preview.task_count:
+        print("\nthe composed plan has nothing left to do.")
+        return 3
+    if not args.yes:
+        print(
+            f"\nnothing dispatched. Re-run with --yes to spend roughly "
+            f"${preview.estimated_cost_usd:.2f} on top of ${spent:.2f}."
+        )
+        return 0
+
+    root = Path(args.state_dir) if args.state_dir else runtime_root()
+    run_id = args.new_run_id or new_run_id()
+    spec = RunSpec(
+        run_id=run_id,
+        goal=args.goal or prior.spec.goal,
+        project_dir=project_dir,
+        graph_name=graph_path.stem,
+        node_id=node_id,
+        budget=budget,
+        parent_run_id=prior.spec.run_id,
+    )
+    scheduler = Scheduler(
+        worker=ClaudeCodeWorker(
+            project_dir=project_dir, permission_mode=args.permission_mode,
+        ),
+        artifacts=ArtifactStore(root, run_id),
+        context=ContextResolver(project_dir=project_dir),
+        state_root=root,
+        config=SchedulerConfig(
+            verify=not args.no_verify,
+            isolate=args.isolate,
+            spec_change=args.change or "",
+        ),
+    )
+    print(f"\nrun {run_id} — state in {root / 'runs' / run_id}\n")
+    state = scheduler.continue_from(prior, spec, tasks)
+    print(_render_state(state))
+
+    from vise.runtime.lessons import record_run_lessons
+
+    recorded = record_run_lessons(state, project_dir)
+    if recorded:
+        print(f"\n{recorded} lesson(s) recorded in this project's experience memory")
+    return 0 if state.succeeded() else 1
+
+
 def _cmd_compose(args: argparse.Namespace) -> int:
     """Read a run into a brief for composing what follows it.
 
@@ -483,6 +620,10 @@ def _run_ids(args: argparse.Namespace) -> list[str]:
 
 def _render_state(state) -> str:
     lines = [f"run {state.spec.run_id} — {state.spec.goal}"]
+    if state.spec.parent_run_id:
+        # Without this a chain reads as unrelated runs, and the money it spent
+        # cannot be added up by anyone who was not there when it was started.
+        lines.append(f"  continues {state.spec.parent_run_id}")
     if state.cancelled:
         lines.append(f"CANCELLED: {state.cancel_reason}")
     elif state.human_gate:

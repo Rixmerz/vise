@@ -12,7 +12,7 @@ two-line change is before it starts.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterable, Sequence
 
 from vise.runtime import ownership as _own
@@ -264,6 +264,7 @@ def plan(
     completed: Iterable[str] = (),
     project_dir: str | None = None,
     change: str = "",
+    spent_usd: float = 0.0,
 ) -> RunPlan:
     """Turn a DAG node's tasks into a readable, costed, checked plan.
 
@@ -277,6 +278,12 @@ def plan(
     )
     router = router or ModelRouter()
     ledger = BudgetLedger(budget or RunBudget())
+    # Money already spent against this goal, when the plan continues a prior
+    # run. Without it a continuation's preview measures its own cost against
+    # the whole ceiling and reports "fits" for a chain that is already over —
+    # the ceiling would bound the last link instead of the run of runs.
+    if spent_usd:
+        ledger.spent = replace(ledger.spent, cost_usd=ledger.spent.cost_usd + spent_usd)
     remaining = ledger.remaining_usd()
 
     raw_waves, unschedulable = dependency_waves(tasks, completed)

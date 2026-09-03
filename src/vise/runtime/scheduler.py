@@ -220,6 +220,41 @@ class Scheduler:
         )
         return self.run(state.spec, tasks, resume_from=state)
 
+    def continue_from(
+        self, prior: RunState, spec: RunSpec, tasks: Sequence[Any]
+    ) -> RunState:
+        """Run a new plan as the continuation of a recorded one.
+
+        ``resume`` keeps the plan and retries what did not finish. This keeps
+        the *spend* and takes a different plan — the one a person composed from
+        the stopped run. They share one argument and nothing else, which is why
+        they are two methods: resetting records to ``PENDING`` is right for a
+        graph that has not changed and meaningless for one that has.
+
+        What carries is the ledger, for the reason ``resume`` gives about a
+        single run and which is no less true of a chain: a ceiling that resets
+        between links is not a ceiling, and a goal pursued across four runs
+        would be under budget in each and unbounded overall.
+
+        What does not carry is the succeeded *records*. Identity is exactly
+        what a new plan may have changed — a composed ``cli-python`` with new
+        ownership and new acceptance is not the ``cli-python`` that failed —
+        and nothing here can tell. So a task the composer put in the plan runs.
+        The prior run's successes reach the new plan the other way, as
+        ``completed`` ids that satisfy dependencies, which is the caller's job
+        and not this one's.
+        """
+        state = RunState.for_tasks(spec, [t.id for t in tasks])
+        state.ledger.spent = prior.ledger.spent
+        state.ledger.by_task = dict(prior.ledger.by_task)
+        state.emit(
+            "continued",
+            parent=prior.spec.run_id,
+            inherited_usd=round(prior.ledger.spent.cost_usd, 4),
+            tasks=len(tasks),
+        )
+        return self.run(spec, tasks, resume_from=state)
+
     def run(
         self,
         spec: RunSpec,
@@ -229,9 +264,10 @@ class Scheduler:
     ) -> RunState:
         """Dispatch until every task is terminal, parked, or the run stops.
 
-        ``resume_from`` continues a recorded run instead of starting a fresh
-        one — see ``resume``, which is the only caller that passes it. Nothing
-        after this line distinguishes the two cases on purpose: the spec gate
+        ``resume_from`` supplies the state instead of one being built here —
+        ``resume`` passes a recorded run, ``continue_from`` passes a fresh run
+        carrying a prior one's ledger. Nothing after this line distinguishes
+        the three callers on purpose: the spec gate
         is re-checked (the repository may have moved since), the worktree pool
         is re-opened, and the dispatch loop below is the part of this runtime
         that is hardest to test, so it gets one entry point rather than two.

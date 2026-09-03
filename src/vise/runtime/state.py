@@ -334,6 +334,7 @@ class RunState:
                 max_wall_time_s=float(budget_data.get("max_wall_time_s", 0.0)),
             ),
             created_at=str(spec_data.get("created_at") or utcnow()),
+            parent_run_id=str(spec_data.get("parent_run_id") or ""),
         )
         state = cls(spec=spec, ledger=BudgetLedger(spec.budget))
         state.started_at = str(data.get("started_at") or utcnow())

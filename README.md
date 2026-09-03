@@ -187,6 +187,25 @@ vise runtime budget run-a1b2c3       # what it cost, per task
 vise runtime cancel run-a1b2c3       # stop one from another terminal
 ```
 
+A stopped run has two ways forward, and which one you want depends on whether
+the plan was the problem:
+
+```sh
+vise runtime resume  run-a1b2c3                        # same plan, retry what did not finish
+vise runtime compose run-a1b2c3                        # what the next plan needs to know
+vise runtime continue run-a1b2c3 --graph next.yaml     # a new plan, carrying the ledger
+```
+
+`compose` reads the run into the terms a follow-up is written in — what is
+already paid for, what is not and why, what was wrong with the plan rather than
+the work — and dispatches nothing. `continue` runs the graph you composed as a
+continuation of the old run: its ledger opens at what the old one spent, so a
+`--max-cost` bounds the chain rather than its last link, and the two runs are
+linked in the state so the chain can be added up afterwards. It declines to
+guess about identity — a task the new plan declares runs, even where its id
+succeeded before, and it says which ones those are; `--skip-done` is for when
+you know they are the same work.
+
 Five rules the run enforces that are easy to state and easy to skip:
 
 - **A run that writes needs a spec.** Before its first dispatch — before the

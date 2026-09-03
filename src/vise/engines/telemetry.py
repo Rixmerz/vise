@@ -82,6 +82,7 @@ _VALID_RUN_EVENTS = frozenset({
     "replanned",
     "replan_declined",
     "replan_unavailable",
+    "continued",
     # What a stopped run settled on its way out. Worth a cross-run record
     # precisely because it is money spent on work nobody read: a run whose
     # `drained` costs add up is a run whose ceilings are set wrong.

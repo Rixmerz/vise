@@ -390,6 +390,11 @@ class RunSpec:
     budget: RunBudget = field(default_factory=RunBudget)
     created_at: str = field(default_factory=_utcnow)
 
+    #: The run this one continues, when a new plan was composed from a stopped
+    #: one. Without it a chain of runs is a pile of unrelated runs, and the
+    #: money the chain spent cannot be added up after the fact.
+    parent_run_id: str = ""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
@@ -399,4 +404,5 @@ class RunSpec:
             "node_id": self.node_id,
             "budget": self.budget.to_dict(),
             "created_at": self.created_at,
+            "parent_run_id": self.parent_run_id,
         }
