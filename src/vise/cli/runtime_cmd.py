@@ -291,6 +291,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"\nrun {run_id} — state in {root / 'runs' / run_id}\n")
     state = scheduler.run(spec, tasks)
     print(_render_state(state))
+
+    # What the run learned goes where the next plan will look. After the run,
+    # by the process that owns it, and never able to change its exit code.
+    from vise.runtime.lessons import record_run_lessons
+
+    recorded = record_run_lessons(state, spec.project_dir)
+    if recorded:
+        print(f"\n{recorded} lesson(s) recorded in this project's experience memory")
     return 0 if state.succeeded() else 1
 
 

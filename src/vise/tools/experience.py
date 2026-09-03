@@ -277,6 +277,9 @@ def register_experience(mcp):
         return {
             "total_matching": len(filtered),
             "showing": len(entries),
+            # One commit is one lesson seen through several globs; this is
+            # the count that answers "how much does the memory know".
+            "distinct_commits": len({e.commit_hash for e in filtered if e.commit_hash}),
             "entries": [
                 {
                     "id": e.id,
@@ -289,6 +292,7 @@ def register_experience(mcp):
                     "occurrences": e.occurrences,
                     "shapes": dict(e.shapes),
                     "scope": e.scope,
+                    "commit_hash": e.commit_hash or None,
                     "resolution": e.resolution[:100] if e.resolution else None,
                     "last_seen": e.last_seen,
                 }

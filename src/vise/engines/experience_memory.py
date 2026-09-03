@@ -27,6 +27,8 @@ VALID_TYPES = frozenset({
     "gate_blocked", "gate_resolved",
     "impact_high",
     "skill_referenced",
+    # Written by the runtime after a run — see vise.runtime.lessons.
+    "run_replanned", "run_blocked",
 })
 
 VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
@@ -50,6 +52,11 @@ class ExperienceEntry:
     resolution: str = ""
     related_files: list[str] = field(default_factory=list)
     scope: str = "global"             # global|project
+    # Set by the commit recorder, which writes one entry per touched glob so the
+    # injector can match a file to a lesson. Every entry from one commit shares
+    # this, which is how stats and listings tell N lessons from one lesson seen
+    # through N globs. Empty for every other source.
+    commit_hash: str = ""
     # Structured repeat counting: shape slug -> times seen. `occurrences` counts
     # records merged onto this entry; `shapes` counts repeats of one FAILURE
     # SHAPE, which is a different question and the one callers actually ask.
@@ -594,8 +601,13 @@ class ExperienceMemoryStore:
             by_severity[e.severity] = by_severity.get(e.severity, 0) + 1
             confidences.append(e.confidence)
 
+        from_commits = [e for e in self.entries if e.commit_hash]
         return {
             "total": len(self.entries),
+            # `total` counts entries; a commit fans out into one per glob, so
+            # "26 entries" from 8 commits is not 26 lessons. Say both.
+            "from_commits": len(from_commits),
+            "distinct_commits": len({e.commit_hash for e in from_commits}),
             "by_type": by_type,
             "by_scope": by_scope,
             "by_severity": by_severity,

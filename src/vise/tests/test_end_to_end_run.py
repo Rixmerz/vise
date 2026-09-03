@@ -24,6 +24,7 @@ import pytest
 
 from vise.engines.graph_engine import Task
 from vise.runtime.contracts import (
+    FailureKind,
     RunBudget,
     RunSpec,
     TaskResult,
@@ -233,3 +234,75 @@ def test_the_persisted_state_survives_a_round_trip(project, tmp_path):
         state.ledger.spent.cost_usd)
     raw = json.loads((tmp_path / "runs" / "e2e" / "state.json").read_text())
     assert raw["spec"]["run_id"] == "e2e"
+
+
+# ---------------------------------------------------------------------------
+# The loop closes: fail → re-spec → succeed, on a real repository
+# ---------------------------------------------------------------------------
+
+
+class _SpecBugWorker(_Worker):
+    """Fails ``a`` once as a SPEC_BUG, answers the re-spec, then does the work."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen: dict[str, int] = {}
+
+    def run(self, brief):
+        self.seen[brief.task_id] = self.seen.get(brief.task_id, 0) + 1
+        if brief.task_id == "a" and self.seen["a"] == 1:
+            self.dispatched.append(brief.task_id)
+            return TaskResult(
+                task_id="a", verdict=Verdict.FAIL,
+                summary="the spec asks alpha to replace mod.py; the tests assume it appends",
+                classification=FailureKind.SPEC_BUG,
+                usage=Usage(cost_usd=self.cost, tokens_in=10, tokens_out=20),
+            )
+        if brief.task_id.endswith("::respec"):
+            self.dispatched.append(brief.task_id)
+            return TaskResult(
+                task_id=brief.task_id, verdict=Verdict.PASS,
+                summary="alpha should append a marker line, not replace the file",
+                evidence="read src/alpha/mod.py and the tests",
+                usage=Usage(cost_usd=self.cost, tokens_in=10, tokens_out=20),
+            )
+        return super().run(brief)
+
+
+def test_a_spec_bug_replans_and_the_run_still_finishes(project, tmp_path):
+    """Nine real runs in this repository's history, zero replans.
+
+    The replanner landed with unit tests and no run had ever exercised it
+    against real git, real gates and a real verifier. This is that run: task
+    ``a`` fails once saying the spec was wrong, a ``design`` task is put in
+    front of it, that task answers, ``a`` runs again from the answer, and the
+    node finishes with the work in the tree and the reason in the record.
+    """
+    from vise.runtime.lessons import lessons_from
+
+    worker = _SpecBugWorker()
+    state = Scheduler(
+        worker=worker, registry=AgentRegistry.bundled(), state_root=tmp_path,
+    ).run(
+        RunSpec(run_id="e2e-replan", goal="build the thing", project_dir=str(project),
+                budget=RunBudget(max_parallel=2)),
+        _tasks(),
+    )
+
+    kinds = [e["kind"] for e in state.events]
+    assert state.replans == 1, kinds
+    assert "replanned" in kinds
+    assert "a::respec" in state.tasks, list(state.tasks)
+    assert state.tasks["a::respec"].state is TaskState.SUCCEEDED, state.tasks["a::respec"].note
+    assert state.tasks["a"].state is TaskState.SUCCEEDED, state.tasks["a"].note
+    assert state.tasks["a"].attempt_count == 2
+    assert state.succeeded(), {t: (r.state.value, r.note) for t, r in state.tasks.items()}
+
+    order = worker.dispatched
+    assert order.index("a") < order.index("a::respec") < len(order) - 1, order
+    assert "# a was here" in (project / "src" / "alpha" / "mod.py").read_text()
+    assert "# b was here" in (project / "src" / "beta" / "mod.py").read_text()
+
+    # And the reason is a lesson the next run can read.
+    [lesson] = [x for x in lessons_from(state) if x.type == "run_replanned"]
+    assert "a (spec_bug): the spec asks alpha to replace mod.py" in lesson.resolution
