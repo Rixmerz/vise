@@ -8,6 +8,52 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The enforcer blocked less than the workflow declared, and said nothing.**
+  `graph_enforcer.py` is the PreToolUse gate every `tools_blocked` relies on,
+  and it reads the graph with its own stdlib-only parser because it runs
+  before *every* tool call. Keeping it light was right; leaving it
+  structurally blind was not. It matched `- id:` and `tools_blocked:` at any
+  depth, which broke three ways — each silent, and each failing **open**:
+
+  - `tools_blocked: ["Bash"]` — the inline form `graph_parser` accepts and
+    enforces — parsed as empty. A gate its author wrote, that vise accepted,
+    that blocked nothing.
+  - A `dag` node whose `tasks:` came before its `tools_blocked:` had the block
+    list attributed to the last task id, so the node blocked nothing. Every
+    `dag` node was exposed, and `dag` nodes are where the runtime is going.
+  - A line of prose inside `prompt_injection: |` beginning `- id:` invented a
+    node and took the declaring node's restrictions with it.
+
+  The parser is now indentation-aware and still imports nothing: using
+  `yaml.safe_load` was measured rather than assumed, and takes the hook's
+  median startup from 25 ms to 48 ms with a half-second tail.
+
+  Found by comparing the two parsers over the bundled library — `research-graph`
+  already yielded four phantom nodes (its `gather` task ids). The suite now
+  pins the hook's parser against `graph_parser.load_graph_from_file` for every
+  bundled workflow; that comparison is what found all three.
+
+  **Behaviour change:** a workflow that declared `tools_blocked` in an affected
+  shape was not being enforced and now is. A repository relying — knowingly or
+  not — on a gate that never fired will start seeing it block.
+
+- **`hooks/graph_enforcer.py` read 34% while being launched on every run.**
+  The pre-existing hook tests replace the environment wholesale, which strips
+  `COVERAGE_PROCESS_START` and hides the subprocess from coverage; they also
+  only reached the escape-hatch allowlist, never the deny path. The new tests
+  launch the hook with the environment intact and drive the block decision,
+  the disabled flag, a corrupt state file and a missing graph.
+
+### Known
+
+- A **trailing comment on a block-list item** (`- "Bash"  # no shell`) is
+  mishandled by both parsers — `graph_parser` yields `'"Bash"'`, the enforcer
+  yields the rest of the line, and neither blocks `Bash`. It belongs to
+  `graph_parser` first: fixing only the enforcer would break the agreement the
+  change above establishes. No bundled workflow uses the shape.
+
 ## [0.1.0a21] — 2026-09-03
 
 ### Added

@@ -27,51 +27,151 @@ except Exception:
             return base / "vise"
 
 
+#: Block-scalar introducers. Everything indented under one of these is prose,
+#: not structure, and must not be read as either.
+_BLOCK_SCALARS = frozenset({"|", ">", "|-", ">-", "|+", ">+", "|2", ">2"})
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
+def _scalar(raw):
+    return raw.strip().strip('"').strip("'")
+
+
+def _flow_items(raw):
+    """Items of an inline sequence: ``["A", "B"]`` -> ``["A", "B"]``.
+
+    The real parser accepts this form and so must this one — a node written
+    ``tools_blocked: ["Bash"]`` used to parse as empty, which is a gate its
+    author declared, that vise accepted, and that blocked nothing.
+    """
+    inner = raw.strip()
+    if inner.startswith("["):
+        inner = inner[1:]
+    if inner.endswith("]"):
+        inner = inner[:-1]
+    return [_scalar(part) for part in inner.split(",") if part.strip()]
+
+
 def parse_tools_blocked(content):
     """Extract node_id -> tools_blocked mapping from graph YAML.
 
-    Minimal parser (~25 lines). Only extracts 'id' and 'tools_blocked'
-    fields from the nodes section. Stops at 'edges:' section.
+    Deliberately partial: it answers one question — which tools does this
+    node block — and skips everything else rather than guessing at it. And
+    deliberately stdlib-only, because this runs before *every* tool call.
+    Measured rather than assumed: adding ``import yaml`` takes the hook's
+    median startup from 25 ms to 48 ms with a half-second tail, which is not
+    a trade a gate on the hot path gets to make.
+
+    But a light parser still has to be a correct one, and this one used to be
+    structurally blind — it matched ``- id:`` and ``tools_blocked:`` at any
+    depth, which broke three ways, each of them silent and each failing OPEN:
+
+    * a ``dag`` node whose ``tasks:`` came before its ``tools_blocked:`` had
+      the block list attributed to the last task id, so the node blocked
+      nothing;
+    * the inline form above parsed as empty;
+    * a line of prose inside ``prompt_injection: |`` beginning ``- id:``
+      invented a node and took the real node's restrictions with it.
+
+    Indentation is the whole fix: a ``- id:`` deeper than the node sequence
+    is a task, a key that is not at the node's own key indent belongs to
+    something nested, and a block scalar is consumed without being read.
+
+    ``test_graph_enforcer_parser.py`` pins the result against
+    ``graph_parser.load_graph_from_file`` over every bundled workflow. That
+    comparison is what found all three.
     """
     mapping = {}
-    node_id = None
-    collecting = False
+    lines = content.splitlines()
 
-    for line in content.splitlines():
+    # Only the top-level `nodes:` section describes nodes. Starting anywhere
+    # is how a `metadata:` block or a recipe file could contribute entries.
+    start = None
+    for index, line in enumerate(lines):
+        if _indent(line) == 0 and line.strip().startswith("nodes:"):
+            start = index + 1
+            break
+    if start is None:
+        return mapping
+
+    node_indent = None   # column of the "-" that opens a node
+    key_indent = None    # column of the keys belonging to the current node
+    node_id = None
+    collecting = False   # inside this node's tools_blocked block sequence
+
+    i = start
+    total = len(lines)
+    while i < total:
+        line = lines[i]
         stripped = line.strip()
+        i += 1
 
         if not stripped or stripped.startswith("#"):
             continue
 
-        # Stop at edges section — we only care about nodes
-        if stripped == "edges:" or stripped == "edges":
-            break
+        indent = _indent(line)
 
-        # New node entry
-        if stripped.startswith("- id:"):
-            node_id = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+        if stripped.startswith("- "):
+            if node_indent is None:
+                node_indent = indent  # the first item fixes the node depth
+            if indent < node_indent:
+                break  # dedented out of the nodes section
+            if indent > node_indent:
+                # Deeper item: a tools_blocked entry if we are collecting one,
+                # otherwise a nested task — which is not a node.
+                if collecting and node_id is not None:
+                    mapping[node_id].append(_scalar(stripped[2:]))
+                continue
+            collecting = False
+            if stripped.startswith("- id:"):
+                node_id = _scalar(stripped.split(":", 1)[1])
+                mapping.setdefault(node_id, [])
+                # Sibling keys align with `id`, wherever the dash put it.
+                after_dash = line[indent + 1:]
+                key_indent = indent + 1 + (len(after_dash) - len(after_dash.lstrip(" ")))
+            else:
+                node_id = None
+                key_indent = None
+            continue
+
+        if indent == 0:
+            break  # the next top-level key ends the nodes section
+
+        if node_id is None or indent != key_indent or ":" not in stripped:
+            # Belongs to something nested (a task's own fields), or is not a
+            # key at all. Either way it ends any list we were collecting.
+            collecting = False
+            continue
+
+        key, _, rest = stripped.partition(":")
+        key = key.strip()
+        rest = rest.strip()
+
+        if rest in _BLOCK_SCALARS:
+            collecting = False
+            while i < total:
+                nxt = lines[i]
+                if nxt.strip() and _indent(nxt) <= indent:
+                    break
+                i += 1
+            continue
+
+        if key != "tools_blocked":
+            collecting = False
+            continue
+
+        if rest.startswith("["):
+            mapping[node_id] = _flow_items(rest)
+            collecting = False
+        elif rest:
+            mapping[node_id] = [_scalar(rest)]
+            collecting = False
+        else:
             mapping[node_id] = []
-            collecting = False
-            continue
-
-        if node_id is None:
-            continue
-
-        # tools_blocked key (block list form)
-        if stripped.startswith("tools_blocked:"):
-            val = stripped.split(":", 1)[1].strip()
-            if not val:  # List follows on next lines
-                collecting = True
-            continue
-
-        # List item under tools_blocked
-        if collecting and stripped.startswith("- "):
-            mapping[node_id].append(stripped[2:].strip().strip('"').strip("'"))
-            continue
-
-        # Any other key ends tools_blocked collection
-        if collecting and ":" in stripped:
-            collecting = False
+            collecting = True
 
     return mapping
 
