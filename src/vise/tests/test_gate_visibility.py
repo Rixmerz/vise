@@ -97,6 +97,11 @@ async def test_a_real_pass_is_marked_mechanical(
     # `true` exits 0 on any POSIX box; no project toolchain required.
     profile.write_text('checks:\n  lint: ["true"]\n', encoding="utf-8")
     monkeypatch.setenv("VISE_QUALITY_PROFILE", str(profile))
+    # A repo-declared command runs only once approved on this machine
+    # (vise.core.consent). A real pass now includes that step.
+    from vise.core import consent
+
+    consent.approve(unconfigured_repo, "lint", ["true"])
 
     graph = load_graph_from_file(WORKFLOWS / "quality-gate-graph.yaml")
     result = await _run_node_validators(
