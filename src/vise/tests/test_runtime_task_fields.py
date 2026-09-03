@@ -187,3 +187,43 @@ def test_requires_human_survives_the_parser_and_the_builder():
 
 def test_a_task_that_declares_nothing_does_not_require_a_human():
     assert _tasks(PLAIN_YAML)["t1"].requires_human is False
+
+
+def test_a_declared_default_still_means_what_was_declared():
+    """The emitter omits defaults; that is only safe while the parser agrees.
+
+    `_generate_graph_yaml` writes `writes: false` and stays silent on
+    `writes: true`, because true is what a task without the key already means.
+    The two halves of that bargain live in different files — the omission is in
+    the builder, the default is in the parser — and nothing made them agree.
+    A parser default flipping to `False` would turn every composed writing task
+    into a read-only one, silently, and the spec gate that fires on `writes`
+    would stop firing.
+
+    So this asserts the property rather than the text: declare each default
+    explicitly, emit, parse, and require the value to come back.
+    """
+    declared = {
+        "writes": True,
+        "criticality": "routine",
+        "complexity": "medium",
+        "requires_human": False,
+    }
+    builder = {
+        "metadata": {"name": "b", "version": "1.0"},
+        "nodes": [{
+            "id": "implement", "name": "N", "node_type": "dag",
+            "is_start": True, "is_end": True,
+            "tasks": [{"id": "t1", "name": "One", **declared}],
+        }],
+        "edges": [],
+    }
+
+    rendered = _generate_graph_yaml(builder)
+    task = _tasks(rendered)["t1"]
+
+    for field, value in declared.items():
+        assert field not in rendered, f"{field} is a default and should be omitted"
+        assert getattr(task, field) == value, (
+            f"{field} was declared {value!r} and came back {getattr(task, field)!r}"
+        )

@@ -172,3 +172,63 @@ def test_a_mixed_list_is_refused_whole(tools):
     assert out["success"] is False
     preview = tools["graph_builder_preview"](builder_id=builder)
     assert "tests_pass" not in str(preview), "half the list was kept"
+
+
+# --- where a composed graph lands ------------------------------------------
+
+
+def _saveable(builder_id: str):
+    """A minimal valid graph, ready to save."""
+    from vise.tools._graph_builder import _graph_builders
+
+    _graph_builders[builder_id] = {
+        "metadata": {"name": "composed", "description": "", "version": "1.0.0",
+                     "type": "graph"},
+        "nodes": [{"id": "n", "name": "N", "is_start": True, "is_end": True,
+                   "mcps_enabled": ["*"], "max_visits": 10}],
+        "edges": [],
+    }
+
+
+def test_a_composed_graph_lands_in_the_project_that_asked_for_it(
+    tools, tmp_path, monkeypatch
+):
+    """`project_dir` was accepted and ignored, so every graph went user-wide.
+
+    A plan composed from one repository's run became visible to every other
+    repository on the machine, at the scope that loses to nothing but the
+    project's own. Found by saving a graph composed from a real run and looking
+    at where the file went.
+    """
+    import vise.tools._graph_builder as mod
+
+    global_dir = tmp_path / "user"
+    monkeypatch.setattr(mod, "get_global_workflows_dir", lambda: global_dir)
+    project = tmp_path / "repo"
+    project.mkdir()
+    _saveable("b1")
+
+    result = tools["graph_builder_save"](
+        builder_id="b1", filename="composed", project_dir=str(project))
+
+    assert result["success"], result
+    assert result["scope"] == "project"
+    assert (project / ".claude" / "workflows" / "composed-graph.yaml").exists()
+    assert not global_dir.exists(), "nothing should reach the user-wide library"
+
+
+def test_without_a_project_it_still_goes_user_wide(tools, tmp_path, monkeypatch):
+    """The old behaviour is the fallback, not a bug to be removed."""
+    import vise.core.session as session
+    import vise.tools._graph_builder as mod
+
+    global_dir = tmp_path / "user"
+    monkeypatch.setattr(mod, "get_global_workflows_dir", lambda: global_dir)
+    monkeypatch.setattr(session, "get_session_project_dir", lambda _sid: None)
+    _saveable("b2")
+
+    result = tools["graph_builder_save"](builder_id="b2", filename="composed")
+
+    assert result["success"], result
+    assert result["scope"] == "user"
+    assert (global_dir / "composed-graph.yaml").exists()

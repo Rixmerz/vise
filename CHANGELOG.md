@@ -10,6 +10,28 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Fixed
 
+- **A composed graph landed in every repository on the machine.**
+  `graph_builder_save` accepted `project_dir` and `session_id` and used
+  neither: the file always went to the user-wide workflows library, which
+  loses precedence only to the project scope. A plan composed from one
+  repository's run was then visible to every other one. It now writes to the
+  named project's `.claude/workflows/`, falls back to the user library when no
+  project is named — today's behaviour for callers that pass nothing — and
+  reports which scope it used.
+
+  Found by composing a graph from a real run's brief and looking at where the
+  file went. The same trip exercised the loop end to end for the first time:
+  brief → builder → saved YAML → `runtime plan`, with `command_exit` refused
+  at the builder as designed.
+
+- **The builder's omitted defaults were only correct by coincidence.** It
+  writes `writes: false` and stays silent on `writes: true`, because true is
+  what a task without the key already means — but the omission lives in the
+  builder and the default in the parser, with nothing making them agree. A
+  parser default flipping would have turned every composed writing task
+  read-only, silently, and stopped the spec gate from firing. Now asserted as
+  a property: declare each default, emit, parse, require it back.
+
 - **`resume` and `compose` disagreed about the same failure.** `compose` says
   a `spec_bug` means the plan was wrong and retrying cannot fix it; `resume`
   offered the same task back with no comment. Two commands built for one loop

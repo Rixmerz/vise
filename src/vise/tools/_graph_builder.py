@@ -1,7 +1,9 @@
 """Graph builder tools: graph_builder_create/add_node/add_edge/preview/save/list/delete."""
 
 import uuid
+from pathlib import Path
 
+from vise.core.session import resolve_project_dir
 from vise.engines.config import get_global_workflows_dir
 from vise.engines.graph_parser import parse_graph_yaml, GraphParseError
 
@@ -721,7 +723,14 @@ def register_graph_builder_tools(mcp):
             project_dir: Project directory (optional after set_session)
             session_id: Session ID for parallel isolation
 
-        The file will be saved as {filename}-graph.yaml in the workflows directory.
+        With ``project_dir`` (or a session that remembers one) the graph is
+        written to that project's ``.claude/workflows/``, the highest-precedence
+        scope; without one it goes to the user-wide library as before.
+
+        Both parameters used to be accepted and ignored — every composed graph
+        landed in the user scope regardless — so a plan composed from one
+        repository's run became visible to every other repository on the
+        machine. A composed graph is about the project whose run produced it.
         """
         if builder_id not in _graph_builders:
             return {
@@ -764,8 +773,18 @@ def register_graph_builder_tools(mcp):
                 "message": f"Generated YAML is invalid: {e}"
             }
 
-        # Get workflows directory
+        # Where it lands. A composed graph belongs to the project whose run it
+        # was composed from; the user scope is the fallback for a caller that
+        # named no project, which is what every caller got before.
+        scope = "user"
         workflows_dir = get_global_workflows_dir()
+        try:
+            resolved, _sid = resolve_project_dir(project_dir, session_id)
+        except ValueError:
+            resolved = ""
+        if resolved:
+            workflows_dir = Path(resolved) / ".claude" / "workflows"
+            scope = "project"
         workflows_dir.mkdir(parents=True, exist_ok=True)
 
         # Save file
@@ -783,6 +802,7 @@ def register_graph_builder_tools(mcp):
             "success": True,
             "message": "Graph saved successfully",
             "file": str(output_path),
+            "scope": scope,
             "graph_name": builder["metadata"]["name"],
             "stats": {
                 "nodes": len(builder["nodes"]),
