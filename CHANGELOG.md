@@ -6,7 +6,7 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
-## [Unreleased]
+## [0.1.0a22] — 2026-09-03
 
 ### Added
 
@@ -101,6 +101,17 @@ you may already depend on, it says so under **Behaviour change**.
   `resume` rather than silently dropped.
 
 ### Fixed
+
+- **The codelayer hook's latency budget measured the machine, not the hook.**
+  `test_the_hook_stays_within_its_latency_budget` timed the wall clock of a
+  whole `subprocess.run`, so it charged the hook for an interpreter cold start
+  it does not cause — and, under `coverage run`, for loading the tracer in the
+  child too. It went red at 159 ms on a busy runner and green alone, which is
+  the shape that teaches people to re-run a red gate instead of reading it.
+  It now takes paired samples — a bare interpreter and the hook, back to back —
+  and asserts the *marginal* cost, which is the number the budget was always
+  about. Re-broken with a 200 ms sleep in the hook to confirm it still catches
+  real slowness.
 
 - **Telemetry dropped the `resumed` event.** The same defect class as
   `drained`/`drain_failed` earlier in this release: a new run event has to be

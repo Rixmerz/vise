@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vise-mcp"
-version = "0.1.0a21"
+version = "0.1.0a22"
 description = "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
