@@ -223,6 +223,13 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
                           help="actually dispatch; without it the remaining work is printed")
     resume_p.set_defaults(func=_cmd_resume)
 
+    compose_p = inner.add_parser(
+        "compose", help="what a finished run says about the plan that should follow it")
+    compose_p.add_argument("run_id")
+    compose_p.add_argument("--state-dir", default=None)
+    compose_p.add_argument("--json", action="store_true")
+    compose_p.set_defaults(func=_cmd_compose)
+
     status_p = inner.add_parser("status", help="where runs stand")
     status_p.add_argument("run_id", nargs="?", default=None)
     status_p.add_argument("--limit", type=int, default=5)
@@ -403,6 +410,26 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     if recorded:
         print(f"\n{recorded} lesson(s) recorded in this project's experience memory")
     return 0 if state.succeeded() else 1
+
+
+def _cmd_compose(args: argparse.Namespace) -> int:
+    """Read a run into a brief for composing what follows it.
+
+    Dispatches nothing. There is no ``run_start`` tool by a documented
+    decision, and this does not reopen it: the composed graph is something a
+    person reads and runs.
+    """
+    from vise.runtime.compose import brief_from
+
+    brief = brief_from(_load_state(args, args.run_id))
+    if args.json:
+        print(json.dumps(brief.to_dict(), indent=2))
+    else:
+        print(brief.render())
+    # Zero means "there is a plan to write". A finished run has nothing to
+    # compose, which is not an error but is worth a distinct code so a script
+    # can tell the two apart.
+    return 0 if brief.needs_a_new_plan else 3
 
 
 # --- reading a run back ---------------------------------------------------

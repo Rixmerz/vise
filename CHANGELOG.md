@@ -10,6 +10,50 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Added
 
+- **A composed graph may no longer author its own gate.** `replan.py` states
+  the principle — *"A replanner recomposes; it never authors a gate […] A
+  planner allowed to write the condition it is judged by is a planner grading
+  its own homework"* — and the replanner honours it by construction. The
+  builder did not: `graph_builder_add_node(validators=[...])` accepted
+  anything and `save` checked only that the YAML parsed, so composing and
+  gating were one privilege.
+
+  `BUILDER_VALIDATORS` names what a composed node may declare. The line is
+  mechanical rather than a matter of taste: every allowed validator runs
+  vise's own reviewed logic, and the two refused ones — `command_exit` and
+  `quality_check` — run a command the *repository* chose. `add_node` and
+  `update_node` both enforce it, and a list with one refused entry is refused
+  whole rather than half-kept.
+
+  `BUILDER_VALIDATORS_EXCLUDED` carries each reason as data so the suite can
+  assert that every validator in the registry is in exactly one of the two
+  sets. Adding a validator is now a decision someone makes; an allowlist whose
+  complement is implicit admits the next one by accident, and the next one is
+  the one nobody thought about.
+
+  This binds the builder, not YAML written by hand. A workflow file is
+  committed and reviewed as a file; the builder is an API call made
+  mid-session that nobody reviews, so the check goes where the review is not.
+
+- **`vise runtime compose <run_id>`** — what a finished run says about the plan
+  that should follow it. The two planes were complete and disconnected:
+  `graph_builder_*` accepts a whole plan, `RunState` records what the next one
+  needs, and between them was a person reading `state.json`.
+
+  The brief states what is already paid for, what is not and why (keeping the
+  classification when a later result lost it), what was wrong with the plan
+  rather than the work, what the project's memory now carries, and which
+  validators a composed node may declare. Deterministic on purpose: deciding
+  what to build next is judgement and this makes no attempt at it, but a
+  composer must never have to re-derive which tasks already succeeded.
+
+  **It dispatches nothing.** There is no `run_start` tool by a decision
+  documented at `README.md:23` and pinned by a test, and this does not reopen
+  it — the composed graph is something a person reads and runs, and the plan
+  they read now reports its own concurrency ceiling and cost. Exit 3 when a
+  run has nothing to compose, distinct from 0 so a script can tell the two
+  apart.
+
 - **A plan says how wide it can actually run.** Every one of the nine runs
   vise has performed declared `max_parallel: 3`. Measured from their event
   timelines, peak concurrency was **2** in the five that got that far and

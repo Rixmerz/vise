@@ -5,6 +5,69 @@ import uuid
 from vise.engines.config import get_global_workflows_dir
 from vise.engines.graph_parser import parse_graph_yaml, GraphParseError
 
+#: Validators a graph composed through these tools may declare.
+#:
+#: `runtime/replan.py` states the principle this enforces: *"A replanner
+#: recomposes; it never authors a gate. […] A planner allowed to write the
+#: condition it is judged by is a planner grading its own homework."* The
+#: replanner is bounded by construction. These tools were not — an agent could
+#: compose a node and choose the validators that would judge it, and `save`
+#: checked only that the YAML parsed.
+#:
+#: The line is drawn where it can be drawn mechanically: every validator here
+#: runs vise's own reviewed logic. The two that are excluded run a command the
+#: *repository* chose, which is a different kind of trust and one a composed
+#: graph must not grant itself.
+#:
+#: This binds the builder, not YAML written by hand. A person editing a
+#: workflow file is authoring, and their file is reviewed as a file; these
+#: tools are the surface an agent composes through, so they carry the
+#: constraint.
+BUILDER_VALIDATORS: frozenset[str] = frozenset({
+    "capability",
+    "design_tokens",
+    "diff_scope",
+    "files_exist",
+    "lint_pass",
+    "lsp_clean",
+    "no_new_deps",
+    "openspec",
+    "tests_fail",
+    "tests_pass",
+    "ui_contrast",
+    "ui_layout",
+})
+
+#: Excluded, with the reason. Kept as data rather than a comment so
+#: ``test_builder_validator_allowlist.py`` can assert that every validator in
+#: the registry appears in exactly one of these two sets — which makes adding a
+#: validator a decision someone has to make, instead of a default.
+BUILDER_VALIDATORS_EXCLUDED: dict[str, str] = {
+    "command_exit": "runs an arbitrary command the graph chooses",
+    "quality_check": "runs a command named by the repository's .vise/quality.yaml",
+}
+
+
+def _reject_unauthorable(validators):
+    """The reason a composed node may not declare this validator, or None."""
+    for declared in validators or []:
+        name = str((declared or {}).get("type", "")).strip()
+        if name in BUILDER_VALIDATORS:
+            continue
+        why = BUILDER_VALIDATORS_EXCLUDED.get(name)
+        if why:
+            return (
+                f"a composed graph may not declare the '{name}' validator: it {why}. "
+                f"A planner that writes the condition it is judged by is grading its "
+                f"own homework — see runtime/replan.py. Write it into the workflow "
+                f"file by hand if the repository really needs it."
+            )
+        return (
+            f"unknown validator '{name}' — a composed graph may declare only: "
+            f"{', '.join(sorted(BUILDER_VALIDATORS))}"
+        )
+    return None
+
 
 # In-memory graph builder storage
 # Key: builder_id, Value: {"metadata": {...}, "nodes": [...], "edges": [...]}
@@ -301,6 +364,10 @@ def register_graph_builder_tools(mcp):
                     "message": f"Node '{node_id}' already exists in this builder"
                 }
 
+        refusal = _reject_unauthorable(validators)
+        if refusal:
+            return {"success": False, "message": refusal}
+
         node = {
             "id": node_id,
             "name": name,
@@ -515,6 +582,9 @@ def register_graph_builder_tools(mcp):
                 "message": f"Node '{node_id}' not found in builder '{builder_id}'",
                 "available_nodes": [n["id"] for n in builder["nodes"]],
             }
+        refusal = _reject_unauthorable(validators)
+        if refusal:
+            return {"success": False, "message": refusal}
         patched: list[str] = []
         for key, val in (
             ("name", name),
