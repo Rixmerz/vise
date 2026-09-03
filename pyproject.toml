@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vise-mcp"
-version = "0.1.0a20"
+version = "0.1.0a21"
 description = "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -87,7 +87,7 @@ concurrency = ["thread", "multiprocessing"]
 # said 71, CLAUDE.md said 74 — so "the coverage gate" meant a different number
 # depending on which one you ran, and the one that actually gated was the
 # lowest. Every caller now runs a bare `coverage report`.
-fail_under = 78
+fail_under = 80
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

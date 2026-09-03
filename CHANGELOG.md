@@ -8,7 +8,79 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+## [0.1.0a21] — 2026-09-03
+
 ### Added
+
+- **A command the repository chose runs only after someone here approved
+  it.** `.vise/quality.yaml` is committed with the repository, and
+  `QualityCheckValidator` ran whatever it named and graded the exit code as
+  mechanical verification — a fresh clone could run anything at its first
+  node gate and have the result count. Consent is now by digest of the argv,
+  recorded in user scope (`approved_checks.json`), never in the repository.
+  `vise bootstrap` approves what it writes, because the person is there; a
+  cloned profile needs `vise approve <check>` (or `--all`) after reading the
+  file; `VISE_TRUST_PROJECT_TOOLS=1` is the blanket, and already meant "trust
+  what came with the clone" for a checker committed under `.venv/`. A command
+  the repository rewrites after approval is unapproved again.
+
+  **Behaviour change:** a profile that existed before this release is
+  unapproved on every machine. Its checks report `asserted`/`unverified` with
+  the exact next step until `vise approve --all` is run once. `vise approve
+  --list` shows each check's state.
+
+- **`vise bootstrap` says whether a browser exists.** The three design gates
+  fail closed without one — correctly — and the first `ui_layout` node was
+  where people found out, after bootstrap had said the repo was ready. CI had
+  the same gap for months: it never installed a browser, so the render gates
+  vise ships had never once run in the pipeline.
+
+- **A run leaves what it learned.** After a week of dogfooding the runtime,
+  41 of the memory's 42 entries were commit subjects, fanned out one per
+  touched glob, and the only entry a future agent would want came from a
+  node gate. `vise.runtime.lessons` reads a run's event record after the run
+  and writes replans (`run_replanned`, with the failed attempt's reason) and
+  parked, unroutable or unreadable work (`run_blocked`) to the project's
+  memory. The scheduler stays ignorant of memory; `vise runtime run` calls it.
+
+- **The replan loop, proven on a real repository.** Nine real runs in this
+  repository's history had zero replans: the replanner shipped with unit
+  tests against a hand-built registry and had never run against real git,
+  real gates and the bundled fleet. The end-to-end test now fails a task as a
+  `SPEC_BUG`, watches a `design` task land in front of it, and asserts the
+  second attempt succeeds from the answer with the work in the tree.
+
+- **Memory counts distinct commits.** `experience_stats` and
+  `experience_list` report `distinct_commits` next to the entry count. The
+  fan-out is deliberate — the injector matches a file to a glob — but "26
+  entries" from 8 commits is not 26 lessons, and nothing said so.
+
+- **`vise.core.livespec.LIVESPEC_TOOLS`** — the ten tool names vise assumes
+  livespec exposes, in one place, with a test that holds the codelayer deny
+  message, both skills, three commands and the README to it. Livespec is not
+  in this repository, so a rename there still has to be found by a person;
+  it is then one edit here and the suite names every other line.
+
+- **Tests for what an agent actually touches.** The four graph mutation
+  tools and the management tools (21–45 % covered while the engines under
+  them read 80 %+), the CLI (26 %, and the only way to dispatch the runtime),
+  and `hooks/goal_gate.py` — the Stop hook, at 0 %: its engine was tested,
+  the script Claude Code runs was not, and it is the one hook that fails into
+  holding a turn open rather than into nothing. Each is reached through the
+  registered callable or `main(argv)` with the real parameter names.
+
+- **openspec: five finished changes archived, six specs synced.** 106 of 106
+  tasks were closed and the changes still sat in `changes/`; the mandatory
+  gate watched the entrance and nothing watched the exit. Their `ADDED`
+  deltas are now the capabilities' main specs. One new change proposed with
+  every task open: `decouple-after-generation`, the phase that turns
+  linearly generated code into structure *after* tests pass, where there is
+  an oracle — the half of the coupling problem `codelayer` could not reach.
+
+- **README said 21 agents; 22 ship.** The count test pinned workflows and
+  recipes — its own docstring names this drift class "in the one dimension
+  neither of them looks at", and agents was the next one. It now pins agents
+  and skills in README and CLAUDE.md.
 
 - **An agent execution plane — specified, contracted, and planning; not yet
   dispatching.** vise decided *what process* a change follows and never *who
