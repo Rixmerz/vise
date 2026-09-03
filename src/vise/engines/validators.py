@@ -1161,12 +1161,18 @@ class QualityCheckValidator:
     Resolution cascade. Every unbound case is a SKIP: ``passed=True``,
     ``source="asserted"`` (never "mechanical" — nothing ran, so
     ``goal_complete`` must not grade this as verified), evidence naming the
-    exact next step. Only a real run (case 4) is ``source="mechanical"``.
+    exact next step. Only a real run (case 5) is ``source="mechanical"``.
 
     1. no profile file            -> not configured, create the profile
     2. profile exists, key absent -> not configured, add the key
     3. configured, binary missing -> skipped, binary not on PATH
-    4. otherwise                  -> run it, passed = (exit == 0)
+    4. runnable, not approved     -> skipped, names `vise approve <check>`
+    5. otherwise                  -> run it, passed = (exit == 0)
+
+    Case 4 is consent — ``vise.core.consent``. The command was chosen by the
+    repository, so it runs only once someone on this machine approved that
+    exact argv (``vise bootstrap`` approves what it writes; ``vise approve``
+    covers a cloned profile), or under ``VISE_TRUST_PROJECT_TOOLS=1``.
 
     ``check`` has no required value: an empty ``check`` (misconfiguration —
     nobody said which check to run) FAILS closed, matching how
@@ -1224,6 +1230,27 @@ class QualityCheckValidator:
                 evidence=(
                     f"quality check '{self.check}' skipped — {cmd[0]} "
                     f"{_not_found_reason(cmd[0])}"
+                ),
+                at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
+            )
+
+        from vise.core import consent
+
+        if not consent.trusted(goal.project_dir, self.check, cmd):
+            why = (
+                "its command changed since it was approved"
+                if consent.approval_state(goal.project_dir, self.check, cmd) == consent.CHANGED
+                else "nobody on this machine has approved it"
+            )
+            return ValidatorRecord(
+                name=label, passed=True, confidence_contribution=self.weight,
+                weight=self.weight,
+                evidence=(
+                    f"quality check '{self.check}' not run — the repository chose this "
+                    f"command and {why}: `{' '.join(cmd)}`. Read .vise/quality.yaml, "
+                    f"then `vise approve {self.check}`; or {consent.TRUST_ENV}=1 trusts "
+                    f"every repo-declared command"
                 ),
                 at=_now(), source="asserted", exit_code=None,
                 outcome="unverified",

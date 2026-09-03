@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from vise.engines.quality_profile import (
     QUALITY_PROFILE_ENV,
     UnboundCheck,
@@ -332,3 +334,14 @@ def test_records_are_named_for_the_check_not_the_validator_type(tmp_path, monkey
 
     assert ran.name == "quality_check:sast"
     assert skipped.name == "quality_check:secrets"
+
+
+@pytest.fixture(autouse=True)
+def _trust_repo_commands(monkeypatch):
+    """These tests are about the resolution cascade, not about consent.
+
+    A repo-declared command now runs only once approved on this machine
+    (``vise.core.consent``); ``test_consent.py`` owns that behaviour. Here the
+    blanket trust keeps every case below measuring what it was written to.
+    """
+    monkeypatch.setenv("VISE_TRUST_PROJECT_TOOLS", "1")

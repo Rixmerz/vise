@@ -59,7 +59,7 @@ def _files():
 
 def _parser_tree() -> dict[str, set[str]]:
     """{subcommand: {its subcommands}} straight out of the real parser."""
-    from vise.cli import bootstrap_cmd, experience_cmd, graph_cmd
+    from vise.cli import approve_cmd, bootstrap_cmd, experience_cmd, graph_cmd
     from vise.cli import insights_cmd, runtime_cmd, shot_cmd
 
     # Built the same way `main` builds it. Reaching into the modules rather
@@ -68,7 +68,7 @@ def _parser_tree() -> dict[str, set[str]]:
     parser = argparse.ArgumentParser(prog="vise")
     sub = parser.add_subparsers(dest="command")
     for module in (graph_cmd, experience_cmd, insights_cmd, bootstrap_cmd,
-                   runtime_cmd, shot_cmd):
+                   approve_cmd, runtime_cmd, shot_cmd):
         module.add_parser(sub)
 
     tree: dict[str, set[str]] = {name: set() for name in _PRE_PARSER}

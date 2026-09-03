@@ -28,6 +28,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from vise.core import consent
+from vise.engines.render_harness import browser_status
+
 # (manifest, ecosystem). Order matters only for reporting; a polyglot repo
 # matches several and gets checks for each.
 _MANIFESTS: tuple[tuple[str, str], ...] = (
@@ -281,6 +284,23 @@ def render(found: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _design_gates_report() -> str:
+    """The three design gates fail closed without a browser. Say so here.
+
+    CI never installed one, and nobody knew until a gate asked. Bootstrap is
+    where a person is already looking at what this repo can and cannot check,
+    so the answer belongs here — not in the first ``ui_layout`` block a week
+    later, after bootstrap said the repo was ready.
+    """
+    ok, reason = browser_status()
+    if ok:
+        return "\ndesign gates (ui_layout, ui_contrast): browser found — they will run."
+    return (
+        "\ndesign gates (ui_layout, ui_contrast): NO BROWSER — they fail closed "
+        f"until one exists.\n  {reason}"
+    )
+
+
 def _cmd_bootstrap(args: argparse.Namespace) -> int:
     project = Path(args.project_dir or ".").expanduser().resolve()
     target = project / ".vise" / "quality.yaml"
@@ -291,10 +311,12 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
         print(f"{target} already exists — not overwriting. Re-run with --force.")
         print("\nWhat detection would have written:\n")
         print(render(found))
+        print(_design_gates_report())
         return 0
 
     if args.dry_run:
         print(render(found))
+        print(_design_gates_report())
         return 0
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -303,6 +325,18 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
     print(f"  bound:   {', '.join(sorted(found['bound'])) or '(nothing — no tools found)'}")
     if found["skipped"]:
         print(f"  skipped: {', '.join(sorted(found['skipped']))}")
+
+    # The person is here, running bootstrap: that is the consent a profile
+    # that arrived with a clone never had. See vise.core.consent.
+    for check, cmd in sorted(found["bound"].items()):
+        consent.approve(project, check, cmd)
+    if found["bound"]:
+        print(
+            f"  approved: {len(found['bound'])} check(s) to run at the node gate on this "
+            "machine (a cloned profile needs `vise approve`)"
+        )
+
+    print(_design_gates_report())
 
     unit = found["bound"].get("unit")
     lint = found["bound"].get("lint")

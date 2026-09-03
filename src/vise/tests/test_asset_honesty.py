@@ -156,3 +156,31 @@ def test_readme_bundled_asset_counts_match_what_ships() -> None:
             f"README's architecture block says workflows ({w}), recipes ({r}); "
             f"the real counts are ({workflows}), ({recipes})"
         )
+
+
+def test_readme_and_claude_md_count_the_agents_and_skills_that_ship() -> None:
+    """The dimension the test above does not look at — until it drifted there.
+
+    ``researcher.md`` made 22 agents and left README saying 21, with a green
+    suite: the exact drift class the docstring above describes, one dimension
+    over. CLAUDE.md is pinned too. Every agent working on vise reads it first,
+    so a stale count there is wrong guidance at the source.
+    """
+    root = ASSETS.parents[2]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    agents = len(sorted((root / "agents").glob("*.md")))
+    skills = len(sorted((root / "skills").glob("*/SKILL.md")))
+    workflows = len(WORKFLOW_FILES)
+
+    assert f"vise ships {agents} agents" in readme, f"README must say 'vise ships {agents} agents'"
+    for wrong in re.findall(r"vise ships (\d+) agents", readme):
+        assert int(wrong) == agents, f"README says 'vise ships {wrong} agents'; {agents} ship"
+
+    assert f"{agents} bundled subagent charters" in claude_md, (
+        f"CLAUDE.md must say '{agents} bundled subagent charters'"
+    )
+    assert f"{skills} bundled skills" in claude_md, f"CLAUDE.md must say '{skills} bundled skills'"
+    assert f"the {workflows} bundled `*-graph.yaml` workflows" in claude_md, (
+        f"CLAUDE.md must say 'the {workflows} bundled `*-graph.yaml` workflows'"
+    )

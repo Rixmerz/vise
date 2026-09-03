@@ -310,7 +310,7 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `files_exist` | declared `paths:` are present | never |
 | `capability` | a resolved capability tool returns ok | capability unbound |
 | `lsp_clean` | per-language diagnostics on changed files | no checker for that language |
-| `quality_check` | a `check:` name from `.vise/quality.yaml` | no profile, key absent, or binary missing |
+| `quality_check` | a `check:` name from `.vise/quality.yaml` | no profile, key absent, binary missing, or the command not yet approved on this machine (`vise approve <check>`; bootstrap approves what it writes) |
 | `openspec` | `openspec/` planning artifacts | only the `validated` level; the four structural ones fail closed |
 | `no_new_deps` | no dependency manifest gained entries | not a git repo, no manifest, unresolvable base |
 | `diff_scope` | the diff stays inside declared `allow:` globs | not a git repo, or nothing changed |
@@ -366,7 +366,7 @@ partition is exactly the case worth catching.
 
 ## Project agents
 
-vise ships 21 agents. A project can add its own in `.vise/agents/*.md`, and the
+vise ships 22 agents. A project can add its own in `.vise/agents/*.md`, and the
 runtime layers them over the bundled fleet — same frontmatter, same rules:
 
 ```

@@ -68,6 +68,12 @@ def _load_checks_map(project_dir: str | Path) -> dict | None:
     return checks
 
 
+def list_checks(project_dir: str | Path) -> list[str]:
+    """Every check name the profile declares, in file order. Empty if no profile."""
+    checks = _load_checks_map(project_dir)
+    return [str(k) for k in checks] if checks else []
+
+
 def resolve_check(project_dir: str | Path, check_name: str) -> tuple[str, ...] | UnboundCheck:
     """Resolve *check_name* to a command tuple, or an ``UnboundCheck`` reason.
 

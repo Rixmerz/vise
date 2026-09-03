@@ -79,6 +79,11 @@ why. When adding a validator, decide which side it is on and say so in its
 docstring — a gate that cannot run must never report success, and a hook that
 raises takes the user's session down.
 
+A command named in `.vise/quality.yaml` was chosen by the repository. It runs
+only after `vise approve <check>` on this machine (`vise bootstrap` approves
+what it writes) or under `VISE_TRUST_PROJECT_TOOLS=1`; until then the check
+reports `asserted`/`unverified`. `src/vise/core/consent.py` has the reasoning.
+
 ### Hooks fail open, on purpose
 
 Every hook in `src/vise/hooks/` must never break the user's session. A hook that

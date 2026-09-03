@@ -16,6 +16,18 @@ of the tool — it means the repo does not have that tool, or has it installed
 without ever configuring it. Say which of the two, because the fix differs:
 install it, or add its config, or accept the gap knowingly.
 
+Writing the profile also **approves** the commands it bound, on this machine:
+the person ran bootstrap, and that is the consent. A `.vise/quality.yaml` that
+arrived with a clone was never bootstrapped here, so its checks report
+`unverified` until someone reads the file and runs `vise approve --all` (or
+one check at a time). Say this if the profile already existed.
+
+Bootstrap also reports whether a browser is present. The three design gates
+(`ui_layout`, `ui_contrast`, and the tokens check where it renders) fail
+closed without one — correctly — so a repo with UI work will hit a block at
+the first `ui_layout` node. If the report says NO BROWSER, relay the install
+command it prints; do not run it unasked.
+
 **2. Report the two environment variables** it printed and tell the user to put
 them in `.claude/settings.json` under `env`. Do not edit that file yourself
 unless asked — it is theirs, and it often holds things vise has no business

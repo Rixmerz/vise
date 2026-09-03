@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] in ("--help", "-h", "help") or not args:
         print("vise — phase-gated workflows, experience memory, git snapshots")
         print(f"version {__version__}")
-        print("usage: vise [version|graph|experience|insights|runtime|bootstrap|shot|migrate-state|doctor|help]   (run the MCP server with `vise-mcp`)")
+        print("usage: vise [version|graph|experience|insights|runtime|bootstrap|approve|shot|migrate-state|doctor|help]   (run the MCP server with `vise-mcp`)")
         return 0
     if args[0] == "doctor":
         return _cmd_doctor()
@@ -272,10 +272,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  warning: {summary['error']}", file=sys.stderr)
         print(f"  legacy tree left in place at {summary['legacy_dir']} (not deleted)")
         return 0
-    if args[0] in ("graph", "experience", "insights", "runtime", "bootstrap", "shot"):
+    if args[0] in ("graph", "experience", "insights", "runtime", "bootstrap", "approve", "shot"):
         import argparse
 
         from vise.cli import (
+            approve_cmd,
             bootstrap_cmd,
             experience_cmd,
             graph_cmd,
@@ -290,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         experience_cmd.add_parser(sub)
         insights_cmd.add_parser(sub)
         bootstrap_cmd.add_parser(sub)
+        approve_cmd.add_parser(sub)
         runtime_cmd.add_parser(sub)
         shot_cmd.add_parser(sub)
         ns = parser.parse_args(args)
