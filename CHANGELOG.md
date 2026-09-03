@@ -99,13 +99,26 @@ you may already depend on, it says so under **Behaviour change**.
   launch the hook with the environment intact and drive the block decision,
   the disabled flag, a corrupt state file and a missing graph.
 
-### Known
+- **A trailing comment silently disarmed a restriction, in both parsers.**
+  Recorded as known when the enforcer's parser was rewritten and now fixed on
+  both sides together, which is the only way it could be fixed without
+  breaking their agreement. `- "Bash"  # no shell` yielded `'"Bash"'` from
+  `graph_parser` and the whole rest of the line from the enforcer; neither
+  matches a tool, so the restriction blocked nothing.
 
-- A **trailing comment on a block-list item** (`- "Bash"  # no shell`) is
-  mishandled by both parsers — `graph_parser` yields `'"Bash"'`, the enforcer
-  yields the rest of the line, and neither blocks `Bash`. It belongs to
-  `graph_parser` first: fixing only the enforcer would break the agreement the
-  change above establishes. No bundled workflow uses the shape.
+  The cause in `graph_parser` was ordering: the quote check ran before the
+  comment strip, so a quoted value with a comment no longer *ended* in a quote,
+  failed the test, and came back with its quotes on. It now takes a quoted
+  scalar up to its closing quote — which also fixes an inline list with a
+  trailing comment (`["a", "b"]  # …`), previously degraded to a string — while
+  leaving `#fff`, `url#anchor` and a `#` inside quotes alone.
+
+- **The `resumed` event was dropped by telemetry, and now a test says why that
+  keeps happening.** Third occurrence in one release after `drained` and
+  `drain_failed`. `test_telemetry_event_registry.py` pins the emitted set
+  against `_VALID_RUN_EVENTS` in both directions: an unregistered event is data
+  thrown away behind a warning nobody reads, and a registered one nobody emits
+  is a line that outlived its reason.
 
 ## [0.1.0a21] — 2026-09-03
 

@@ -42,20 +42,32 @@ def parse_yaml_simple(content: str) -> dict:
         if not val:
             return None
 
-        # Remove quotes
-        if (val.startswith('"') and val.endswith('"')) or \
-           (val.startswith("'") and val.endswith("'")):
-            return val[1:-1]
+        # A quoted scalar owns everything up to its CLOSING quote; whatever
+        # follows is a trailing comment, and a '#' inside the quotes is
+        # content. Finding the close explicitly rather than testing
+        # `endswith` is what fixes `- "Bash"  # no shell`: with a comment the
+        # value no longer ends in a quote, so the old test failed, the comment
+        # strip below ran, and the value came back as '"Bash"' — quotes and
+        # all. A tools_blocked entry named '"Bash"' matches no tool, so the
+        # gate its author wrote silently blocked nothing.
+        if val[0] in '"\'':
+            close = val.find(val[0], 1)
+            if close != -1:
+                return val[1:close]
 
         # Inline flow sequence: "[]" or "[a, b, \"c\"]". Handles the common
         # `mcps_enabled: []` / `mcps_enabled: [serena, sequentialthinking]`
         # forms that block-list syntax (key on its own line, items indented
-        # below) doesn't cover.
-        if val.startswith('[') and val.endswith(']'):
-            inner = val[1:-1].strip()
-            if not inner:
-                return []
-            return [parse_value(item) for item in inner.split(',')]
+        # below) doesn't cover. Same reasoning as the quotes above: take up to
+        # the closing bracket so a trailing comment does not turn the list
+        # into a string.
+        if val.startswith('['):
+            close = val.find(']')
+            if close != -1:
+                inner = val[1:close].strip()
+                if not inner:
+                    return []
+                return [parse_value(item) for item in inner.split(',')]
 
         # Strip trailing inline YAML comment from unquoted scalar.
         # Block literal content never passes through parse_value, so this is safe.

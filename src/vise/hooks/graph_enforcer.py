@@ -37,7 +37,26 @@ def _indent(line):
 
 
 def _scalar(raw):
-    return raw.strip().strip('"').strip("'")
+    """One YAML scalar, with its quotes and any trailing comment removed.
+
+    The comment matters and is not cosmetic. ``- "Bash"  # no shell`` used to
+    yield the whole rest of the line here and ``'"Bash"'`` from the real
+    parser — neither of which matches a tool, so a restriction its author
+    wrote blocked nothing on either side. A quoted value owns everything up to
+    its closing quote (a ``#`` inside the quotes is content); an unquoted one
+    ends at the first whitespace-preceded ``#``, which leaves ``#fff`` and
+    ``url#anchor`` alone.
+    """
+    raw = raw.strip()
+    if raw[:1] in ('"', "'"):
+        close = raw.find(raw[0], 1)
+        if close != -1:
+            return raw[1:close]
+        return raw[1:]
+    head, sep, _ = raw.partition(" #")
+    if not sep:
+        head, sep, _ = raw.partition("\t#")
+    return head.strip()
 
 
 def _flow_items(raw):

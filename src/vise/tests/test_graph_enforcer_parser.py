@@ -210,13 +210,8 @@ def test_a_file_with_no_nodes_section_yields_nothing():
 
 
 def test_whole_line_comments_and_blank_lines_are_ignored():
-    """Trailing comments (``- "Bash"  # no shell``) are deliberately NOT
-    covered here: the real parser mishandles those too — it yields ``'"Bash"'``
-    — so neither side blocks, and teaching this parser to strip them would
-    break the agreement the first test in this file establishes. That is a
-    defect in ``graph_parser`` first, and it is recorded in the change
-    proposal rather than half-fixed here.
-    """
+    """Trailing comments are covered further down, once both parsers learned
+    to strip them — see ``test_a_block_list_item_survives_its_comment``."""
     parsed = parse_tools_blocked(
         "nodes:\n"
         "  # the first phase\n"
@@ -377,3 +372,47 @@ def test_garbage_on_stdin_approves():
     )
     assert proc.returncode == 0
     assert json.loads(proc.stdout) == {"decision": "approve"}
+
+
+# ---------------------------------------------------------------------------
+# Trailing comments — the one shape both parsers used to get wrong
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("item,expected", [
+    ('"Bash"', "Bash"),
+    ('"Bash"   # no shell in this phase', "Bash"),
+    ("Bash   # no shell in this phase", "Bash"),
+    ("'Bash'  # single quotes too", "Bash"),
+    ('"Bash#1"', "Bash#1"),
+])
+def test_a_block_list_item_survives_its_comment(item, expected):
+    """This was recorded as "found, not fixed here" when the enforcer's parser
+    was rewritten: the real parser mishandled it too — it yielded `'"Bash"'`,
+    quotes and all — so teaching only the enforcer would have broken the
+    agreement the first test in this file establishes. Both are fixed now, so
+    the case belongs here.
+
+    A tool named `'"Bash"'` or `'Bash   # no shell'` matches nothing, so the
+    restriction its author wrote blocked nothing, on either side, silently.
+    """
+    parsed = parse_tools_blocked(_graph(f"    tools_blocked:\n      - {item}\n"))
+    assert parsed == {"a": [expected]}
+
+
+def test_the_two_parsers_agree_on_a_commented_item(tmp_path):
+    """The property the fix has to preserve: whatever the enforcer decides, the
+    real parser must decide the same, or the agreement is gone."""
+    yaml = (
+        'nodes:\n  - id: "a"\n    is_start: true\n    tools_blocked:\n'
+        '      - "Bash"   # no shell here\n'
+        '  - id: "z"\n    is_end: true\n'
+        'edges:\n  - id: "e"\n    from: "a"\n    to: "z"\n'
+    )
+    path = tmp_path / "g.yaml"
+    path.write_text(yaml, encoding="utf-8")
+
+    from_hook = parse_tools_blocked(yaml)["a"]
+    from_real = load_graph_from_file(path).nodes["a"].tools_blocked
+
+    assert from_hook == list(from_real) == ["Bash"]
