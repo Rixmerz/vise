@@ -83,6 +83,12 @@ class RunPlan:
     #: terms however wide the budget is.
     critical_path: int = 0
 
+    #: The lanes the caller asked for. Kept because the ceiling above is
+    #: deliberately structural: without this, a plan capped at 2 still reported
+    #: that 4 tasks "can run at once", which is the same class of claim the
+    #: ceiling was added to stop the plan from making.
+    max_parallel: int = 0
+
     #: Observations that do not stop the run. Kept apart from ``problems``
     #: because that field is load-bearing — ``vise runtime plan`` exits 1 on it
     #: and ``run`` refuses to dispatch — and "you asked for three lanes and can
@@ -92,6 +98,19 @@ class RunPlan:
     @property
     def estimated_cost_usd(self) -> float:
         return sum(w.estimated_cost_usd for w in self.waves)
+
+    @property
+    def effective_concurrency(self) -> int:
+        """What this run actually reaches — the structure and the budget, both.
+
+        The narrower of the two binds. Reporting the ceiling alone overstates a
+        capped run; reporting the cap alone overstates a chain.
+        """
+        if not self.concurrency_ceiling:
+            return 0
+        if not self.max_parallel:
+            return self.concurrency_ceiling
+        return min(self.concurrency_ceiling, self.max_parallel)
 
     @property
     def task_count(self) -> int:
@@ -113,7 +132,7 @@ class RunPlan:
         out.append(f"\ntotal: {self.task_count} task(s), ~${self.estimated_cost_usd:.2f}")
         if self.concurrency_ceiling:
             out.append(
-                f"shape: at most {self.concurrency_ceiling} task(s) can run at once; "
+                f"shape: at most {self.effective_concurrency} task(s) run at once; "
                 f"longest chain is {self.critical_path}"
             )
         if self.notes:
@@ -134,6 +153,8 @@ class RunPlan:
             "problems": list(self.problems),
             "unschedulable": list(self.unschedulable),
             "concurrency_ceiling": self.concurrency_ceiling,
+            "effective_concurrency": self.effective_concurrency,
+            "max_parallel": self.max_parallel,
             "critical_path": self.critical_path,
             "notes": list(self.notes),
         }
@@ -336,6 +357,15 @@ def plan(
             f"max_parallel is {declared}, but dependencies and ownership allow at "
             f"most {ceiling} task(s) at once — the extra lane(s) buy nothing here"
         )
+    elif ceiling and declared < ceiling:
+        # The other direction, and the one that was silent: the structure is
+        # wider than the budget, so the cap is what makes the run narrow. That
+        # is actionable — raising it makes the same plan finish sooner — and a
+        # plan that does not say it leaves the caller to guess.
+        notes.append(
+            f"the structure allows {ceiling} task(s) at once but max_parallel is "
+            f"{declared} — raising it would widen this run"
+        )
 
     return RunPlan(
         waves=tuple(waves),
@@ -343,5 +373,6 @@ def plan(
         unschedulable=tuple(unschedulable),
         concurrency_ceiling=ceiling,
         critical_path=len(raw_waves),
+        max_parallel=declared,
         notes=tuple(notes),
     )

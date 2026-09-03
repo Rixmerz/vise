@@ -142,10 +142,42 @@ def test_a_budget_the_graph_can_use_gets_no_note():
     assert _plan(tasks, max_parallel=2).notes == ()
 
 
-def test_a_budget_smaller_than_the_ceiling_gets_no_note():
-    """Under-declaring is a deliberate choice — it costs less and takes longer."""
+def test_a_budget_smaller_than_the_ceiling_says_which_constraint_binds():
+    """Under-declaring stays a legitimate choice; the plan states it, not scolds it.
+
+    This test used to assert silence, on the reasoning that under-declaring is
+    deliberate and needs no warning. Running `vise runtime plan --max-parallel 2`
+    against the one bundled dag workflow showed what that silence cost: the
+    shape line read "at most 4 task(s) can run at once" while the budget allowed
+    2 — the plan asserting a width it would not reach, which is the exact defect
+    `concurrency_ceiling` exists to prevent, pointed the other way.
+
+    Reporting the effective number alone would swap one silence for another: 2
+    is then visible but the reader cannot tell whether the structure or the cap
+    produced it. So the note says which, and stays a note — the run is correct
+    and will finish.
+    """
     tasks = [_task(x, ownership=(f"src/{x}/**",)) for x in ("a", "b", "c", "d")]
-    assert _plan(tasks, max_parallel=2).notes == ()
+
+    result = _plan(tasks, max_parallel=2)
+
+    assert result.concurrency_ceiling == 4, "the structure is unchanged by the budget"
+    assert result.effective_concurrency == 2, "but only two lanes are bought"
+    assert result.problems == (), "a narrow budget is not a defect"
+    assert len(result.notes) == 1
+    assert "raising it would widen this run" in result.notes[0]
+    assert "at most 2 task(s) run at once" in result.render()
+
+
+def test_a_ceiling_smaller_than_the_budget_still_reports_the_ceiling():
+    """The narrower of the two binds, whichever one it is."""
+    tasks = [_task("a", ownership=("src/a/**",)), _task("b", deps=["a"])]
+
+    result = _plan(tasks, max_parallel=4)
+
+    assert result.concurrency_ceiling == 1
+    assert result.effective_concurrency == 1
+    assert "at most 1 task(s) run at once" in result.render()
 
 
 def test_the_shape_reaches_the_rendered_plan_and_the_dict():
@@ -157,11 +189,13 @@ def test_the_shape_reaches_the_rendered_plan_and_the_dict():
     result = _plan(tasks, max_parallel=3)
 
     rendered = result.render()
-    assert "at most 1 task(s) can run at once" in rendered
+    assert "at most 1 task(s) run at once" in rendered
     assert "longest chain is 2" in rendered
     assert "note:" in rendered
 
     payload = result.to_dict()
     assert payload["concurrency_ceiling"] == 1
+    assert payload["effective_concurrency"] == 1
+    assert payload["max_parallel"] == 3
     assert payload["critical_path"] == 2
     assert len(payload["notes"]) == 1

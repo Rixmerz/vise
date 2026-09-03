@@ -10,6 +10,26 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Fixed
 
+- **A capped plan still claimed the width it could not use.** The shape line
+  read the structural ceiling and ignored `max_parallel`, so
+  `vise runtime plan --max-parallel 2` reported "at most 4 task(s) can run at
+  once" — a plan asserting a width it would not reach, which is the exact
+  defect `concurrency_ceiling` was added to prevent, pointed the other way.
+
+  It now reports the narrower of structure and budget, and says which one
+  binds: over-declaring already warned that the extra lanes buy nothing, and
+  under-declaring now says the structure is wider and raising the cap would
+  widen the run. Reporting the effective number alone would have swapped one
+  silence for another — 2 visible, but no way to tell whether the graph or the
+  budget produced it. `concurrency_ceiling` keeps its structural meaning;
+  `effective_concurrency` and `max_parallel` join it in `to_dict`.
+
+  A test asserted the old silence deliberately ("under-declaring is a chosen
+  trade-off"). That decision stands — the plan states which constraint binds
+  rather than calling a narrow budget a problem — and the test now records it
+  in those terms. Found by running `plan` against every bundled workflow;
+  9 of the 10 have no dag node at all, which is its own finding.
+
 - **A replan that did not happen said so without saying why.** `_replan`
   emitted `replan_unavailable` and `replan_declined` carrying the kind and
   nothing else, while handing the human gate a full sentence. Those two events
