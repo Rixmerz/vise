@@ -10,6 +10,29 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Added
 
+- **`vise.runtime.decouple`** — the refusal half of the decouple phase, which
+  is the half worth having as code. The phase's premise is that a boundary
+  decision should wait until there is an oracle, and the earliest that exists
+  is a green `tests_pass`. Its rules are already written down, in
+  `skills/codelayer/SKILL.md` "When NOT to decouple": the rule of three, a
+  ~100-line size floor, and scripts, migrations, generated code and tests out
+  of scope entirely.
+
+  Those rules were prose, read by the same agent being asked to move code —
+  and a refusal list an agent may re-weigh is one that gets re-weighed in
+  favour of moving. `triage()` takes candidates and returns what may move,
+  what may not, and under which rule; `refuse()` is the single ordered
+  predicate behind it. The order is part of the contract, because only the
+  first refusal is recorded, and a test pins it. Two more tests assert the
+  constants against the skill's own sentences, so the number and the prose
+  cannot drift apart while both are read by the same agent.
+
+  Nothing dispatches yet. The looking — `search_similar`, `analyze_impact`,
+  `compute_index_status` — is livespec's, and livespec is a separate MCP
+  server that vise names and cannot call; the phase prompt and the graph node
+  are still open, and the change records why the node cannot be shipped
+  disabled the way its own task list assumed.
+
 - **`vise runtime continue <run_id> --graph <composed-graph>`** — the last
   mechanical link in the loop. Every other step existed: `compose` reads a
   stopped run into the terms the next plan is written in, `graph_builder_*`
