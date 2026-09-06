@@ -53,7 +53,23 @@ _INVESTIGACION = (
     "registro puede confirmar que alguien la abrió"
 )
 
+_SIN_INDICE = (
+    "el artefacto es una lista de candidatos que salió de livespec, otro "
+    "servidor MCP: vise no puede llamarlo y por lo tanto no puede comprobar "
+    "lo que trajo. La comprobación real de este workflow es `tests_pass` en "
+    "`move`, que es lo único que puede decir si el movimiento conservó el "
+    "comportamiento"
+)
+
 UNVERIFIED_BY_DESIGN: dict[tuple[str, str], str] = {
+    # --- decouple ------------------------------------------------------------
+    ("decouple", "survey"): _SIN_INDICE,
+    ("decouple", "triage"): (
+        "la decisión sí es mecánica, pero la toma `vise.runtime.decouple.triage` "
+        "dentro de la sesión, no un validador del registro: el nodo no escribe "
+        "nada que una puerta pueda leer del árbol de trabajo"
+    ),
+    ("decouple", "report"): _PROSA,
     # --- research ------------------------------------------------------------
     # vise's gates are built for repositories. Este es el primer workflow
     # cuyo producto es una respuesta y no un diff, y decirlo aquí es más

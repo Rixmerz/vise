@@ -97,7 +97,15 @@ def test_read_only_phases_named_by_the_skill_really_block_edits(graph_name, node
 # onto, so it is deliberately absent from the routing table. Every other bundled
 # graph must be reachable, or it ships as a file `graph_activate` accepts and
 # nothing ever names. `sprint-e2e` sat unrouted this way.
-_INTENTIONALLY_UNROUTED = {"dogfood"}
+#: Bundled but deliberately not routed by the orchestration skill.
+#:
+#: `dogfood` is vise's own dev loop, not user-facing. `decouple` is unproven:
+#: its own proposal set the bar at three real repositories before it ships in
+#: anyone's live path, the same bar `codelayer` set for `enforce`, and the
+#: graph format has no node-level off switch — so shipping it as its own
+#: unrouted workflow is how it can be run at all without being run by default.
+#: The row moves into the Step 0 table when the bar is met.
+_INTENTIONALLY_UNROUTED = {"dogfood", "decouple"}
 
 
 def test_every_bundled_workflow_is_routable():

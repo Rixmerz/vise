@@ -14,7 +14,7 @@ Treat those files with the same care as the code.
 |---|---|
 | `src/vise/` | the MCP server, engines, hooks, CLI, recipes |
 | `src/vise/engines/` | validators and the logic they gate on — the three design gates live here |
-| `src/vise/assets/workflows/` | the 10 bundled `*-graph.yaml` workflows |
+| `src/vise/assets/workflows/` | the 11 bundled `*-graph.yaml` workflows |
 | `src/vise/tests/` | the whole suite — asset honesty tests live here too |
 | `agents/` | 22 bundled subagent charters |
 | `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |

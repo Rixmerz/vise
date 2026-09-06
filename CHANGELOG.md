@@ -107,9 +107,49 @@ you may already depend on, it says so under **Behaviour change**.
   the run can spend. Plans will read higher than they did, in the direction of
   the truth.
 
-- **The coverage ratchet moves to 84.** The real number is 85, and the floor
-  had been sitting at 80 while the suite ran four points above it — a ratchet
-  that lags is one that lets a regression through unnoticed.
+- **`decouple-graph.yaml`** — the phase that moves code after the tests pass,
+  which is the first moment a boundary decision has an oracle. Its refusal half
+  landed earlier as `vise.runtime.decouple`; this is the rest, minus the bar it
+  has not met.
+
+  Four phases. `survey` reads: it names the livespec calls vise cannot make —
+  `compute_index_status` first, then `search_similar` per added unit and
+  `analyze_impact` per changed signature — and asks for exactly the four fields
+  `Candidate` declares. `triage` hands them to `vise.runtime.decouple.triage`
+  and takes its answer; the agent may say it disagrees with a refusal and may
+  not act on it, because the list is code precisely so that the party being
+  asked to move code is not the one deciding whether it may. `move` moves one
+  candidate at a time and reverts any that turns the suite red. `report` keeps
+  three things apart that render alike: the index could not be read, the index
+  was read and there was nothing to move, and candidates were found and
+  declined under a rule — a refusal is a finding, not an absence.
+
+  **It ships unrouted, on purpose.** Its own proposal set the bar at three real
+  repositories before it goes in anyone's live path, the same bar `codelayer`
+  set for `enforce`, and the graph format has no node-level off switch — so a
+  node in `feature-dev-graph.yaml` would have run in every repo that types
+  `/feature`, which is what that task existed to avoid. Shipping it as its own
+  workflow in `_INTENTIONALLY_UNROUTED` is how the bar can be met at all rather
+  than skipped. Two corrections came out of building it: the `enabled: false`
+  the task named is not a field the parser reads, and `diff_scope` cannot ship
+  configured because its `allow:` globs belong to the consuming repository and
+  an empty list fails closed — so it ships commented with the reason, and the
+  exit gate is `tests_pass` alone, mechanically rather than by a phrase.
+
+  The graph is the only *workflow* under `test_livespec_contract`'s speaker
+  set, and a test parses the survey's field block against `Candidate` — the
+  testable half of the seam the design admits cannot be checked end to end.
+
+- **The coverage ratchet moves to 84.** The floor had been sitting at 80 while
+  the suite ran four points above it, and a ratchet that lags is one that lets
+  a regression through unnoticed.
+
+  The margin is zero, and that is worth knowing before the gate goes red on
+  somebody. The reading is 84% reproducibly and was 85% once; the difference is
+  whether every hook subprocess's data file lands for `coverage combine` (58
+  files versus 59 — about twenty statements). So a run that loses one child
+  reports 83 and fails. If that starts happening, the answer is to find the
+  child that did not land, not to lower the floor.
 
 - **A declined replan says so on the task that asked for it.** Handed the live
   task list, the default replanner finds the re-specification it already

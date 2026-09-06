@@ -1,0 +1,212 @@
+metadata:
+  name: "Decouple"
+  description: "Turn code that works into code a reader wants — after the tests pass, which is the first moment a boundary decision has an oracle."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+# Not routed by the orchestration skill, and that is deliberate — it is in
+# `_INTENTIONALLY_UNROUTED` in test_orchestration_skill_sync.py. The phase's
+# own proposal set the bar: off until it has been run against three real repos,
+# the same bar `codelayer` set for `enforce`. Shipping it as its own workflow
+# is how it can be run at all without putting an unproven phase in the live
+# `/feature` path of every repo that installs vise — the graph format has no
+# node-level off switch, so "ship it disabled" was not available.
+#
+# The premise, from `codelayer_gate`: a well-factored repo costs an agent more
+# to read than a badly-factored one, so structure and navigability pull against
+# each other and the agent resolves the tension by writing coupled code. The
+# symbol layer removed the read cost. This removes the other one — producing
+# decoupled code means serialising a graph, and generation is one linear
+# stream, so coupled code *is* that stream. Deciding the boundary afterwards is
+# deciding it with evidence: the suite that already passes.
+#
+# Every step that looks belongs to livespec, a separate MCP server vise names
+# and cannot call. So the prompts below tell the agent which calls to make and
+# what to bring back, and `vise.runtime.decouple` judges what comes back. A
+# refusal list an agent may re-weigh is a refusal list that gets re-weighed in
+# favour of moving.
+
+nodes:
+  - id: "survey"
+    name: "Survey"
+    is_start: true
+    tools_blocked: ["Edit", "Write", "NotebookEdit"]
+    prompt_injection: |
+      PHASE: SURVEY
+      Look before proposing anything. You are reading, not moving: Edit and
+      Write are blocked here on purpose.
+
+      1. `compute_index_status()`. If livespec is not mounted, or the index is
+         stale, STOP. Say "no index" and take the edge to the report. A phase
+         that guesses at structure without an index is the under-engineering
+         it exists to prevent, wearing a better name.
+      2. For every unit this change added or grew: `search_similar(code)` on
+         its body. This is the call that pays for itself — the duplicate you
+         are about to leave behind has a *different name*, which is why it got
+         written, so neither grep nor your memory of the repo will find it.
+      3. For every signature this change altered: `analyze_impact(qname)`.
+         That is where the consumer count comes from, and the consumer count
+         is what the rule of three is about.
+
+      Bring back one row per candidate, with these four fields and no others:
+
+        unit          the qualified name livespec gave it
+        path          its file, repo-relative
+        module_lines  how many lines the module it lives in has
+        consumers     how many call sites analyze_impact found
+
+      A field you cannot fill truthfully is left out. Do not estimate one:
+      every default refuses, which is the safe direction, and a guessed
+      `consumers` is the one number that can talk the rule of three into a
+      move it should have declined.
+
+      Signal: say "surveyed" with the rows, or "no index" with the reason.
+
+  - id: "triage"
+    name: "Triage"
+    tools_blocked: ["Edit", "Write", "NotebookEdit"]
+    prompt_injection: |
+      PHASE: TRIAGE
+      What may move is not your call, and that is the point of this phase.
+      Hand the rows to `vise.runtime.decouple.triage` and take its answer:
+
+        from vise.runtime.decouple import Candidate, triage
+        report = triage([Candidate(unit=..., path=..., module_lines=..., consumers=...), ...])
+
+      It applies `skills/codelayer/SKILL.md` "When NOT to decouple" as code:
+
+        out_of_scope   scripts, migrations, generated code, tests — entirely.
+                       Migrations are append-only history; refactoring one
+                       rewrites the past. Test duplication is often deliberate.
+        rule_of_three  fewer than three consumers. Two call sites is a
+                       coincidence, and the first two are the two you
+                       understand least, so the abstraction you would extract
+                       from them is the one most likely to be wrong.
+        size_floor     a module under roughly 100 lines stays one file.
+
+      Only the first matching rule is recorded, because a finding that names
+      three reasons names none.
+
+      You may disagree with a refusal. Say so in the report, in one line, with
+      what you would need to show to overturn it. You may not act on it: the
+      rules are code somebody reviewed precisely so that the agent being asked
+      to move code is not the one deciding whether it may.
+
+      Signal: say "triaged" with `report.to_dict()`, or "nothing to move" when
+      `accepted` is empty — which is a real outcome and a good one.
+
+  - id: "move"
+    name: "Move"
+    validators:
+      - type: tests_pass
+        weight: 1.0
+    # Scope gate. Uncomment as an ADDITIONAL entry under the `validators:` key
+    # above — do not re-declare `validators:`, a duplicate key silently drops
+    # tests_pass. It ships commented because its `allow:` globs are this
+    # repository's and vise does not know them; an empty `allow` FAILS CLOSED,
+    # so a shipped default would either block every run or permit everything,
+    # and the second is worse than no gate because it reads as one.
+    #   - type: diff_scope
+    #     allow: ["src/**", "lib/**"]
+    #     weight: 0.3
+    prompt_injection: |
+      PHASE: MOVE
+      One accepted candidate at a time. Not a batch: a batch that turns the
+      suite red tells you the suite is red and nothing about which move did it.
+
+      For each, in order:
+      1. Move it. `read_unit(qname)` for the body and the signatures it calls;
+         the closure is the scope, and nothing outside it is yours to touch.
+      2. Run the repo's own suite.
+      3. Red? Revert that move and record it as reverted, with the failure
+         verbatim. A red test is reverted, not argued with — the whole claim of
+         this phase is that it decides with an oracle, and the oracle just
+         spoke.
+
+      Change no behaviour. Not "no intended behaviour" — none. This phase moves
+      code; a fix that rides along inside a refactor is a fix nobody reviewed,
+      and the suite cannot tell you which of the two changes it is passing.
+
+      Signal: say "moved" with what moved and what was reverted.
+
+  - id: "report"
+    name: "Report"
+    is_end: true
+    tools_blocked: ["Edit", "Write", "NotebookEdit"]
+    prompt_injection: |
+      PHASE: REPORT
+      Write down what this phase did, for the person deciding whether it earned
+      its place. `DecoupleReport.to_dict()` has the shape:
+
+        found / accepted / refused (each with its rule) / moved / reverted /
+        cost_usd / skipped
+
+      Three things the report must keep apart, because they render alike and
+      mean different things:
+
+        skipped        the index could not be read. Nothing was looked at.
+        found: 0       the index was read and there was nothing to move.
+        refused        candidates were found and declined, each under a rule.
+
+      A refusal is a finding. Report it as one, not as an absence — "declined
+      four, three under the rule of three" is what tells a reader the phase is
+      calibrated, and an empty report tells them nothing either way.
+
+      Do not report a confidence number. This phase moved code or it did not,
+      and the suite already said which.
+
+      Signal: say "reported".
+
+edges:
+  - id: "survey-to-triage"
+    from: "survey"
+    to: "triage"
+    condition:
+      type: "phrase"
+      phrases:
+        - "surveyed"
+        - "next phase"
+        - "advance"
+
+  # No index, no phase. The honest exit, and the common one in any repo that
+  # has not mounted livespec.
+  - id: "survey-to-report"
+    from: "survey"
+    to: "report"
+    condition:
+      type: "phrase"
+      phrases:
+        - "no index"
+        - "index is stale"
+        - "skipped"
+    priority: 2
+
+  - id: "triage-to-move"
+    from: "triage"
+    to: "move"
+    condition:
+      type: "phrase"
+      phrases:
+        - "triaged"
+        - "next phase"
+        - "advance"
+
+  # Everything refused. A real outcome, and the one the refusal list exists to
+  # produce — it must not have to pass through a phase named "move".
+  - id: "triage-to-report"
+    from: "triage"
+    to: "report"
+    condition:
+      type: "phrase"
+      phrases:
+        - "nothing to move"
+    priority: 2
+
+  # The only mechanical gate this workflow has, and the only one it needs: the
+  # suite that was green before the move has to be green after it.
+  - id: "move-to-report"
+    from: "move"
+    to: "report"
+    condition:
+      type: "validators_green"

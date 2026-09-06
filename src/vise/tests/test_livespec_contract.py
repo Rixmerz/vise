@@ -31,6 +31,10 @@ SPEAKERS = (
     REPO / "commands" / "debt.md",
     REPO / "commands" / "bootstrap.md",
     REPO / "src" / "vise" / "hooks" / "codelayer_gate.py",
+    # The decouple workflow is the only *graph* that speaks livespec: its
+    # survey phase is a list of calls vise cannot make, written down for the
+    # agent that can. A rename there is as silent as one in a skill.
+    REPO / "src" / "vise" / "assets" / "workflows" / "decouple-graph.yaml",
 )
 
 #: Backticked call-shaped identifiers: `read_unit(qname)`, `locate("x")`.
