@@ -51,6 +51,44 @@ Also fixed in the same pass, and the same class of error:
   Playwright demands its own Chromium revision. It is two installs. The
   orchestration skill said one.
 
+### Added — the installer and `vise doctor` know about the browser and the neighbours
+
+`install.sh` provisioned `fastmcp` and `fastembed` and then reported one thing:
+which language servers are on PATH. It said nothing about the browser the three
+render gates need, and nothing about the three MCP servers vise's skills and
+workflows now teach — so the two pieces most likely to make a fresh install
+behave strangely were the two it never mentioned.
+
+`vise doctor` gains both sections, and `install.sh` reports them from there
+rather than re-deriving. That is the script's own recorded lesson: the LSP hint
+table was duplicated in it once, drifted, and printed a green tick for a
+`rust-analyzer` that could not start.
+
+The three are not the same kind of missing, and the output says so:
+
+- a **language server** that is absent stays dormant until you open that
+  language;
+- a **render-gate browser** that is absent refuses every run in a repo that
+  wires those gates, because they fail closed;
+- a **neighbouring server** vise cannot see at all, so what it prints is the
+  minimum version its guidance assumes, plus what livespec or flowtrace left in
+  this repo when they left something.
+
+New `./install.sh --design` installs the `[design]` extra **and** its Chromium.
+Both steps, deliberately: `pip install 'vise[design]'` on its own leaves
+playwright with no browser, the gates fail closed on a message about a missing
+Chromium, and one install later the person is stuck again with no idea why —
+the exact two-step trap `render_harness._unavailable_message` exists to spell
+out. It runs through the venv's own interpreter, because a `playwright` binary
+from another environment installs a build this playwright refuses. Left opt-in
+because it downloads a browser and most repos never turn those gates on.
+
+`test_install_script.py` pins what the script claims: every extra it installs
+is one `pyproject.toml` declares, every flag its `--help` advertises is one the
+`case` block matches, and every `doctor` section it greps for is one `doctor`
+prints. It never runs the installer — that talks to the `claude` CLI and writes
+to a home directory, and a test that did either would be testing the machine.
+
 ### Added — the verification panel's regression lens reaches for a tool
 
 Of the four lenses a verifier panel cycles through, three are judgement and one

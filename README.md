@@ -60,6 +60,27 @@ git clone https://github.com/Rixmerz/vise && cd vise
 
 `install.sh` checks for the `claude` CLI, provisions runtime deps (a dedicated venv under the vise data dir — `$XDG_DATA_HOME/vise/venv`, falling back to `~/.local/share/vise/venv` — if system `python3` lacks `fastmcp`/`fastembed`), registers the clone as a local marketplace named `vise-dev`, and installs `vise@vise-dev`. Re-running it updates an existing install rather than reporting it already present. Idempotent — safe to re-run.
 
+Two opt-in extras, because both cost something most repos never need:
+
+```bash
+./install.sh --dev      # pytest, ruff, mypy, coverage — the [dev] extra
+./install.sh --design   # playwright AND its Chromium, for the render gates
+```
+
+`--design` runs both steps deliberately. `pip install 'vise[design]'` on its
+own leaves playwright installed with no browser, and `ui_layout` / `ui_contrast`
+then fail closed on a message about a missing Chromium — one install later you
+are stuck again. If you also run `layout-inspector`, it resolves its **own**
+Chromium: each Playwright demands its own build and refuses one installed by a
+different environment.
+
+After installing, `install.sh` reports three sections from `vise doctor`, and
+they are not the same kind of missing. A language server that is absent stays
+dormant until you open that language; a missing render-gate browser refuses
+every run in a repo that wires those gates; and the neighbouring MCP servers
+are ones vise cannot see at all, so what it prints is the minimum version its
+guidance assumes.
+
 The clone path uses `vise-dev`, not `rixmerz`, on purpose. Claude Code keys marketplaces by **name** across every source, so two repos declaring the same marketplace name displace each other and the loser's plugins stop resolving. `rixmerz` is the owner namespace at [Rixmerz/claude-plugins](https://github.com/Rixmerz/claude-plugins), and a clone claiming that name would knock the published plugins offline — so the clone gets a namespace of its own.
 
 Install **one or the other**, not both. The two marketplaces coexist fine, but installing `vise@rixmerz` and `vise@vise-dev` together loads vise twice — duplicate skills, commands, agents, and a second MCP server. To switch to the clone, uninstall the published one first:

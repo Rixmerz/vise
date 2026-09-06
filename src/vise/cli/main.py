@@ -219,6 +219,65 @@ def _cmd_doctor() -> int:
         lines.append(f"  {tool:<15} [{'OK' if found else 'MISSING'}]" + (f"  {found}" if found else ""))
 
     lines.append("")
+    lines.append("=== Render gates (ui_layout, ui_contrast) ===")
+    # These fail CLOSED. `vise doctor` is where someone finds out what a repo
+    # can and cannot check, and a gate that will refuse every run until a
+    # browser exists belongs on that list next to the language servers — which
+    # are the opposite case, dormant until needed.
+    try:
+        from vise.cli._browser_probe import browser_status_quiet
+
+        ok, reason = browser_status_quiet()
+        if ok:
+            lines.append("  browser         [OK]  chromium is available")
+        else:
+            lines.append("  browser         [MISSING]")
+            for hint in reason.splitlines():
+                if hint.strip():
+                    lines.append(f"                   {hint.strip()}")
+        lines.append(
+            "  a render gate also needs at least one `design.targets` entry in "
+            ".vise/quality.yaml;"
+        )
+        lines.append(
+            "  without one it fails closed rather than skipping. `vise bootstrap` says so per repo."
+        )
+    except Exception as exc:  # pragma: no cover - defensive, doctor must not crash
+        lines.append(f"  could not check ({exc})")
+
+    lines.append("")
+    lines.append("=== Neighbouring MCP servers (vise names them, cannot call them) ===")
+    # vise's skills and workflows teach these servers' tools. Nothing in this
+    # repository can check that they are mounted — MCP has no server-to-server
+    # channel — so what `doctor` reports is the minimum version the guidance
+    # assumes plus, where the server leaves a file behind, whether this repo
+    # has one. Reported here rather than re-derived in install.sh: the LSP hint
+    # table was duplicated there once, and the copy went stale.
+    try:
+        from vise.core.neighbour_state import graph_state, index_state, trace_state
+        from vise.core.neighbours import MINIMUM_VERSIONS
+
+        project = Path.cwd()
+        footprints = {
+            "livespec": index_state(project).detail,
+            "flowtrace": trace_state(project).detail,
+        }
+        for name, minimum in sorted(MINIMUM_VERSIONS.items()):
+            found = footprints.get(name)
+            lines.append(f"  {name:<17} needs >= {minimum}")
+            if found:
+                lines.append(f"                    this repo: {found}")
+        graph = graph_state(project)
+        if graph.present:
+            lines.append(f"  Graphify          {graph.detail}")
+        lines.append(
+            "  layout-inspector leaves no footprint in a repo — check your own tool surface."
+        )
+        lines.append("  `vise neighbours` reports this per project, with what follows from it.")
+    except Exception as exc:  # pragma: no cover - defensive, doctor must not crash
+        lines.append(f"  could not check ({exc})")
+
+    lines.append("")
     lines.append("=== XDG state migration ===")
     try:
         from vise.core import paths as _paths

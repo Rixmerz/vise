@@ -21,9 +21,24 @@ else
 fi
 
 DEV=0
+DESIGN=0
 for arg in "$@"; do
   case "$arg" in
     --dev) DEV=1 ;;
+    --design) DESIGN=1 ;;
+    -h|--help)
+      cat <<'USAGE'
+usage: ./install.sh [--dev] [--design]
+
+  --dev     also install the [dev] extras (pytest, ruff, mypy, coverage)
+  --design  also install the [design] extra and a Chromium for it. The three
+            render gates (ui_layout, ui_contrast, design_tokens) fail CLOSED,
+            so without this they refuse every run in a repo that wires them.
+            Left opt-in because it downloads a browser (~150MB) and most repos
+            never turn those gates on.
+USAGE
+      exit 0
+      ;;
   esac
 done
 
@@ -61,6 +76,31 @@ if [ "$DEV" = "1" ]; then
   fi
   "${VENV_DIR}/bin/pip" install --quiet -e "${REPO_DIR}[dev]"
   echo "ok: dev extras installed into ${VENV_DIR}."
+fi
+
+# 2c. Design extras (--design): playwright plus the browser it drives.
+#
+#     Both steps, and in this order. `pip install 'vise[design]'` alone leaves
+#     playwright installed with no browser, and the gates then fail closed on a
+#     message about a missing Chromium — one install later the person is stuck
+#     again with no idea why. That two-step trap is exactly what
+#     render_harness._unavailable_message exists to spell out; doing both here
+#     means nobody has to read it.
+#
+#     `playwright install` MUST run through this venv's own interpreter: a
+#     `playwright` binary from another environment installs a build this
+#     playwright will refuse.
+if [ "$DESIGN" = "1" ]; then
+  if [ ! -x "${VENV_DIR}/bin/python" ]; then
+    mkdir -p "$(dirname "$VENV_DIR")"
+    python3 -m venv "$VENV_DIR"
+    "${VENV_DIR}/bin/pip" install --quiet --upgrade pip
+  fi
+  "${VENV_DIR}/bin/pip" install --quiet -e "${REPO_DIR}[design]"
+  "${VENV_DIR}/bin/python" -m playwright install chromium
+  echo "ok: render-gate browser installed for ${VENV_DIR}."
+  echo "    layout-inspector, if you use it, resolves its OWN chromium — its"
+  echo "    playwright will refuse a build installed by a different one."
 fi
 
 # 3. Register this CLONE as a local marketplace and install from it.
@@ -117,15 +157,31 @@ fi
 #    a shim that exits with "Unknown binary" the moment anything runs it.
 #    `vise doctor` starts each server the way Claude Code does and reports
 #    what actually happened.
-echo
+#    Three sections, not one. LSP servers are the dormant kind — absent means
+#    nothing until you open that language. The render gates are the opposite:
+#    they fail CLOSED, so a missing browser refuses every run in a repo that
+#    wires them, and that belongs in front of someone who has just installed.
+#    The neighbours are neither: vise cannot see whether they are mounted, so
+#    what it reports is the version its guidance assumes.
+VISE_BIN=""
 if [ -x "${VENV_DIR}/bin/vise" ]; then
-  "${VENV_DIR}/bin/vise" doctor 2>/dev/null | sed -n '/LSP servers/,/^$/p'
+  VISE_BIN="${VENV_DIR}/bin/vise"
 elif command -v vise >/dev/null 2>&1; then
-  vise doctor 2>/dev/null | sed -n '/LSP servers/,/^$/p'
-else
-  echo "LSP servers: run \`vise doctor\` to see which are installed."
+  VISE_BIN="vise"
 fi
-echo "  (a missing server stays dormant until you open that language.)"
+
+echo
+if [ -n "$VISE_BIN" ]; then
+  DOCTOR_OUT="$("$VISE_BIN" doctor 2>/dev/null || true)"
+  for section in "LSP servers" "Render gates" "Neighbouring MCP servers"; do
+    printf '%s\n' "$DOCTOR_OUT" | sed -n "/=== ${section}/,/^\$/p"
+  done
+else
+  echo "run \`vise doctor\` to see language servers, the render-gate browser,"
+  echo "and the versions vise's guidance assumes of its neighbouring servers."
+fi
+echo "  (a missing LSP server stays dormant until you open that language;"
+echo "   a missing render-gate browser does not — those gates fail closed.)"
 
 echo
 echo "vise installed. Restart Claude Code (or start a new session) to load it."
