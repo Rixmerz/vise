@@ -7,7 +7,10 @@ metadata:
 
 # The first bundled workflow whose output is an answer rather than a diff, and
 # the first to use a `dag` node — the runtime's parallel fan-out shipped with no
-# bundled graph that reached it.
+# bundled graph that reached it. It is also the first whose width the data
+# decides: `split` writes the sub-questions into an artifact and `per-question`
+# becomes one task per entry, so a question with nine parts gets nine agents
+# and a question with two gets two, instead of four fixed passes over the whole.
 #
 # The shape is not the engineering shape with different words. An implementation
 # workflow gates on "do the checks pass"; there is no test suite for a claim
@@ -36,6 +39,9 @@ nodes:
       3. Split it into sub-questions that can be pursued independently. If two
          sub-questions cannot be answered without each other, they are one
          sub-question; say so rather than splitting them for the parallelism.
+         This split is for the reader. The gather phase runs as its own
+         process and cannot read this session, so its first task makes the
+         split again from the goal; write yours down so the two can be compared.
       4. Say what would make the answer *not matter* — the condition under
          which nobody needs this. If you cannot name one, the question is
          probably too broad to answer.
@@ -45,11 +51,35 @@ nodes:
     name: "Gather"
     node_type: "dag"
     tasks:
-      - id: "primary"
-        name: "Primary sources"
+      - id: "split"
+        name: "Split the question"
         role: "research"
         writes: false
+        complexity: "low"
         prompt: |
+          Turn the goal into sub-questions that can be pursued independently.
+          If two cannot be answered without each other, they are one; say so
+          rather than splitting for the parallelism. Each entry is one sentence
+          a stranger could answer wrongly. Emit them as an artifact, because
+          the next task becomes one agent per entry and reads nothing else:
+            {"kind": "plan", "payload": {"sub_questions": ["...", "..."]}}
+          An empty list is an answer — it means the question does not divide —
+          and a missing list stops the run, so emit one either way.
+      - id: "per-question"
+        name: "Primary sources, per sub-question"
+        role: "research"
+        writes: false
+        # One task per entry of `split`'s list, each on its own agent with a
+        # fresh window. The cap is the width this phase may reach, not a guess
+        # at how wide the question is; a longer list is cut and the cut is on
+        # the run's record.
+        for_each:
+          from: "split"
+          items: "sub_questions"
+          max_items: 8
+        prompt: |
+          Answer this one sub-question and no other:
+            {item}
           Go to the thing itself, not to writing about the thing. The code, the
           RFC, the actual API response, the spec section. Where you can run
           something to find out, run it and quote the output verbatim — that is
@@ -94,12 +124,16 @@ nodes:
           Cite everything.
     prompt_injection: |
       PHASE: GATHER
-      Four independent passes at the same question, each blind to the others.
+      Independent passes, each blind to the others: one primary-source pass
+      per sub-question, as many as the split found, plus three over the whole
+      question — prior art, the case against, and the adjacent constraints.
       They run in parallel on purpose: an agent that has read another's answer
-      is confirming it, not checking it.
+      is confirming it, not checking it. The width is decided by the split,
+      not by this file; `vise runtime plan` shows the cap and `status` shows
+      what it became.
       Every finding carries its source. A claim with no source is not a finding;
       it belongs under the researcher's own conclusions, separately labelled.
-      Signal: say "gathered" when all four have reported.
+      Signal: say "gathered" when every pass has reported.
 
   - id: "verify"
     name: "Verify sources"

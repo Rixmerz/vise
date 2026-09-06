@@ -84,15 +84,18 @@ The proposal says why. The design adds one thing: the join's reason names
 every failed child, so `compose` can tell the next plan which items to redo
 rather than "the gather failed".
 
-## Resume re-expands from the store
+## Resume re-expands from the recorded items
 
-Children are not in the YAML. `resume` rebuilds the task list from the graph,
-the template becomes ready again, and expansion re-reads the same artifact
-from the store and derives the same ids — so the children's records line up:
-succeeded ones kept, the rest reset, as for any task. The property to test is
-that two expansions of one artifact produce identical ids. Without an artifact
-store expansion cannot happen, and the join blocks saying so; the CLI always
-supplies one, and a test that does not is a test of a run that cannot expand.
+Children are not in the YAML. The state records, per template, the items that
+became children and the children's ids; `resume` derives the children again
+from the template and those items before it resets anything, so the loop has
+tasks to dispatch whose records already exist — succeeded ones kept, the rest
+reset, as for any task. Derived from the record and not re-read from the
+store, because a resume that re-read the artifact could derive a different
+width than the run it continues, and the ledger already names the children it
+paid for. The property to test is that two expansions of one list produce
+identical ids. Without an artifact store expansion cannot happen at all, and
+the template blocks saying so; the CLI always supplies one.
 
 ## What the plan can say
 

@@ -52,6 +52,77 @@ in a wave before starting any task in the next one wastes the wall-clock of its
 slowest member. The waves exist so a person can read the plan; dispatch follows
 dependencies, not wave boundaries.
 
+## Expansion
+
+A `dag` node's tasks are a list written before anyone has seen the data. A
+task may instead declare `for_each` and become one task per item of a list an
+upstream task produced:
+
+```yaml
+- id: "split"
+  role: "research"
+  writes: false
+- id: "per-question"
+  role: "research"
+  writes: false
+  for_each:
+    from: "split"            # the task whose result it expands
+    items: "sub_questions"   # the key in that task's artifact payload
+    max_items: 8             # the width this may reach; 0 means the default
+  prompt: |
+    Answer this one sub-question and no other: {item}
+```
+
+When `split` succeeds, the scheduler reads `sub_questions` from its artifact
+and creates `per-question[1]` … `per-question[n]`. They are ordinary tasks —
+routed, admitted, gated, verified, escalated and integrated like any other —
+each with `{item}` (or `{item.key}`, for an object) substituted into its
+prompt, acceptance criteria and ownership patterns, and its item on the last
+line of its prompt whether or not the template used the placeholder.
+
+`per-question` itself never reaches a worker. It is ready twice: once when its
+source succeeds, and it *expands*; once when every child has succeeded, and it
+*joins*, at no cost, writing a `collection` artifact under its own id that
+says how wide the fan-out was, what each item was, and how each child ended. A
+downstream task that depends on it receives the children's artifacts beside
+that collection.
+
+What the source said decides three different things, and they are kept apart —
+the same distinction `runtime/decouple.py` draws between `found: 0` and "could
+not look":
+
+| The source's artifacts…                         | The template                                                |
+|-------------------------------------------------|-------------------------------------------------------------|
+| carry the key with items                        | expands; the `expanded` event carries the count and the cap |
+| carry the key, empty                            | joins with zero children and says so; downstream still runs |
+| do not carry the key, or there is no store      | is `BLOCKED`, naming the source, the key, and what it did carry |
+
+**The cap is reported, never silent.** `max_items` defaults to
+`DEFAULT_MAX_ITEMS` in `runtime/expand.py` — 25, not the 250 a research
+product runs on its own fleet, because a child here is a `claude -p` session on
+this machine and a default that could spend 250× one estimate on one list is
+one nobody would defend after the bill. A longer list is cut to the cap, and
+`expansion_truncated` records how many items were dropped; the join's note and
+the collection carry the same number.
+
+A child fails the way any task does — the ladder, then a person — and the join
+waits. The run stops naming the child; siblings that passed keep their pass;
+`resume` derives the same children from the items the state recorded and
+retries only what did not finish. The replanner is handed the live task list,
+so a replan after an expansion keeps the children rather than cancelling them
+as dropped.
+
+`vise runtime plan` has no items. It shows the template once, marked
+`×1..8 — one per item of split's 'sub_questions'`, prices it as a range from
+one child to the cap, and notes when the widest case would not fit the budget —
+a note, not a problem, because admission stops the run for a person when the
+money runs out, and that is the design.
+
+The width is decided by the data and applied by code. The worker's whole say is
+the list; the count, the cap and the join are the scheduler's. A `for_each` run
+without an artifact store blocks rather than guesses, and the CLI always
+supplies one.
+
 ## The spec gate
 
 Asked once, before the first dispatch, whenever the run contains a task that
@@ -182,6 +253,10 @@ falls back to the shared tree.
 grading its own homework is the failure mode the whole design exists to prevent;
 `worker-contract.md` says why the verifier is a separate agent with a separate
 input.
+
+A `for_each` template never enters `RUNNING`: it is expanded at its first
+readiness and joined at its second, both in-process, and its `SUCCEEDED` means
+every child reached theirs. See [Expansion](#expansion).
 
 ## Concurrency
 

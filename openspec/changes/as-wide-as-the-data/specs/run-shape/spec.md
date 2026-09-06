@@ -22,10 +22,10 @@ child has succeeded.
 - **WHEN** every child has succeeded
 - **THEN** the declaring task is `SUCCEEDED` at no cost, and a `collection` artifact under its id lists the items and each child's outcome
 
-#### Scenario: One failed child fails the join
+#### Scenario: One failed child keeps the join from succeeding
 
 - **WHEN** one of twelve children ends `FAILED`
-- **THEN** the declaring task is blocked, its reason names that child, and tasks depending on it do not start
+- **THEN** the run stops for a person naming that child, the declaring task does not succeed, tasks depending on it do not start, and siblings that passed keep their pass
 
 #### Scenario: The list is empty
 

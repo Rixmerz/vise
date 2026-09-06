@@ -219,6 +219,13 @@ def _generate_graph_yaml(builder: dict) -> str:
                 for key in ("max_cost", "max_turns", "timeout_s"):
                     if task.get(key):
                         lines.append(f"        {key}: {task[key]}")
+                fe = task.get("for_each")
+                if isinstance(fe, dict) and fe.get("from") and fe.get("items"):
+                    lines.append("        for_each:")
+                    lines.append(f'          from: "{fe["from"]}"')
+                    lines.append(f'          items: "{fe["items"]}"')
+                    if fe.get("max_items"):
+                        lines.append(f"          max_items: {int(fe['max_items'])}")
 
         lines.append("")
 
@@ -330,7 +337,9 @@ def register_graph_builder_tools(mcp):
                 "criticality": routine|elevated|critical, "complexity":
                 trivial|low|medium|high, "writes": bool, "model", "effort",
                 "acceptance": list[str], "max_cost", "max_turns", "timeout_s",
-                "requires_human": bool.
+                "requires_human": bool, and "for_each": {"from": str, "items":
+                str, "max_items"?: int} to expand into one child task per item
+                of the named task's artifact list.
                 Omit them all and the node behaves exactly as before.
             validators: Optional list of validator dicts declared on this node.
                 Each dict: {"type": str, "weight"?: float, ...}.

@@ -318,7 +318,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if not args.yes:
         print(
             f"\nnothing dispatched. Re-run with --yes to spend roughly "
-            f"${preview.estimated_cost_usd:.2f}."
+            f"${preview.estimated_cost_usd:.2f}{_up_to(preview)}."
         )
         return 0
 
@@ -531,7 +531,7 @@ def _cmd_continue(args: argparse.Namespace) -> int:
     if not args.yes:
         print(
             f"\nnothing dispatched. Re-run with --yes to spend roughly "
-            f"${preview.estimated_cost_usd:.2f} on top of ${spent:.2f}."
+            f"${preview.estimated_cost_usd:.2f}{_up_to(preview)} on top of ${spent:.2f}."
         )
         return 0
 
@@ -616,6 +616,15 @@ def _run_ids(args: argparse.Namespace) -> list[str]:
         (p.name for p in runs.iterdir() if (p / "state.json").is_file()),
         reverse=True,
     )
+
+
+def _up_to(preview) -> str:
+    """The ceiling beside the floor, only when they differ — a plan without an
+    expansion reads exactly as it did."""
+    if preview.estimated_cost_ceiling_usd > preview.estimated_cost_usd:
+        return (f" (up to ~${preview.estimated_cost_ceiling_usd:.2f} if every "
+                f"expansion reaches its cap)")
+    return ""
 
 
 def _render_state(state) -> str:

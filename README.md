@@ -144,8 +144,8 @@ plans without dispatching. Four documents specify it:
 | [`docs/worker-contract.md`](docs/worker-contract.md) | the brief a worker gets, the result it owes, and the four honesty gates |
 
 A DAG node's tasks can now carry `role`, `ownership`, `criticality`,
-`complexity`, `writes`, `model`, `effort`, `acceptance` and per-task budget
-ceilings. `vise runtime plan` reads them back:
+`complexity`, `writes`, `model`, `effort`, `acceptance`, `for_each` and
+per-task budget ceilings. `vise runtime plan` reads them back:
 
 ```sh
 vise runtime plan path/to/oauth-graph.yaml --max-cost 12
@@ -241,6 +241,17 @@ A task can also declare `requires_human: true` and the run parks before it
 starts — for the work where continuing is cheap and being wrong is expensive: a
 destructive migration, a breaking public API change, a security-critical fix.
 That asymmetry, not a confidence threshold, is the test for setting it.
+
+And a task can declare `for_each` and become one task per item of a list an
+upstream task produced — `from` names the task, `items` the key in its artifact,
+`max_items` the most children it may become — so a run is as wide as the data
+rather than as wide as the YAML's author guessed. The children are ordinary
+tasks; the declaring task is the join, dispatches no worker, and succeeds when
+every child does. A list longer than the cap is cut and the cut is on the record;
+a list the source never produced blocks the join with the reason rather than
+reading as an empty one. The bundled `research` workflow gathers this way: its
+`split` task writes the sub-questions, and `per-question` becomes one agent per
+entry. `docs/scheduler.md` § Expansion has the rules.
 
 Three passes sit above the worker, each answering a question it cannot answer
 about itself: a **debugger** classifies a failure that named no kind (the

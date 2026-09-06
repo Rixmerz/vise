@@ -142,6 +142,15 @@ tokens of one worker's transcript is both expensive and a worse input than the
 four hundred tokens of what it concluded, because the transcript contains every
 hypothesis it abandoned with the same weight as the one it kept.
 
+An artifact is also how a worker decides a run's width without deciding its
+shape. The source of a `for_each` expansion emits its list under the key the
+template declared — `{"kind": "plan", "payload": {"sub_questions": [...]}}` —
+and that list is the whole of its say: the scheduler creates one child per
+entry up to the cap, and the join writes a `collection` artifact under the
+template's id. A child's brief ends with `item i/n: …` naming the entry it
+owns, and a task downstream of the template receives the children's artifacts
+beside the collection. `scheduler.md` § Expansion has the rules.
+
 ## What a worker never does
 
 - Advance a phase, traverse an edge, or write graph state.

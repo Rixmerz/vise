@@ -8,12 +8,45 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .graph_engine import Node, Edge, EdgeCondition, Graph, Task
+from .graph_engine import Node, Edge, EdgeCondition, ForEach, Graph, Task
 
 
 class GraphParseError(Exception):
     """Raised when graph YAML parsing fails."""
     pass
+
+
+def _parse_for_each(node_id: str, task_id: str, raw: object) -> ForEach | None:
+    """Read a task's ``for_each`` block, failing closed on anything half-said.
+
+    A missing ``from`` or ``items`` cannot default: there is no list to guess
+    at. A cap that is not a positive integer is refused for the same reason a
+    typo'd criticality is — a value that silently became "unlimited" would look
+    like it worked, once, on the bill.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' has a for_each that is not a mapping"
+        )
+    source = raw.get('from')
+    key = raw.get('items')
+    if not source or not isinstance(source, str):
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' for_each needs 'from': the task whose result it expands"
+        )
+    if not key or not isinstance(key, str):
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' for_each needs 'items': the payload key holding the list"
+        )
+    cap_raw = raw.get('max_items', 0)
+    if isinstance(cap_raw, bool) or not isinstance(cap_raw, int) or cap_raw < 0:
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' for_each max_items must be a non-negative "
+            f"integer (0 for the default), got {cap_raw!r}"
+        )
+    return ForEach(from_task=source, items=key, max_items=cap_raw)
 
 
 # Agent-runtime enums. Kept here rather than imported from vise.runtime so the
@@ -447,6 +480,12 @@ def parse_graph_yaml(content: str) -> Graph:
                         f"Node '{node_id}' task '{task_id}' has invalid complexity "
                         f"'{complexity}'; must be one of {sorted(_VALID_COMPLEXITY)}"
                     )
+                for_each = _parse_for_each(node_id, str(task_id), task_data.get('for_each'))
+                if for_each is not None and for_each.from_task not in deps:
+                    # The source is what the expansion waits on. Making the
+                    # author repeat it under `dependencies` would be a second
+                    # place for the same fact to be wrong.
+                    deps = [*deps, for_each.from_task]
                 effort = task_data.get('effort')
                 if effort is not None and str(effort) not in _VALID_EFFORT:
                     raise GraphParseError(
@@ -472,6 +511,7 @@ def parse_graph_yaml(content: str) -> Graph:
                     max_turns=int(task_data.get('max_turns', 0) or 0),
                     timeout_s=int(task_data.get('timeout_s', 0) or 0),
                     requires_human=bool(task_data.get('requires_human', False)),
+                    for_each=for_each,
                 ))
 
         advisor_reason = node_data.get('advisor_reason') or node_data.get('reason')

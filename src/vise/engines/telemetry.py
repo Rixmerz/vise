@@ -113,6 +113,14 @@ _VALID_RUN_EVENTS = frozenset({
     "wall_clock_exhausted",
     "cancelled",
     "run_finished",
+    # Width from the data. `expanded` is the one to count across runs — how
+    # wide a fan-out actually went against the cap the plan showed — and
+    # `expansion_truncated` is the cut the cap made, which must never be
+    # silent.
+    "expanded",
+    "expansion_truncated",
+    "expansion_blocked",
+    "joined",
 })
 
 

@@ -227,3 +227,147 @@ def test_a_declared_default_still_means_what_was_declared():
         assert getattr(task, field) == value, (
             f"{field} was declared {value!r} and came back {getattr(task, field)!r}"
         )
+
+
+# --- for_each: width from the data ------------------------------------------
+
+
+FOR_EACH_YAML = """
+metadata:
+  name: "wide"
+  version: "1.0"
+nodes:
+  - id: "implement"
+    name: "Implement"
+    node_type: "dag"
+    is_start: true
+    is_end: true
+    tasks:
+      - id: "split"
+        name: "Split"
+        role: "research"
+        writes: false
+      - id: "each"
+        name: "Each"
+        role: "research"
+        writes: false
+        for_each:
+          from: "split"
+          items: "sub_questions"
+          max_items: 8
+        prompt: |
+          Answer this one: {item}
+edges: []
+"""
+
+
+def test_for_each_survives_the_parser_and_adds_the_source_as_a_dependency():
+    """The source is what the expansion waits on. Asking the author to repeat
+    it under `dependencies` would be a second place for one fact to be wrong."""
+    task = _tasks(FOR_EACH_YAML)["each"]
+    assert task.for_each is not None
+    assert (task.for_each.from_task, task.for_each.items, task.for_each.max_items) == (
+        "split", "sub_questions", 8
+    )
+    assert task.dependencies == ["split"]
+    assert "{item}" in (task.prompt or ""), "the placeholder reaches the runtime untouched"
+
+
+def test_a_source_already_declared_as_a_dependency_is_not_duplicated():
+    yaml_text = FOR_EACH_YAML.replace(
+        '        for_each:', '        dependencies: ["split"]\n        for_each:'
+    )
+    assert _tasks(yaml_text)["each"].dependencies == ["split"]
+
+
+def test_a_task_declaring_nothing_does_not_expand():
+    assert _tasks(PLAIN_YAML)["t1"].for_each is None
+
+
+def test_the_cap_defaults_to_zero_meaning_the_runtimes_default_never_unlimited():
+    yaml_text = FOR_EACH_YAML.replace("          max_items: 8\n", "")
+    assert _tasks(yaml_text)["each"].for_each.max_items == 0
+
+
+@pytest.mark.parametrize(
+    "block,fragment",
+    [
+        ('for_each:\n          items: "x"', "needs 'from'"),
+        ('for_each:\n          from: "split"', "needs 'items'"),
+        ('for_each:\n          from: "split"\n          items: "x"\n          max_items: -1',
+         "max_items"),
+        ('for_each:\n          from: "split"\n          items: "x"\n          max_items: true',
+         "max_items"),
+        ('for_each: "split"', "not a mapping"),
+    ],
+)
+def test_a_half_said_for_each_fails_closed(block, fragment):
+    """There is no list to guess at, and a cap that silently became unlimited
+    would look like it worked — once, on the bill."""
+    yaml_text = FOR_EACH_YAML.replace(
+        'for_each:\n          from: "split"\n          items: "sub_questions"\n          max_items: 8',
+        block,
+    )
+    with pytest.raises(GraphParseError) as exc:
+        parse_graph_yaml(yaml_text)
+    assert fragment in str(exc.value)
+
+
+def test_a_task_that_expands_from_itself_is_refused():
+    with pytest.raises(GraphParseError) as exc:
+        parse_graph_yaml(FOR_EACH_YAML.replace('from: "split"', 'from: "each"'))
+    assert "expands from itself" in str(exc.value)
+
+
+def test_a_task_that_expands_from_an_unknown_task_is_refused():
+    with pytest.raises(GraphParseError) as exc:
+        parse_graph_yaml(FOR_EACH_YAML.replace('from: "split"', 'from: "ghost"'))
+    assert "ghost" in str(exc.value)
+
+
+def test_a_hand_built_expansion_that_does_not_wait_on_its_source_is_refused():
+    """The parser adds the dependency; a Task built in code has to carry it, or
+    the children would be derived from a list that does not exist yet."""
+    from vise.engines.graph_engine import ForEach, Graph, Node, Task
+
+    node = Node(
+        id="n", name="n", node_type="dag", is_start=True, is_end=True,
+        tasks=[
+            Task(id="split", name="split"),
+            Task(id="each", name="each", for_each=ForEach(from_task="split", items="k")),
+        ],
+    )
+    graph = Graph(nodes={"n": node}, edges=[])
+    errors = graph.validate()
+    assert any("does not depend on it" in e for e in errors), errors
+    node.tasks[1].dependencies = ["split"]
+    assert not [e for e in graph.validate() if "each" in e]
+
+
+def test_the_builder_round_trips_for_each():
+    builder = {
+        "metadata": {"name": "b", "version": "1.0"},
+        "nodes": [{
+            "id": "implement", "name": "Implement", "node_type": "dag",
+            "is_start": True, "is_end": True,
+            "tasks": [
+                {"id": "split", "name": "Split", "role": "research", "writes": False},
+                {"id": "each", "name": "Each", "role": "research", "writes": False,
+                 "for_each": {"from": "split", "items": "sub_questions", "max_items": 5}},
+            ],
+        }],
+        "edges": [],
+    }
+    rendered = _generate_graph_yaml(builder)
+    assert 'from: "split"' in rendered and 'items: "sub_questions"' in rendered
+    assert "max_items: 5" in rendered
+    task = _tasks(rendered)["each"]
+    assert (task.for_each.from_task, task.for_each.items, task.for_each.max_items) == (
+        "split", "sub_questions", 5
+    )
+    assert task.dependencies == ["split"]
+
+    builder["nodes"][0]["tasks"][1]["for_each"].pop("max_items")
+    rendered = _generate_graph_yaml(builder)
+    assert "max_items" not in rendered
+    assert _tasks(rendered)["each"].for_each.max_items == 0

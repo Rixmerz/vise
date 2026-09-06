@@ -18,9 +18,24 @@ from typing import Any, Iterable, Sequence
 from vise.runtime import ownership as _own
 from vise.runtime.budget import BudgetLedger
 from vise.runtime.contracts import RunBudget
+from vise.runtime.expand import cap_for
 from vise.runtime.registry import AgentRegistry, AgentSpec, capability_hint
 from vise.runtime.routing import ModelRouter, RoutingDecision
 from vise.runtime.spec_gate import check as spec_gate_check
+
+
+@dataclass(frozen=True)
+class Expands:
+    """What a plan can say about a `for_each` task: where the width comes from
+    and how wide it may get. Not how wide it will be — the list does not exist
+    until the source has run."""
+
+    source: str
+    key: str
+    cap: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"source": self.source, "key": self.key, "cap": self.cap}
 
 
 @dataclass(frozen=True)
@@ -34,6 +49,15 @@ class PlannedTask:
     decision: RoutingDecision
     ownership: tuple[str, ...]
     writes: bool = True
+    #: Set for a task that becomes one child per item at run time. The
+    #: decision above is priced per child; ``ceiling_usd`` is the cap times it.
+    expands: Expands | None = None
+
+    @property
+    def ceiling_usd(self) -> float:
+        """The most this task can cost: its estimate, times its cap if it expands."""
+        width = self.expands.cap if self.expands is not None else 1
+        return self.decision.estimated_cost_usd * width
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +68,7 @@ class PlannedTask:
             "ownership": list(self.ownership),
             "writes": self.writes,
             "routing": self.decision.to_dict(),
+            "expands": self.expands.to_dict() if self.expands is not None else None,
         }
 
 
@@ -63,6 +88,10 @@ class PlannedWave:
     @property
     def estimated_cost_usd(self) -> float:
         return sum(t.decision.estimated_cost_usd for t in self.tasks)
+
+    @property
+    def estimated_cost_ceiling_usd(self) -> float:
+        return sum(t.ceiling_usd for t in self.tasks)
 
 
 @dataclass(frozen=True)
@@ -97,7 +126,15 @@ class RunPlan:
 
     @property
     def estimated_cost_usd(self) -> float:
+        """The floor: every expanding task counted once. Never an overstatement,
+        so the "spend roughly" line under `run` is a number the run will reach."""
         return sum(w.estimated_cost_usd for w in self.waves)
+
+    @property
+    def estimated_cost_ceiling_usd(self) -> float:
+        """The most the plan can cost: every expansion at its cap. Equal to the
+        floor when nothing expands, so a plan without `for_each` reads as before."""
+        return sum(w.estimated_cost_ceiling_usd for w in self.waves)
 
     @property
     def effective_concurrency(self) -> int:
@@ -123,13 +160,25 @@ class RunPlan:
                        f"~${wave.estimated_cost_usd:.2f})")
             for t in wave.tasks:
                 agent = t.agent_id or "UNROUTABLE"
+                width = ""
+                if t.expands is not None:
+                    width = (
+                        f"  ×1..{t.expands.cap} — one per item of "
+                        f"{t.expands.source}'s '{t.expands.key}'"
+                    )
                 out.append(
                     f"  {t.task_id:<24} {agent:<20} "
-                    f"{t.decision.model}/{t.decision.effort}"
+                    f"{t.decision.model}/{t.decision.effort}{width}"
                 )
                 for reason in t.decision.reasons:
                     out.append(f"      · {reason}")
-        out.append(f"\ntotal: {self.task_count} task(s), ~${self.estimated_cost_usd:.2f}")
+        total = f"\ntotal: {self.task_count} task(s), ~${self.estimated_cost_usd:.2f}"
+        if self.estimated_cost_ceiling_usd > self.estimated_cost_usd:
+            total += (
+                f" — up to ~${self.estimated_cost_ceiling_usd:.2f} if every "
+                f"expansion reaches its cap"
+            )
+        out.append(total)
         if self.concurrency_ceiling:
             out.append(
                 f"shape: at most {self.effective_concurrency} task(s) run at once; "
@@ -149,6 +198,7 @@ class RunPlan:
                 for w in self.waves
             ],
             "estimated_cost_usd": round(self.estimated_cost_usd, 4),
+            "estimated_cost_ceiling_usd": round(self.estimated_cost_ceiling_usd, 4),
             "task_count": self.task_count,
             "problems": list(self.problems),
             "unschedulable": list(self.unschedulable),
@@ -304,6 +354,8 @@ def plan(
 
     waves: list[PlannedWave] = []
     running_cost = 0.0
+    running_ceiling = 0.0
+    expanding: list[PlannedTask] = []
     index = 0
     for raw in raw_waves:
         planned: list[PlannedTask] = []
@@ -342,6 +394,11 @@ def plan(
                     f"task '{task.id}' does not fit the remaining run budget "
                     f"(~${decision.estimated_cost_usd:.2f})"
                 )
+            fe = getattr(task, "for_each", None)
+            expands = (
+                Expands(source=fe.from_task, key=fe.items, cap=cap_for(task))
+                if fe is not None else None
+            )
             pt = PlannedTask(
                 task_id=task.id,
                 name=getattr(task, "name", task.id),
@@ -350,7 +407,11 @@ def plan(
                 decision=decision,
                 ownership=tuple(getattr(task, "ownership", ()) or ()),
                 writes=bool(getattr(task, "writes", True)),
+                expands=expands,
             )
+            running_ceiling += pt.ceiling_usd
+            if expands is not None:
+                expanding.append(pt)
             planned.append(pt)
         for group in _split_on_ownership(planned, (budget or RunBudget()).max_parallel):
             waves.append(PlannedWave(index=index, tasks=tuple(group)))
@@ -359,6 +420,23 @@ def plan(
     ceiling = _concurrency_ceiling(raw_waves)
     declared = (budget or RunBudget()).max_parallel
     notes: list[str] = []
+    for pt in expanding:
+        # The width is not a number this plan has. Saying so is the whole of
+        # what it can honestly say, plus the one fact that bounds it.
+        notes.append(
+            f"{pt.task_id} expands at run time — one child per item of "
+            f"{pt.expands.source}'s '{pt.expands.key}', at most {pt.expands.cap}; "
+            f"the shape line counts it once"
+        )
+    if expanding and remaining is not None and running_ceiling > remaining >= running_cost:
+        # A note and not a problem, by the same rule as over-declared
+        # parallelism: the plan is correct and will run, and admission stops
+        # it for a person when the money runs out — which is the design.
+        notes.append(
+            f"if every expansion reaches its cap the run costs ~${running_ceiling:.2f} "
+            f"and the budget leaves ~${remaining:.2f} — admission will stop it for a "
+            f"person when the money runs out"
+        )
     if ceiling and declared > ceiling:
         notes.append(
             f"max_parallel is {declared}, but dependencies and ownership allow at "

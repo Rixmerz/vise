@@ -10,6 +10,52 @@ you may already depend on, it says so under **Behaviour change**.
 
 ### Added
 
+- **`for_each` — a run as wide as the data.** A `dag` node's tasks were a list
+  written before anyone had seen the data, and `research-graph.yaml` showed the
+  cost exactly: `scope` was told to split the question into sub-questions and
+  `gather` then ran four fixed passes over the whole of it, because nothing
+  could say "one of these per part". A task may now declare `for_each` —
+  `from` names a task in the node, `items` a key in its artifact payload,
+  `max_items` the most children it may become — and when the source succeeds
+  the scheduler creates one child per entry as an ordinary task: routed,
+  admitted, gated, verified, escalated and integrated like any other, with
+  `{item}` substituted into its prompt, acceptance and ownership. The declaring
+  task is the join. It never reaches a worker; it is ready once when its source
+  succeeds and expands, and once when every child has succeeded and joins at no
+  cost, writing a `collection` artifact that downstream tasks receive beside
+  the children's own.
+
+  Three facts that must not blur are kept apart: a list with entries expands, a
+  list that is empty joins with zero children and says so, and a list the
+  source never produced blocks the join naming the source, the key, and what
+  the source did carry. The cap is reported, never silent — `DEFAULT_MAX_ITEMS`
+  is 25 with its reason beside it, and a cut is an `expansion_truncated` event,
+  a number in the join's note and a number in the collection. `resume` derives
+  the same children from the items the state recorded and retries only what
+  did not finish, and the replanner is now handed the live task list, so a
+  replan after an expansion keeps the children instead of cancelling them as
+  "dropped by a replan". `vise runtime plan` shows the template once, priced
+  as a range from one child to the cap, and notes when the widest case would
+  not fit the budget.
+
+  The `research` workflow is the first to use it: a `split` task writes the
+  sub-questions and `per-question` becomes one primary-source pass per entry,
+  capped at eight; the case against stays a whole-question pass, because a
+  refutation of the answer needs the whole question. What this deliberately is
+  not: a `run_start` tool, the Workflow tool, or a shape an agent decides —
+  the worker's whole say is the list, and the count, the cap and the join are
+  code. Proposed in `openspec/changes/as-wide-as-the-data`, whose remaining
+  sections — rounds until nothing new, and a verifier panel deciding by
+  majority — are designed and open.
+
+- **A declined replan says so on the task that asked for it.** Handed the live
+  task list, the default replanner finds the re-specification it already
+  added and declines the second time, which is the bound `replan.py` always
+  promised; the task's note used to stop at "the plan is wrong, so trying the
+  same task harder cannot fix it", which reads as a run that stopped
+  mid-sentence. It now continues: "asked for a replan and the replanner
+  declined to produce a new plan".
+
 - **`vise.runtime.decouple`** — the refusal half of the decouple phase, which
   is the half worth having as code. The phase's premise is that a boundary
   decision should wait until there is an oracle, and the earliest that exists

@@ -86,6 +86,30 @@ def test_every_gathering_task_is_staffable(graph):
         )
 
 
+def test_the_gathering_phase_is_as_wide_as_the_question(graph):
+    """The first bundled workflow whose width the data decides.
+
+    `scope` was always told to split the question; `gather` then ran four fixed
+    passes over the whole of it, because nothing could say "one per part".
+    """
+    tasks = {t.id: t for t in graph.nodes["gather"].tasks}
+    split, each = tasks["split"], tasks["per-question"]
+    assert each.for_each is not None
+    assert (each.for_each.from_task, each.for_each.items) == ("split", "sub_questions")
+    assert "split" in each.dependencies
+    assert "{item}" in (each.prompt or ""), "the child must be told which part is its own"
+    assert "sub_questions" in (split.prompt or ""), (
+        "the source must be told the key the expansion reads"
+    )
+    assert 1 <= each.for_each.max_items <= 25, "a cap, and a defensible one"
+
+
+def test_the_case_against_stays_a_whole_question_pass(graph):
+    """A refutation of the answer needs the whole question, not one part of it."""
+    against = {t.id: t for t in graph.nodes["gather"].tasks}["against"]
+    assert against.for_each is None
+
+
 def test_verification_can_send_the_run_back_for_more_sources(graph):
     """Verification emptying the evidence must be able to reopen gathering.
 

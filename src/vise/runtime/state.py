@@ -152,6 +152,11 @@ class RunState:
     replans: int = 0
     human_gate: str = ""
     events: list[dict[str, Any]] = field(default_factory=list)
+    #: What each `for_each` template became: its source, its key, the items
+    #: that got a child, the children's ids, and how many items the cap
+    #: dropped. Persisted so a resume derives the same children and a status
+    #: can say how wide the run went.
+    expansions: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     #: The narrative `vise runtime explain` reads back. Bounded, because a run that
     #: escalates and replans can emit hundreds and the state file is read on
@@ -289,6 +294,7 @@ class RunState:
             "budget": self.ledger.report(),
             "tasks": {k: v.to_dict() for k, v in sorted(self.tasks.items())},
             "events": list(self.events),
+            "expansions": {k: dict(v) for k, v in sorted(self.expansions.items())},
         }
 
     def save(self, root: Path | str) -> Path:
@@ -346,6 +352,10 @@ class RunState:
         for task_id, record in (data.get("tasks") or {}).items():
             state.tasks[task_id] = TaskRecord.from_dict(record)
         state.events = [e for e in (data.get("events") or []) if isinstance(e, dict)]
+        state.expansions = {
+            str(k): dict(v) for k, v in (data.get("expansions") or {}).items()
+            if isinstance(v, dict)
+        }
         spent = (data.get("budget") or {}).get("spent") or {}
         state.ledger.spent = Usage(
             tokens_in=int(spent.get("tokens_in", 0)),

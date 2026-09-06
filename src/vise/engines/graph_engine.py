@@ -65,6 +65,23 @@ class EdgeCondition:
 
 
 @dataclass
+class ForEach:
+    """One child task per item of an upstream result — docs/scheduler.md § Expansion.
+
+    ``from_task`` names a task in the same node; ``items`` names a key in that
+    task's artifact payload holding a list. When the source succeeds the runtime
+    creates one child per item, and the declaring task becomes the join that
+    succeeds when every child does. ``max_items`` caps the width; ``0`` means
+    the runtime's default, never unlimited — a list is data, and data can be
+    250 long.
+    """
+
+    from_task: str
+    items: str
+    max_items: int = 0
+
+
+@dataclass
 class Task:
     """A task within a DAG node. Lightweight sub-unit of work with dependencies.
 
@@ -97,6 +114,9 @@ class Task:
             destructive migration, a breaking public API change, a
             security-critical fix. That asymmetry, not a confidence threshold,
             is the test for setting it.
+        for_each: Expand into one child task per item of an upstream task's
+            artifact. The declaring task dispatches no worker of its own; it is
+            the join. None means the task is exactly one task.
     """
     id: str
     name: str
@@ -118,6 +138,7 @@ class Task:
     max_turns: int = 0
     timeout_s: int = 0
     requires_human: bool = False
+    for_each: ForEach | None = None
 
 
 @dataclass
@@ -276,6 +297,23 @@ class Graph:
                 for dep in task.dependencies:
                     if dep not in task_ids:
                         errors.append(f"Node '{node_id}' task '{task.id}' depends on unknown task '{dep}'")
+                # An expansion's source is a task in this node that the
+                # expanding task waits on. The parser adds the dependency;
+                # a Task built by hand has to have it, or the children would
+                # be derived from a list that does not exist yet.
+                if task.for_each is not None:
+                    source = task.for_each.from_task
+                    if source == task.id:
+                        errors.append(f"Node '{node_id}' task '{task.id}' expands from itself")
+                    elif source not in task_ids:
+                        errors.append(
+                            f"Node '{node_id}' task '{task.id}' expands from unknown task '{source}'"
+                        )
+                    elif source not in task.dependencies:
+                        errors.append(
+                            f"Node '{node_id}' task '{task.id}' expands from '{source}' "
+                            f"but does not depend on it"
+                        )
             # Cycle detection (Kahn's algorithm)
             in_degree: dict[str, int] = {t.id: 0 for t in node.tasks}
             adj: dict[str, list[str]] = {t.id: [] for t in node.tasks}

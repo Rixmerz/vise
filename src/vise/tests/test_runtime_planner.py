@@ -7,6 +7,8 @@ read.
 """
 from __future__ import annotations
 
+import pytest
+
 from vise.engines.graph_engine import Task
 from vise.runtime.contracts import RunBudget
 from vise.runtime.planner import RunPlan, dependency_waves, plan
@@ -201,3 +203,82 @@ def test_the_plan_serialises():
 def test_an_empty_node_plans_to_an_empty_plan():
     result = _plan([])
     assert result.waves == () and result.task_count == 0
+
+
+# --- what the plan can say about a width it does not have --------------------
+
+
+def _wide(cap: int = 0):
+    from vise.engines.graph_engine import ForEach
+
+    reg = _registry()
+    reg.agents["researcher"] = AgentSpec(
+        id="researcher", role="research", description="d", model="sonnet",
+        writes=False, capabilities=("research",),
+    )
+    tasks = [
+        Task(id="split", name="Split", role="research", writes=False),
+        Task(id="each", name="Each", role="research", writes=False, dependencies=["split"],
+             for_each=ForEach(from_task="split", items="sub_questions", max_items=cap)),
+        Task(id="synth", name="Synth", role="research", writes=False, dependencies=["each"]),
+    ]
+    return tasks, reg
+
+
+def test_an_expanding_task_is_planned_once_with_its_source_and_cap_named():
+    tasks, reg = _wide(cap=6)
+    result = _plan(tasks, registry=reg)
+    planned = {t.task_id: t for w in result.waves for t in w.tasks}
+    assert planned["each"].expands is not None
+    assert (planned["each"].expands.source, planned["each"].expands.key,
+            planned["each"].expands.cap) == ("split", "sub_questions", 6)
+    assert planned["split"].expands is None
+    rendered = result.render()
+    assert "×1..6" in rendered and "split's 'sub_questions'" in rendered
+    assert "expands at run time" in rendered and "counts it once" in rendered
+    assert result.problems == ()
+
+
+def test_the_cost_is_a_range_whose_floor_counts_the_expansion_once():
+    tasks, reg = _wide(cap=6)
+    result = _plan(tasks, registry=reg)
+    per_child = {t.task_id: t for w in result.waves for t in w.tasks}["each"].decision.estimated_cost_usd
+    assert result.estimated_cost_ceiling_usd == pytest.approx(
+        result.estimated_cost_usd + per_child * 5
+    )
+    assert "up to ~$" in result.render()
+    payload = result.to_dict()
+    assert payload["estimated_cost_ceiling_usd"] > payload["estimated_cost_usd"]
+    assert payload["waves"][1]["tasks"][0]["expands"] == {
+        "source": "split", "key": "sub_questions", "cap": 6
+    }
+
+
+def test_an_undeclared_cap_is_planned_at_the_default():
+    from vise.runtime.expand import DEFAULT_MAX_ITEMS
+
+    tasks, reg = _wide()
+    planned = {t.task_id: t for w in _plan(tasks, registry=reg).waves for t in w.tasks}
+    assert planned["each"].expands.cap == DEFAULT_MAX_ITEMS
+
+
+def test_a_ceiling_that_does_not_fit_is_a_note_not_a_problem():
+    tasks, reg = _wide(cap=10)
+    floor = _plan(tasks, registry=reg).estimated_cost_usd
+    result = _plan(tasks, registry=reg, budget=RunBudget(max_cost_usd=floor + 0.5))
+    assert result.problems == ()
+    assert any("every expansion reaches its cap" in n and "stop it for a person" in n
+               for n in result.notes), result.notes
+
+
+def test_a_ceiling_that_fits_gets_no_such_note():
+    tasks, reg = _wide(cap=2)
+    result = _plan(tasks, registry=reg, budget=RunBudget(max_cost_usd=100))
+    assert not any("stop it for a person" in n for n in result.notes), result.notes
+
+
+def test_a_plan_without_an_expansion_reads_exactly_as_before():
+    result = _plan([Task(id="t", name="t", role="test", ownership=["tests/**"])])
+    assert result.estimated_cost_ceiling_usd == result.estimated_cost_usd
+    assert "up to" not in result.render() and "expands" not in result.render()
+    assert result.to_dict()["waves"][0]["tasks"][0]["expands"] is None

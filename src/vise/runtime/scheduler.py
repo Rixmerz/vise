@@ -29,6 +29,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from vise.runtime import ownership as _own
 from vise.runtime.artifacts import ArtifactStore
+from vise.runtime import expand as _expand
 from vise.runtime.context import ContextResolver
 from vise.runtime.contracts import (
     TERMINAL_STATES,
@@ -199,6 +200,11 @@ class Scheduler:
         """
         for task in tasks:
             state.record(task.id)
+        # Children are not in the graph. A template that expanded before the
+        # stop derives the same children from the items the state recorded,
+        # so their records — succeeded ones kept, the rest reset below — line
+        # up with tasks the loop can actually dispatch.
+        tasks = self._rematerialised(state, tasks)
         resumable = [
             record for record in state.tasks.values()
             if record.state is not TaskState.SUCCEEDED
@@ -364,7 +370,10 @@ class Scheduler:
                             verifying, trees, baselines,
                         )
                     if replan:
-                        by_id = self._replan(state, by_id, tasks, task_id)
+                        # The live list, not the graph's: after an expansion
+                        # the graph's list has no children, and a replanner
+                        # handed it would cancel every one of them as "dropped".
+                        by_id = self._replan(state, by_id, list(by_id.values()), task_id)
 
         # The executor has joined every thread by here, so anything still in
         # `pending` has in fact finished — the loop just broke before collecting
@@ -454,6 +463,18 @@ class Scheduler:
             if len(pending) >= max(1, state.spec.budget.max_parallel or 1):
                 break
             task = by_id[task_id]
+            if getattr(task, "for_each", None) is not None:
+                # Never dispatched to a worker. Ready the first time when its
+                # source succeeded — expand. Ready the second time when every
+                # child succeeded — join. Both are transitions, so the loop is
+                # told something started and re-reads readiness.
+                if task_id in state.expansions:
+                    self._join(state, task_id)
+                else:
+                    self._expand(state, by_id, task)
+                self._persist(state)
+                started_any = True
+                continue
             if getattr(task, "requires_human", False):
                 # Checked before anything else, including budget: the point of
                 # this flag is that the work should not start, and finding out
@@ -629,7 +650,7 @@ class Scheduler:
         record = state.record(task.id)
         inputs: tuple[Artifact, ...] = ()
         if self.artifacts is not None:
-            inputs = self.artifacts.inputs_for(getattr(task, "dependencies", ()) or ())
+            inputs = self.artifacts.inputs_for(self._with_children(state, task))
         return TaskBrief(
             run_id=state.spec.run_id,
             task_id=task.id,
@@ -669,6 +690,116 @@ class Scheduler:
         except Exception as exc:  # noqa: BLE001 - context is an aid, never a gate
             state.emit("context_failed", task=task.id, error=f"{type(exc).__name__}: {exc}")
             return ()
+
+    # --- expansion -------------------------------------------------------
+
+    def _with_children(self, state: RunState, task: Any) -> list[str]:
+        """The task's dependencies, with each expanded one's children after it.
+
+        A downstream task depends on the template, and the template's own
+        artifact is the small collection. The children's artifacts are what it
+        actually needs to read, and they file under the children's ids.
+        """
+        out: list[str] = []
+        for dep in getattr(task, "dependencies", ()) or ():
+            out.append(dep)
+            info = state.expansions.get(dep)
+            if info:
+                out.extend(info.get("children") or [])
+        return out
+
+    def _expand(self, state: RunState, by_id: dict[str, Any], task: Any) -> None:
+        """Turn a template into its children from the list its source produced."""
+        fe = task.for_each
+        if self.artifacts is None:
+            reason = (
+                f"for_each needs an artifact store to read '{fe.from_task}' from, "
+                f"and none is configured"
+            )
+            self._apply(state, task.id, TaskState.BLOCKED, reason)
+            state.emit("expansion_blocked", task=task.id, reason=reason)
+            return
+        found = _expand.listing(self.artifacts.for_task(fe.from_task), fe.items)
+        if not found.found:
+            carried = (
+                f"its artifacts carry: {', '.join(found.carried)}" if found.carried
+                else "it produced no artifacts at all"
+            )
+            reason = f"'{fe.from_task}' produced no list under '{fe.items}' — {carried}"
+            self._apply(state, task.id, TaskState.BLOCKED, reason)
+            state.emit("expansion_blocked", task=task.id, source=fe.from_task,
+                       key=fe.items, reason=reason)
+            return
+
+        cap = _expand.cap_for(task)
+        expansion = _expand.expand(task, found.items, cap=cap)
+        for child in expansion.children:
+            by_id[child.id] = child
+            state.record(child.id)
+        # The template now waits on its children. Nothing else about it changes:
+        # `for_each` stays set so the second readiness is recognised as a join.
+        by_id[task.id] = replace(task, dependencies=[c.id for c in expansion.children])
+        state.expansions[task.id] = {
+            "source": fe.from_task,
+            "key": fe.items,
+            "items": list(expansion.items),
+            "children": [c.id for c in expansion.children],
+            "dropped": expansion.dropped,
+        }
+        note = f"expanded to {len(expansion.children)} item(s)"
+        if expansion.dropped:
+            note += f", {expansion.dropped} dropped by the cap of {cap}"
+        state.record(task.id).note = note
+        state.emit("expanded", task=task.id, source=fe.from_task, key=fe.items,
+                   count=len(expansion.children), cap=cap)
+        if expansion.dropped:
+            # The cap is a decision someone made; the cut is a fact the run
+            # must not lose. "No silent caps" is the rule, here and in the plan.
+            state.emit("expansion_truncated", task=task.id, dropped=expansion.dropped,
+                       cap=cap, offered=len(found.items))
+
+    def _join(self, state: RunState, task_id: str) -> None:
+        """Complete a template whose children have all succeeded. Spends nothing."""
+        info = state.expansions[task_id]
+        children: list[str] = list(info.get("children") or [])
+        dropped = int(info.get("dropped") or 0)
+        outcomes = {cid: state.record(cid).state.value for cid in children}
+        if self.artifacts is not None:
+            self.artifacts.put(_expand.collection(
+                state.spec.run_id, task_id,
+                source=str(info.get("source", "")), key=str(info.get("key", "")),
+                items=list(info.get("items") or []), outcomes=outcomes,
+                dropped=dropped,
+            ))
+        if children:
+            note = f"join: {len(children)}/{len(children)} child(ren) succeeded"
+        else:
+            note = "expanded to 0 item(s) — the source's list was empty, so there was nothing to run"
+        if dropped:
+            # The number that must not go missing survives the join's own note.
+            note += f", {dropped} item(s) dropped by the cap"
+        self._apply(state, task_id, TaskState.SUCCEEDED, note)
+        state.emit("joined", task=task_id, children=len(children), dropped=dropped)
+
+    def _rematerialised(self, state: RunState, tasks: Sequence[Any]) -> list[Any]:
+        """The graph's tasks plus the children a recorded expansion derived.
+
+        Deterministic: the same template and the same recorded items yield the
+        same ids, so the children's records are found rather than recreated.
+        """
+        out: list[Any] = []
+        for task in tasks:
+            info = state.expansions.get(task.id)
+            if info is None or getattr(task, "for_each", None) is None:
+                out.append(task)
+                continue
+            items = list(info.get("items") or [])
+            expansion = _expand.expand(task, items, cap=max(1, len(items)))
+            for child in expansion.children:
+                out.append(child)
+                state.record(child.id)
+            out.append(replace(task, dependencies=[c.id for c in expansion.children]))
+        return out
 
     # --- collection ------------------------------------------------------
 
@@ -988,12 +1119,19 @@ class Scheduler:
         """
         if self.config.replanner is None:
             reason = "a failure says the plan is wrong and no replanner is configured"
+            self._note_stop(state, trigger, reason)
             state.stop_for_human(reason)
             state.emit("replan_unavailable", task=trigger or None, reason=reason)
             return by_id
         replacement = self.config.replanner(state, original)
         if not replacement:
+            # Handed the live task list, the replanner finds the remediation it
+            # already added and declines — which is the bound replan.py
+            # promises. The task's note said a replan would follow; it has to
+            # say that none did, or the record reads as a run that stopped
+            # mid-sentence.
             reason = "the replanner declined to produce a new plan"
+            self._note_stop(state, trigger, reason)
             state.stop_for_human(reason)
             state.emit("replan_declined", task=trigger or None, reason=reason)
             return by_id
@@ -1012,6 +1150,14 @@ class Scheduler:
             elif record.state in (TaskState.BLOCKED, TaskState.FAILED):
                 record.state = TaskState.PENDING
         return new_by_id
+
+    @staticmethod
+    def _note_stop(state: RunState, task_id: str, reason: str) -> None:
+        """Append why the run stopped to the note of the task that stopped it."""
+        if not task_id:
+            return
+        record = state.record(task_id)
+        record.note = f"{record.note}; asked for a replan and {reason}" if record.note else reason
 
     # --- the adversarial pass --------------------------------------------
 
