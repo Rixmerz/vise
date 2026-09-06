@@ -51,6 +51,38 @@ Also fixed in the same pass, and the same class of error:
   Playwright demands its own Chromium revision. It is two installs. The
   orchestration skill said one.
 
+### Added — `vise doctor` reports two plugins claiming the same file extension
+
+vise declares twelve language servers as an extension-to-binary map, and Claude
+Code's LSP manifest schema has **no priority field, no workspace-root marker and
+no project-level override**: `lspServers` is plugin-scoped and nothing
+arbitrates between plugins. So two installed plugins both claiming `.ts` is
+undetermined, and the symptom is a language server quietly answering for the
+wrong toolchain.
+
+vise already refused to ship that collision with itself — the Deno section of
+the README is the whole argument for why `deno` is opt-in and why enabling it
+means removing five extensions from the `typescript` entry. What had no answer
+was the same collision arriving from a plugin vise has never heard of. Nothing
+anywhere reported it.
+
+`core/plugin_conflicts.py` reads every installed plugin's manifest out of
+`installed_plugins.json` and names both claimants for any extension claimed
+twice. Three details that decide whether it finds anything real:
+
+- **All three shapes.** `lspServers` accepts a record, a path to a `.lsp.json`,
+  or an array of either. Reading only the record — the shape vise happens to
+  use — would be blind to exactly the third-party manifest this inspects.
+- **`.TSX`, `.tsx` and `tsx` are one claim.** Comparing them raw lets a real
+  collision through on a manifest that merely spells it differently.
+- **A plugin colliding with itself is told apart**, because the fix is a local
+  edit to one file, and it is the mistake the Deno instructions warn about.
+
+It picks no winner. The schema cannot express one, so the only fix is removing
+the extension from a manifest, and saying which two files hold it is the useful
+half. `install.sh` prints the section too: installing vise beside whatever a
+machine already has is the moment a collision is introduced.
+
 ### Added — the installer and `vise doctor` know about the browser and the neighbours
 
 `install.sh` provisioned `fastmcp` and `fastembed` and then reported one thing:

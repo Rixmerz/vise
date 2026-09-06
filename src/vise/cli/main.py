@@ -219,6 +219,43 @@ def _cmd_doctor() -> int:
         lines.append(f"  {tool:<15} [{'OK' if found else 'MISSING'}]" + (f"  {found}" if found else ""))
 
     lines.append("")
+    lines.append("=== LSP extension conflicts (across installed plugins) ===")
+    # Claude Code's LSP manifest schema has no priority field, no workspace-root
+    # marker and no project-level override: `lspServers` is plugin-scoped and
+    # nothing arbitrates. So two plugins claiming `.ts` is undetermined, and the
+    # symptom is a server that quietly answers for the wrong toolchain. vise
+    # already refuses to ship that collision with itself — the README's Deno
+    # section is the whole argument — and this is the same rule applied to
+    # plugins vise has never heard of.
+    try:
+        from vise.core.plugin_conflicts import survey as _lsp_survey
+
+        found = _lsp_survey()
+        if not found.known:
+            lines.append(f"  {found.detail}")
+        elif not found.conflicts:
+            lines.append(f"  none — {found.detail}")
+        else:
+            for conflict in found.conflicts:
+                who = " vs ".join(str(claim) for claim in conflict.claims)
+                lines.append(f"  {conflict.extension:<8} {who}")
+                if conflict.within_one_plugin:
+                    lines.append(
+                        "           both are the same plugin — a manifest that "
+                        "gained a server without giving up the extensions"
+                    )
+            lines.append(
+                "  Nothing decides which of these wins; the schema cannot express "
+                "a preference."
+            )
+            lines.append(
+                "  Remove the extension from one manifest so exactly one server "
+                "owns it."
+            )
+    except Exception as exc:  # pragma: no cover - defensive, doctor must not crash
+        lines.append(f"  could not check ({exc})")
+
+    lines.append("")
     lines.append("=== Render gates (ui_layout, ui_contrast) ===")
     # These fail CLOSED. `vise doctor` is where someone finds out what a repo
     # can and cannot check, and a gate that will refuse every run until a

@@ -624,6 +624,17 @@ collision would make `.ts` behavior a coin flip for every user, including
 Node users for whom it works today. A deterministic opt-in beats a
 nondeterministic default.
 
+`vise doctor` reports the collision rather than leaving it to be discovered
+as odd behaviour. It reads every installed plugin's manifest out of
+`~/.claude/plugins/installed_plugins.json` (or `$CLAUDE_CONFIG_DIR`), resolving
+all three shapes `lspServers` accepts — a record, a path to a `.lsp.json`, or an
+array of either — and names both claimants for any extension claimed twice,
+comparing `.TSX`, `.tsx` and `tsx` as one claim. It does not pick a winner:
+the schema provides no way to express one, so the fix is always to remove the
+extension from one manifest. `install.sh` prints the same section, because
+installing vise beside whatever a machine already has is the moment a collision
+is introduced and the cheapest moment to undo it.
+
 To switch a machine over to Deno, add this to `lspServers` in
 `.claude-plugin/plugin.json` **and remove the same five extensions from the
 `typescript` entry** so exactly one server owns them:

@@ -157,12 +157,17 @@ fi
 #    a shim that exits with "Unknown binary" the moment anything runs it.
 #    `vise doctor` starts each server the way Claude Code does and reports
 #    what actually happened.
-#    Three sections, not one. LSP servers are the dormant kind — absent means
+#    Four sections, not one. LSP servers are the dormant kind — absent means
 #    nothing until you open that language. The render gates are the opposite:
 #    they fail CLOSED, so a missing browser refuses every run in a repo that
 #    wires them, and that belongs in front of someone who has just installed.
 #    The neighbours are neither: vise cannot see whether they are mounted, so
 #    what it reports is the version its guidance assumes.
+#
+#    The conflict section is here because this script is the moment vise joins
+#    whatever else the user already has. Nothing in Claude Code arbitrates two
+#    plugins claiming one extension, so a collision introduced by this install
+#    is silent, and the install is exactly when it is cheapest to undo.
 VISE_BIN=""
 if [ -x "${VENV_DIR}/bin/vise" ]; then
   VISE_BIN="${VENV_DIR}/bin/vise"
@@ -173,7 +178,7 @@ fi
 echo
 if [ -n "$VISE_BIN" ]; then
   DOCTOR_OUT="$("$VISE_BIN" doctor 2>/dev/null || true)"
-  for section in "LSP servers" "Render gates" "Neighbouring MCP servers"; do
+  for section in "LSP servers" "LSP extension conflicts" "Render gates" "Neighbouring MCP servers"; do
     printf '%s\n' "$DOCTOR_OUT" | sed -n "/=== ${section}/,/^\$/p"
   done
 else
