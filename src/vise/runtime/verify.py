@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from vise.runtime.contracts import (
     Artifact,
@@ -46,6 +46,46 @@ REVIEW_PROBES: tuple[str, ...] = (
     "API compatibility — what an existing caller sees after this change",
     "failure recovery — whether the system can be restarted into a good state",
 )
+
+#: The lenses a panel is briefed from, in order, cycling when more verifiers
+#: are asked for than there are lenses.
+#:
+#: Distinct questions rather than the same question asked louder. Three agents
+#: given one prompt return one opinion three times — the disagreement that
+#: makes a panel worth its price has to be built into what they are each asked,
+#: which is the same reason `research-graph.yaml` pays one task to look for the
+#: counter-case.
+#:
+#: The first is today's question, unchanged, so a panel of one is exactly the
+#: single verifier that shipped before panels existed.
+LENSES: tuple[tuple[str, str], ...] = (
+    ("criteria", ""),
+    ("evidence", (
+        "Your lens is the evidence. Do not reason about whether the change looks "
+        "correct — ask whether the quoted output actually demonstrates the "
+        "criterion, and whether someone running that command would see it. "
+        "Output that does not bear on a criterion leaves it unmet, however "
+        "convincing the diff looks."
+    )),
+    ("adversary", (
+        "Your lens is the case against. Assume the criteria are met in the happy "
+        "path and look for the input that breaks them: an empty or maximum "
+        "value, non-ASCII text, the second call, the caller who is authenticated "
+        "but not authorised. A criterion that holds only for the example in the "
+        "evidence is not met."
+    )),
+    ("regression", (
+        "Your lens is what this changed that nobody asked it to. Read the diff "
+        "for behaviour an existing caller depends on and no criterion mentions. "
+        "A criterion met by breaking something else is not met."
+    )),
+)
+
+
+def lens_at(index: int) -> tuple[str, str]:
+    """The lens for the ``index``-th verifier of a panel, cycling."""
+    return LENSES[index % len(LENSES)]
+
 
 #: What a verifier is asked. Kept separate from the reviewer's list because
 #: they are different questions: "does this meet the criteria" versus "what is
@@ -148,15 +188,23 @@ def verifier_brief(
     model: str = "sonnet",
     effort: str = "medium",
     diff: str = "",
+    index: int = 0,
+    panel: int = 1,
 ) -> TaskBrief:
-    """Build the brief a verifier gets for one finished task.
+    """Build the brief the ``index``-th verifier of a panel gets for one task.
 
     Note what is absent: ``work_brief.prompt`` and ``result.summary``. The
     prompt is what the implementer was told to do, and the summary is its
     account of what it did — both are the implementer's framing, and handing
     them over is how a verifier ends up agreeing with a story rather than
     checking a diff.
+
+    A panel member is also not told what the others think, or that there are
+    others. Both would defeat the point: a verifier who knows two colleagues
+    already passed is deciding whether to disagree with them, not whether the
+    criteria are met.
     """
+    name, instruction = lens_at(index)
     context: list[str] = []
     if result.changed_paths:
         context.append("files the implementer reports changing:")
@@ -173,10 +221,10 @@ def verifier_brief(
 
     return TaskBrief(
         run_id=work_brief.run_id,
-        task_id=f"{work_brief.task_id}::verify",
-        name=f"verify {work_brief.name}",
+        task_id=verifier_id(work_brief.task_id, index, panel),
+        name=f"verify {work_brief.name}" + (f" ({name})" if panel > 1 else ""),
         role="verify",
-        prompt=VERIFY_INSTRUCTIONS,
+        prompt=f"{VERIFY_INSTRUCTIONS}\n\n{instruction}" if instruction else VERIFY_INSTRUCTIONS,
         criticality=work_brief.criticality,
         ownership=(),
         acceptance=work_brief.acceptance,
@@ -275,6 +323,81 @@ def debugger_brief(
         model=model,
         effort=effort,
         writes=False,
+    )
+
+
+def verifier_id(task_id: str, index: int, panel: int) -> str:
+    """``task::verify`` for a single verifier, ``task::verify[2]`` in a panel.
+
+    Unchanged for a panel of one, because that is the id every recorded run and
+    every reader of a state file already knows.
+    """
+    return f"{task_id}::verify" if panel <= 1 else f"{task_id}::verify[{index + 1}]"
+
+
+@dataclass(frozen=True)
+class PanelVerdict:
+    """What a panel of verifiers concluded, and on what split."""
+
+    verdict: Verdict
+    verifications: tuple[Verification, ...] = ()
+    reasons: tuple[str, ...] = ()
+    unmet: tuple[str, ...] = ()
+
+    @property
+    def tally(self) -> dict[str, int]:
+        counts = {v.value: 0 for v in Verdict}
+        for verification in self.verifications:
+            counts[verification.verdict.value] += 1
+        return counts
+
+    def render(self) -> str:
+        return ", ".join(f"{n} {name}" for name, n in self.tally.items() if n)
+
+
+def decide_panel(verifications: Sequence[Verification]) -> PanelVerdict:
+    """Fold a panel's answers into one verdict. A majority, decided in code.
+
+    A majority rather than unanimity, because the lenses differ on purpose: a
+    verifier looking at whether the evidence reproduces may have nothing useful
+    to say about a criterion that is about wording, and unanimity would let the
+    lens least able to evaluate veto the ones that could.
+
+    No majority either way is ``INCONCLUSIVE`` and not a quiet pass. Verifiers
+    who could not decide have not decided, and the task is blocked rather than
+    accepted — the same direction every gate in this runtime fails.
+
+    For one verifier this is exactly the single-verifier behaviour that shipped
+    before panels: its verdict, unchanged.
+    """
+    verifications = tuple(verifications)
+    if not verifications:
+        return PanelVerdict(
+            Verdict.INCONCLUSIVE,
+            reasons=("no verifier reported",),
+        )
+    counts = {v: 0 for v in Verdict}
+    for verification in verifications:
+        counts[verification.verdict] += 1
+    needed = len(verifications) / 2
+
+    if counts[Verdict.PASS] > needed:
+        return PanelVerdict(Verdict.PASS, verifications)
+    if counts[Verdict.FAIL] > needed:
+        # The reasons of the verifiers who said fail, and only those: a passing
+        # verifier's notes in a failing panel would send the next attempt to
+        # fix what somebody thought was already right.
+        failing = [v for v in verifications if v.verdict is Verdict.FAIL]
+        return PanelVerdict(
+            Verdict.FAIL,
+            verifications,
+            reasons=tuple(dict.fromkeys(r for v in failing for r in v.reasons)),
+            unmet=tuple(dict.fromkeys(u for v in failing for u in v.unmet)),
+        )
+    return PanelVerdict(
+        Verdict.INCONCLUSIVE,
+        verifications,
+        reasons=tuple(dict.fromkeys(r for v in verifications for r in v.reasons)),
     )
 
 

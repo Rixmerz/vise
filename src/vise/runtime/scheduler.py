@@ -27,6 +27,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from vise.runtime import converge as _converge
 from vise.runtime import ownership as _own
 from vise.runtime.artifacts import ArtifactStore
 from vise.runtime import expand as _expand
@@ -60,11 +61,14 @@ from vise.runtime.state import RunState, cancel_requested, utcnow
 from vise.runtime.verify import (
     Verification,
     debugger_brief,
+    decide_panel,
+    lens_at,
     parse_classification,
     reviewer_brief,
     parse_verification,
     verification_artifact,
     verifier_brief,
+    verifier_id,
 )
 from vise.runtime.worker import Worker, execute
 
@@ -307,7 +311,11 @@ class Scheduler:
         started = time.monotonic()
 
         with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-            pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]] = {}
+            # task id, "work" or "verify", and which member of a verifier panel this
+            # is. The index travels with the future because a panel's answers
+            # come back in completion order, and a verdict has to be filed under
+            # the lens that produced it rather than the one that finished first.
+            pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str, int]] = {}
             # The brief each in-flight task was dispatched with, and — while a
             # verifier is running — the work result it is judging. Held here
             # rather than on the record because both are inputs to a decision
@@ -315,6 +323,10 @@ class Scheduler:
             # behind.
             briefs: dict[str, TaskBrief] = {}
             verifying: dict[str, TaskResult] = {}
+            # Per task under a panel: how many verdicts are owed, and the ones
+            # that have arrived. A decision taken on a partial panel would be
+            # the majority of whoever answered first.
+            panels: dict[str, dict[str, Any]] = {}
             # The tree as it stood before this task's *first* attempt. Reused by
             # every retry: a second attempt that legitimately reproduces the
             # first one's file changes nothing since the first, and comparing
@@ -359,15 +371,16 @@ class Scheduler:
 
                 done, _ = wait(list(pending), timeout=WAIT_SLICE_S, return_when=FIRST_COMPLETED)
                 for future in done:
-                    task_id, kind = pending.pop(future)
+                    task_id, kind, member = pending.pop(future)
                     if kind == "verify":
                         replan = self._collect_verification(
-                            state, by_id, task_id, future, verifying, baselines
+                            state, by_id, task_id, member, future, verifying,
+                            panels, baselines,
                         )
                     else:
                         replan = self._collect(
                             state, by_id, task_id, future, pool, pending, briefs,
-                            verifying, trees, baselines,
+                            verifying, panels, trees, baselines,
                         )
                     if replan:
                         # The live list, not the graph's: after an expansion
@@ -450,7 +463,7 @@ class Scheduler:
         state: RunState,
         by_id: dict[str, Any],
         pool: ThreadPoolExecutor,
-        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str, int]],
         briefs: dict[str, TaskBrief],
         baselines: dict[str, str | None],
         trees: dict[str, str],
@@ -543,7 +556,7 @@ class Scheduler:
                 ),
                 baseline_tree=baselines[task_id],
             )
-            pending[future] = (task_id, "work")
+            pending[future] = (task_id, "work", 0)
             briefs[task_id] = brief
             started_any = True
         return started_any
@@ -677,19 +690,29 @@ class Scheduler:
         ), agent.id, decision.estimated_cost_usd
 
     def _context_for(self, state: RunState, task: Any) -> tuple[str, ...]:
-        """Resolved context, or nothing when no resolver was supplied.
+        """Resolved context, plus what earlier rounds of a sweep already found.
 
-        Nothing is the honest default. A scheduler that silently built its own
-        resolver would walk the caller's repository without being asked, and a
-        brief is the one place where "helpfully included extra" is a cost.
+        Nothing is the honest default for the resolved half. A scheduler that
+        silently built its own resolver would walk the caller's repository
+        without being asked, and a brief is the one place where "helpfully
+        included extra" is a cost.
+
+        The sweep half is not optional and does not go through the resolver: a
+        later round that cannot see what the earlier ones found will report it
+        again, and the runtime will correctly count that as nothing new — so
+        the round is paid for and buys a duplicate. It is the cheapest
+        anti-loop device here, for the same reason prior attempts are carried.
         """
-        if self.context is None:
-            return ()
-        try:
-            return self.context.resolve(task)
-        except Exception as exc:  # noqa: BLE001 - context is an aid, never a gate
-            state.emit("context_failed", task=task.id, error=f"{type(exc).__name__}: {exc}")
-            return ()
+        resolved: tuple[str, ...] = ()
+        if self.context is not None:
+            try:
+                resolved = self.context.resolve(task)
+            except Exception as exc:  # noqa: BLE001 - context is an aid, never a gate
+                state.emit("context_failed", task=task.id,
+                           error=f"{type(exc).__name__}: {exc}")
+        if getattr(task, "until", None) is None:
+            return resolved
+        return resolved + _converge.already_found(state.record(task.id).seen)
 
     # --- expansion -------------------------------------------------------
 
@@ -810,9 +833,10 @@ class Scheduler:
         task_id: str,
         future: Future[tuple[TaskResult, GateOutcome]],
         pool: ThreadPoolExecutor,
-        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str, int]],
         briefs: dict[str, TaskBrief],
         verifying: dict[str, TaskResult],
+        panels: dict[str, dict[str, Any]],
         trees: dict[str, str],
         baselines: dict[str, str | None],
     ) -> bool:
@@ -847,16 +871,26 @@ class Scheduler:
             if work_brief is not None and self._verification_applies(work_brief):
                 verifying[task_id] = result
                 verify_model, verify_effort = self._verify_model()
-                brief = replace(
-                    verifier_brief(work_brief, result,
-                                   model=verify_model, effort=verify_effort),
-                    workdir=trees.get(task_id, state.spec.project_dir),
-                )
-                state.emit("verifying", task=task_id, model=brief.model, effort=brief.effort)
-                pending[pool.submit(
-                    execute, brief, self.worker,
-                    project_dir=trees.get(task_id, state.spec.project_dir),
-                )] = (task_id, "verify")
+                size = self._panel_size(by_id.get(task_id))
+                panels[task_id] = {"expected": size, "verdicts": {}}
+                workdir = trees.get(task_id, state.spec.project_dir)
+                for member in range(size):
+                    brief = replace(
+                        verifier_brief(work_brief, result,
+                                       model=verify_model, effort=verify_effort,
+                                       index=member, panel=size),
+                        workdir=workdir,
+                    )
+                    # A panel of one emits exactly the event it always did. The
+                    # extra fields describe a panel, and a reader of a
+                    # single-verifier run should not have to learn them.
+                    extra = ({"lens": lens_at(member)[0], "panel": size}
+                             if size > 1 else {})
+                    state.emit("verifying", task=task_id, model=brief.model,
+                               effort=brief.effort, **extra)
+                    pending[pool.submit(
+                        execute, brief, self.worker, project_dir=workdir,
+                    )] = (task_id, "verify", member)
                 return False
 
         used_tier = tier_of(record.model, record.effort)
@@ -869,6 +903,16 @@ class Scheduler:
             max_attempts=self.config.max_attempts,
             max_replans=self.config.max_replans,
         )
+        # A sweep's passing round is not the sweep succeeding. Asked before
+        # integration, because a task with another round to run has not
+        # finished and its worktree stays its own.
+        if move.state is TaskState.SUCCEEDED and self._fold_round(state, by_id, task_id, result):
+            state.emit("collected", task=task_id, verdict=result.verdict.value,
+                       gates_accepted=outcome.accepted, refusals=list(outcome.refusals),
+                       action="round", reason=state.record(task_id).note,
+                       cost_usd=round(result.usage.cost_usd, 4))
+            self._persist(state)
+            return False
         # A task that passed without a verifier still has to land. Under
         # isolation its work is in its own worktree until it does, so this is
         # the point where "the task succeeded" becomes true of the repository
@@ -880,7 +924,9 @@ class Scheduler:
                        cost_usd=round(result.usage.cost_usd, 4))
             self._persist(state)
             return False
-        self._apply(state, task_id, move.state, move.reason)
+        self._apply(state, task_id, move.state,
+                    self._settled(state, task_id, move.reason)
+                    if move.state is TaskState.SUCCEEDED else move.reason)
         state.emit(
             "collected",
             task=task_id,
@@ -913,6 +959,75 @@ class Scheduler:
             return False
         return self.registry.resolve("verify", writes=None).agent is not None
 
+    def _panel_size(self, task: Any) -> int:
+        """How many independent opinions this task's pass needs. One by default.
+
+        ``0`` from the graph means "nobody said", which is one — a count is a
+        decision someone makes, and zero verifiers is not one of the choices
+        the field offers. ``config.verify`` off is the switch for that, and it
+        is asked before this.
+        """
+        declared = int(getattr(task, "verifiers", 0) or 0)
+        return max(1, declared)
+
+    # --- sweeps ----------------------------------------------------------
+
+    def _fold_round(self, state: RunState, by_id: dict[str, Any], task_id: str,
+                    result: TaskResult | None) -> bool:
+        """Fold a passing round into the sweep. True when another round is due.
+
+        A round is a *passing* attempt: this is only reached once the honesty
+        gates accepted the result and, where a panel applies, it agreed. A
+        failed round never gets here — it is a failed attempt and takes the
+        ladder, which is the distinction that keeps "found nothing" from being
+        recorded as "was wrong".
+        """
+        task = by_id.get(task_id)
+        spec = getattr(task, "until", None) if task is not None else None
+        if spec is None:
+            return False
+        record = state.record(task_id)
+        # Read through the same helper an expansion uses: one place knows how a
+        # worker reports a list, and two would drift.
+        found = (_expand.listing(result.artifacts, spec.key) if result is not None
+                 else _expand.Listing(None))
+        outcome = _converge.fold(
+            found.items, record.seen, stable=record.stable, number=record.rounds + 1,
+        )
+        record.seen = list(outcome.seen)
+        record.rounds = outcome.number
+        record.stable = outcome.stable
+        state.emit("round", task=task_id, number=outcome.number,
+                   fresh=len(outcome.fresh), total=len(outcome.seen),
+                   stable=outcome.stable, reported=outcome.reported)
+        if _converge.another_round(task, outcome):
+            note = (
+                f"round {outcome.number} added {len(outcome.fresh)} "
+                f"({len(outcome.seen)} so far) — going again"
+            )
+            self._apply(state, task_id, TaskState.PENDING, note)
+            # `_apply` will not write a note over a run that has already
+            # stopped, and a sweep asked to go again inside a stopped run is
+            # not going again — the state it was parked in is the honest one.
+            return not (state.cancelled or state.human_gate)
+        reason = _converge.reason(task, outcome)
+        state.emit("converged", task=task_id, rounds=outcome.number,
+                   found=len(outcome.seen), reason=reason)
+        record.note = reason
+        return False
+
+    @staticmethod
+    def _settled(state: RunState, task_id: str, default: str) -> str:
+        """Why a task succeeded, with a sweep's conclusion kept.
+
+        The generic reason is true and says nothing a reader of a sweep needs:
+        how many rounds it took, whether it converged or hit its cap, and how
+        much it found. `_fold_round` left that on the note, and the ordinary
+        transition would write over it.
+        """
+        record = state.record(task_id)
+        return f"{default} — {record.note}" if record.rounds and record.note else default
+
     def _verify_model(self) -> tuple[str, str]:
         agent = self.registry.resolve("verify", writes=None).agent
         return (agent.model or "sonnet", agent.effort or "medium") if agent else \
@@ -923,25 +1038,32 @@ class Scheduler:
         state: RunState,
         by_id: dict[str, Any],
         task_id: str,
+        member: int,
         future: Future[tuple[TaskResult, GateOutcome]],
         verifying: dict[str, TaskResult],
+        panels: dict[str, dict[str, Any]],
         baselines: dict[str, str | None],
     ) -> bool:
-        """Act on a verifier's answer about one task.
+        """Fold one verifier's answer in, and decide once the panel is whole.
 
         Three outcomes, three different meanings:
 
         pass          the task succeeded — the only path to SUCCEEDED.
-        fail          the work was wrong; the verifier's reasons replace the
+        fail          the work was wrong; the verifiers' reasons replace the
                       worker's summary and the task escalates like any wrong
                       answer.
-        inconclusive  the *verifier* could not evaluate. The task is blocked,
-                      not retried: re-running the implementer cannot fix a
-                      verifier that would not run, and paying for it to find
-                      that out again is the wrong lesson to learn twice.
+        inconclusive  the verifiers could not evaluate, or could not agree. The
+                      task is blocked, not retried: re-running the implementer
+                      cannot fix a verifier that would not run, and paying for
+                      it to find that out again is the wrong lesson to learn
+                      twice.
+
+        With one verifier this is exactly what it was before panels existed —
+        a majority of one is that one's verdict.
         """
-        work_result = verifying.pop(task_id, None)
         record = state.record(task_id)
+        panel = panels.get(task_id) or {"expected": 1, "verdicts": {}}
+        size = int(panel["expected"])
         try:
             collected = future.result()
         except Exception as exc:  # noqa: BLE001 - a verifier crash is not a task failure
@@ -955,13 +1077,22 @@ class Scheduler:
             # on a path where it cannot be None. The two-branch version read the
             # same and left every later use nullable.
             verify_result, _ = collected
-            state.ledger.spend(f"{task_id}::verify", verify_result.usage)
+            # Charged per member, not per task: a panel that billed to one key
+            # would total correctly and leave `vise runtime budget` unable to
+            # say that three opinions cost three times one.
+            state.ledger.spend(verifier_id(task_id, member, size), verify_result.usage)
             verification = parse_verification(verify_result)
 
-        if self.artifacts is not None:
-            self.artifacts.put(
-                verification_artifact(state.spec.run_id, task_id, verification)
-            )
+        if self.artifacts is not None and size > 1:
+            # Each member's own answer, under its own id, so a panel leaves
+            # three readable verdicts rather than one that overwrote two. The
+            # panel's *decision* is filed below, under the task — which is what
+            # a downstream task reads, and for a panel of one is the only
+            # artifact there is, exactly as before panels existed.
+            self.artifacts.put(replace(
+                verification_artifact(state.spec.run_id, task_id, verification),
+                task_id=verifier_id(task_id, member, size),
+            ))
         state.emit(
             "verified",
             task=task_id,
@@ -969,25 +1100,61 @@ class Scheduler:
             unmet=list(verification.unmet),
             reasons=list(verification.reasons)[:3],
             cost_usd=round(verify_result.usage.cost_usd, 4) if verify_result else 0.0,
+            **({"lens": lens_at(member)[0]} if size > 1 else {}),
         )
 
+        panel["verdicts"][member] = verification
+        if len(panel["verdicts"]) < size:
+            # Deciding now would be the majority of whoever answered first.
+            self._persist(state)
+            return False
+        panels.pop(task_id, None)
+        work_result = verifying.pop(task_id, None)
+        decision = decide_panel([panel["verdicts"][i] for i in sorted(panel["verdicts"])])
+        verification = Verification(
+            decision.verdict, decision.reasons, unmet=decision.unmet,
+        )
+        if self.artifacts is not None:
+            # The conclusion, under the task's own id. A task downstream of this
+            # one receives it with the rest of its dependency's artifacts, and
+            # what it needs is the verdict, not three opinions to weigh again.
+            self.artifacts.put(
+                verification_artifact(state.spec.run_id, task_id, verification)
+            )
+        if size > 1:
+            state.emit("panel", task=task_id, verdict=decision.verdict.value,
+                       split=decision.render(), unmet=list(decision.unmet)[:3])
+
         if verification.verdict is Verdict.PASS:
+            # A verified round is still only a round. The verifier judged this
+            # pass; whether the sweep is finished is a different question, and
+            # the answer is counted rather than asked.
+            if self._fold_round(state, by_id, task_id, work_result):
+                self._persist(state)
+                return False
             if self._integrate(state, task_id):
-                self._apply(state, task_id, TaskState.SUCCEEDED,
-                            "verified against its criteria")
+                self._apply(state, task_id, TaskState.SUCCEEDED, self._settled(
+                    state, task_id,
+                    "verified against its criteria"
+                    + (f" by {decision.render()}" if size > 1 else ""),
+                ))
             self._persist(state)
             return False
 
         if verification.verdict is Verdict.INCONCLUSIVE:
+            head = (
+                f"the verifiers did not agree ({decision.render()}) — " if size > 1
+                else "the verifier could not evaluate this — "
+            )
             self._apply(
                 state, task_id, TaskState.BLOCKED,
-                "the verifier could not evaluate this — "
-                + (verification.reasons[0] if verification.reasons else "no reason given"),
+                head + (verification.reasons[0] if verification.reasons
+                        else "no reason given"),
             )
             self._persist(state)
             return False
 
-        # The verifier says the work is wrong. Its reasons, not the worker's
+        # The panel says the work is wrong. Its reasons, not the worker's
         # summary, are what the next attempt is told.
         reasons = "; ".join(verification.unmet or verification.reasons) or "criteria not met"
         rejected = replace(
@@ -1279,7 +1446,7 @@ class Scheduler:
     def _drain(
         self,
         state: RunState,
-        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str]],
+        pending: dict[Future[tuple[TaskResult, GateOutcome]], tuple[str, str, int]],
     ) -> None:
         """Settle every future the loop stopped before collecting.
 
@@ -1294,7 +1461,7 @@ class Scheduler:
         accounting and an honest note on the record; deciding is
         ``recovery.decide``'s job and there is nothing left to decide.
         """
-        for future, (task_id, kind) in list(pending.items()):
+        for future, (task_id, kind, member) in list(pending.items()):
             try:
                 result, _ = future.result(timeout=0)
             except Exception as exc:  # noqa: BLE001 - a stopped run reports, never raises
@@ -1316,7 +1483,7 @@ class Scheduler:
                 )
                 continue
             if kind == "verify":
-                state.ledger.spend(f"{task_id}::verify", result.usage)
+                state.ledger.spend(verifier_id(task_id, member, member + 1), result.usage)
                 state.record(task_id).note = state.record(task_id).note or (
                     "the run stopped while this task was being verified; the "
                     "verification cost is on the record, its verdict is not"

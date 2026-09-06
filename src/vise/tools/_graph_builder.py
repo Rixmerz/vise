@@ -219,6 +219,15 @@ def _generate_graph_yaml(builder: dict) -> str:
                 for key in ("max_cost", "max_turns", "timeout_s"):
                     if task.get(key):
                         lines.append(f"        {key}: {task[key]}")
+                if task.get("verifiers"):
+                    lines.append(f"        verifiers: {int(task['verifiers'])}")
+                un = task.get("until")
+                if isinstance(un, dict) and un.get("key"):
+                    lines.append("        until:")
+                    lines.append(f'          key: "{un["key"]}"')
+                    for field in ("stable_for", "max_rounds"):
+                        if un.get(field):
+                            lines.append(f"          {field}: {int(un[field])}")
                 fe = task.get("for_each")
                 if isinstance(fe, dict) and fe.get("from") and fe.get("items"):
                     lines.append("        for_each:")
@@ -337,9 +346,12 @@ def register_graph_builder_tools(mcp):
                 "criticality": routine|elevated|critical, "complexity":
                 trivial|low|medium|high, "writes": bool, "model", "effort",
                 "acceptance": list[str], "max_cost", "max_turns", "timeout_s",
-                "requires_human": bool, and "for_each": {"from": str, "items":
+                "requires_human": bool, "for_each": {"from": str, "items":
                 str, "max_items"?: int} to expand into one child task per item
-                of the named task's artifact list.
+                of the named task's artifact list, "until": {"key": str,
+                "stable_for"?: int, "max_rounds"?: int} to re-run the task
+                until it stops finding, and "verifiers": int for how many
+                independent opinions its pass needs.
                 Omit them all and the node behaves exactly as before.
             validators: Optional list of validator dicts declared on this node.
                 Each dict: {"type": str, "weight"?: float, ...}.

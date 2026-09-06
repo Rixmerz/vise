@@ -82,6 +82,26 @@ class ForEach:
 
 
 @dataclass
+class Until:
+    """Run this task again until it stops finding — docs/scheduler.md § Convergence.
+
+    A *round* is a passing attempt, which is not an attempt: a failed round is a
+    failed attempt and takes the escalation ladder. ``key`` names the payload
+    list a round reports its findings under; the runtime keys them, counts what
+    is new against everything earlier rounds found, and dispatches again until
+    ``stable_for`` consecutive rounds add nothing or ``max_rounds`` is reached.
+
+    A simple count of rounds misses the tail — the last round is often where the
+    hard one is — and asking an agent "is this new" gets a yes. So the stop
+    condition is quiet rounds and the deduplication is code.
+    """
+
+    key: str
+    stable_for: int = 2
+    max_rounds: int = 5
+
+
+@dataclass
 class Task:
     """A task within a DAG node. Lightweight sub-unit of work with dependencies.
 
@@ -117,6 +137,16 @@ class Task:
         for_each: Expand into one child task per item of an upstream task's
             artifact. The declaring task dispatches no worker of its own; it is
             the join. None means the task is exactly one task.
+        until: Re-dispatch this task after each passing round until it stops
+            finding anything new. None means one round, which is what every
+            task does today. On a task that also declares ``for_each`` this is
+            inherited by the children, like every other field on a template:
+            the join has no round of its own, and "sweep each area until it
+            goes quiet" is what the pair means.
+        verifiers: How many independent opinions ``SUCCEEDED`` needs. Each is
+            briefed from a different lens and none sees another; the majority
+            decides, in code. 0 means the default of one — a count is a
+            decision someone makes, and "none" is not one of the choices.
     """
     id: str
     name: str
@@ -139,6 +169,8 @@ class Task:
     timeout_s: int = 0
     requires_human: bool = False
     for_each: ForEach | None = None
+    until: Until | None = None
+    verifiers: int = 0
 
 
 @dataclass

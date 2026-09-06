@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .graph_engine import Node, Edge, EdgeCondition, ForEach, Graph, Task
+from .graph_engine import Node, Edge, EdgeCondition, ForEach, Graph, Task, Until
 
 
 class GraphParseError(Exception):
@@ -47,6 +47,54 @@ def _parse_for_each(node_id: str, task_id: str, raw: object) -> ForEach | None:
             f"integer (0 for the default), got {cap_raw!r}"
         )
     return ForEach(from_task=source, items=key, max_items=cap_raw)
+
+
+def _positive_int(node_id: str, task_id: str, block: str, field: str, raw: object,
+                  default: int, minimum: int = 1) -> int:
+    """A count from a workflow file, refused unless it is a real one.
+
+    ``bool`` is excluded explicitly: it is an ``int`` in Python, and
+    ``stable_for: true`` would silently mean 1 — a stop condition nobody wrote.
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < minimum:
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' {block}{field} must be an integer "
+            f"of at least {minimum}, got {raw!r}"
+        )
+    return raw
+
+
+def _parse_until(node_id: str, task_id: str, raw: object) -> Until | None:
+    """Read a task's ``until`` block, failing closed on anything half-said.
+
+    ``key`` cannot default: there is no list to count without one, and a task
+    that repeated on nothing would run ``max_rounds`` times and call it
+    convergence.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' has an until that is not a mapping"
+        )
+    key = raw.get('key')
+    if not key or not isinstance(key, str):
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' until needs 'key': the payload key "
+            f"holding what a round found"
+        )
+    stable_for = _positive_int(node_id, task_id, "until ", "stable_for",
+                               raw.get('stable_for'), 2)
+    max_rounds = _positive_int(node_id, task_id, "until ", "max_rounds",
+                               raw.get('max_rounds'), 5)
+    if stable_for > max_rounds:
+        raise GraphParseError(
+            f"Node '{node_id}' task '{task_id}' until wants {stable_for} quiet round(s) "
+            f"out of at most {max_rounds} — the stop condition can never be met"
+        )
+    return Until(key=key, stable_for=stable_for, max_rounds=max_rounds)
 
 
 # Agent-runtime enums. Kept here rather than imported from vise.runtime so the
@@ -480,6 +528,9 @@ def parse_graph_yaml(content: str) -> Graph:
                         f"Node '{node_id}' task '{task_id}' has invalid complexity "
                         f"'{complexity}'; must be one of {sorted(_VALID_COMPLEXITY)}"
                     )
+                until = _parse_until(node_id, str(task_id), task_data.get('until'))
+                verifiers = _positive_int(node_id, str(task_id), "", "verifiers",
+                                          task_data.get('verifiers'), 0, minimum=1)
                 for_each = _parse_for_each(node_id, str(task_id), task_data.get('for_each'))
                 if for_each is not None and for_each.from_task not in deps:
                     # The source is what the expansion waits on. Making the
@@ -512,6 +563,8 @@ def parse_graph_yaml(content: str) -> Graph:
                     timeout_s=int(task_data.get('timeout_s', 0) or 0),
                     requires_human=bool(task_data.get('requires_human', False)),
                     for_each=for_each,
+                    until=until,
+                    verifiers=verifiers,
                 ))
 
         advisor_reason = node_data.get('advisor_reason') or node_data.get('reason')

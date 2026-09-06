@@ -94,7 +94,12 @@ def child_id(template_id: str, index: int) -> str:
     return f"{template_id}[{index}]"
 
 
-def _text(value: Any) -> str:
+def text_of(value: Any) -> str:
+    """An item as text: a string verbatim, anything else as stable JSON.
+
+    Public because convergence keys findings the same way an expansion renders
+    them, and two spellings of "the item as text" would drift.
+    """
     return value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
@@ -104,9 +109,9 @@ def render(text: str, item: Any) -> str:
     def substitute(match: re.Match[str]) -> str:
         key = match.group(1)
         if key is None:
-            return _text(item)
+            return text_of(item)
         if isinstance(item, Mapping) and key in item:
-            return _text(item[key])
+            return text_of(item[key])
         return match.group(0)
 
     return _PLACEHOLDER.sub(substitute, text)
@@ -115,7 +120,7 @@ def render(text: str, item: Any) -> str:
 def item_line(index: int, total: int, item: Any) -> str:
     """The line every child's prompt ends with, placeholder or not, so a
     template that never wrote ``{item}`` still tells its child which one it is."""
-    return f"item {index}/{total}: {_text(item)}"
+    return f"item {index}/{total}: {text_of(item)}"
 
 
 def expand(template: Task, items: Sequence[Any], *, cap: int) -> Expansion:
@@ -128,6 +133,12 @@ def expand(template: Task, items: Sequence[Any], *, cap: int) -> Expansion:
     Every list on the child is a fresh copy. The replanner rewrites a task's
     ``dependencies`` in place, and children sharing one list with the template
     would all acquire each other's re-specification tasks.
+
+    ``for_each`` is the one field cleared: a child must never expand again.
+    Everything else carries, ``until`` and ``verifiers`` included, because the
+    template describes the work and the children are the work — so a template
+    declaring both means "sweep each item until it goes quiet", and one
+    declaring a panel means each child gets one.
     """
     kept = tuple(items[:cap])
     total = len(kept)

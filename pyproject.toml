@@ -87,7 +87,7 @@ concurrency = ["thread", "multiprocessing"]
 # said 71, CLAUDE.md said 74 — so "the coverage gate" meant a different number
 # depending on which one you ran, and the one that actually gated was the
 # lowest. Every caller now runs a bare `coverage report`.
-fail_under = 80
+fail_under = 84
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

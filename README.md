@@ -228,7 +228,10 @@ Five rules the run enforces that are easy to state and easy to skip:
   checked by `vise:verifier`, which is given the criteria, the diff and the
   evidence — and deliberately *not* the implementer's prompt or summary. A
   verifier that reads the argument for why the code is right is reviewing the
-  argument.
+  argument. A task may declare `verifiers: 3` and be judged by a panel instead:
+  three briefs from three distinct lenses, none seeing another, and a majority
+  decided in code. No majority blocks, because verifiers who could not decide
+  have not decided.
 - **Retry, escalate and replan are three different moves.** A missing binary
   retries at the same model; work attempted and wrong climbs one rung; a
   failure classified as a spec or architecture problem rebuilds the plan instead
@@ -252,6 +255,19 @@ a list the source never produced blocks the join with the reason rather than
 reading as an empty one. The bundled `research` workflow gathers this way: its
 `split` task writes the sub-questions, and `per-question` becomes one agent per
 entry. `docs/scheduler.md` § Expansion has the rules.
+
+And a task can declare `until` and keep running while it keeps finding — a
+sweep whose right number of passes is a property of the repository rather than
+of whoever wrote the workflow. Each round reports what it found under a
+declared key; the runtime counts what is new against every earlier round, in
+code, and stops after the declared number of quiet rounds or at the declared
+cap. A round is a *passing* attempt, so a failed round takes the escalation
+ladder and is not a quiet one. `docs/scheduler.md` § Convergence has the rules.
+
+Both are inherited by the children of a `for_each` task, like everything else
+a template declares — so "sweep each area until it goes quiet, and have three
+verifiers judge every round" is a shape, and `vise runtime plan` prices it at
+its widest and longest before anything runs.
 
 Three passes sit above the worker, each answering a question it cannot answer
 about itself: a **debugger** classifies a failure that named no kind (the

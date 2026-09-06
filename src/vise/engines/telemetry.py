@@ -121,6 +121,14 @@ _VALID_RUN_EVENTS = frozenset({
     "expansion_truncated",
     "expansion_blocked",
     "joined",
+    # A sweep that keeps going until it stops finding. `round` is the one worth
+    # counting across runs — how many rounds a converging task really needs is
+    # the number that says whether its cap is set anywhere near right.
+    "round",
+    "converged",
+    # How a panel split. Only emitted when there is more than one verifier —
+    # a majority of one is not a split and does not need a line.
+    "panel",
 })
 
 

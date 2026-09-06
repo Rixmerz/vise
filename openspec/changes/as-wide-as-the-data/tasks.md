@@ -33,24 +33,24 @@
 
 ## 5. Convergence
 
-- [ ] 5.1 `Until` on `Task` — `key`, `stable_for`, `max_rounds` — parsed, validated, round-tripped
-- [ ] 5.2 `seen` and `rounds` on `TaskRecord`, persisted
-- [ ] 5.3 After a passing round: new against seen in code; re-dispatch or stop; `round` and `converged` events
-- [ ] 5.4 The next round's brief carries what was found, marked as not to be reported again
-- [ ] 5.5 A failed round takes the ladder and is not a quiet round
-- [ ] 5.6 Tests, one per scenario in the delta spec
+- [x] 5.1 `Until` on `Task` — `key`, `stable_for`, `max_rounds` — parsed, validated, round-tripped
+- [x] 5.2 `seen`, `rounds` and `stable` on `TaskRecord`, persisted
+- [x] 5.3 After a passing round: new against seen in code; re-dispatch or stop; `round` and `converged` events, registered in `_VALID_RUN_EVENTS`
+- [x] 5.4 The next round's brief carries what was found, marked as not to be reported again
+- [x] 5.5 A failed round takes the ladder and is not a quiet round
+- [x] 5.6 Tests, one per scenario in the delta spec
 
 ## 6. The panel
 
-- [ ] 6.1 `verifiers` on `Task`, parsed, validated (≥ 1), round-tripped
-- [ ] 6.2 `LENSES` in `verify.py`; `verifier_brief(..., lens=)` appends the lens's instruction
-- [ ] 6.3 The scheduler dispatches `N`, collects all, decides by majority in code; each verdict its own artifact under `task::verify[k]`
-- [ ] 6.4 The plan prices a panel as `N` verifier runs
-- [ ] 6.5 Tests, one per scenario in the delta spec
+- [x] 6.1 `verifiers` on `Task`, parsed, validated (≥ 1), round-tripped
+- [x] 6.2 `LENSES` in `verify.py`; `verifier_brief(..., lens=)` appends the lens's instruction
+- [x] 6.3 The scheduler dispatches `N`, collects all, decides by majority in code; each verdict its own artifact and its own ledger line under `task::verify[k]`, the decision under the task; `panel` event registered
+- [x] 6.4 The plan prices a panel as `N` verifier runs — and, found while doing it, prices the *one* verifier it always omitted; `--no-verify` reaches the preview
+- [x] 6.5 Tests, one per scenario in the delta spec
 
 ## 7. Docs
 
-- [x] 7.1 `docs/scheduler.md`: § Expansion, and the task-state section says a template never runs — § Convergence and § The panel wait on sections 5 and 6
+- [x] 7.1 `docs/scheduler.md`: § Expansion, § Convergence, § The panel; the task-state section says a template never runs
 - [x] 7.2 `docs/worker-contract.md`: the `items` key a source emits, and what a child's brief carries
 - [x] 7.3 README: the field list and one example
 - [x] 7.4 CHANGELOG

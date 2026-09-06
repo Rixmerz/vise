@@ -309,6 +309,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         tasks, budget=budget,
         project_dir=str(Path(args.project_dir).resolve()),
         change=args.change or "",
+        # The preview prices what this run will do, so the flag that turns
+        # verification off has to reach it — otherwise `--no-verify` prints a
+        # number the run cannot spend.
+        verify=not args.no_verify,
     )
     print(f"node: {node_id}  ({graph_path.name})\n")
     print(preview.render())

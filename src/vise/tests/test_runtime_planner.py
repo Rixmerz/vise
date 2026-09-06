@@ -267,7 +267,7 @@ def test_a_ceiling_that_does_not_fit_is_a_note_not_a_problem():
     floor = _plan(tasks, registry=reg).estimated_cost_usd
     result = _plan(tasks, registry=reg, budget=RunBudget(max_cost_usd=floor + 0.5))
     assert result.problems == ()
-    assert any("every expansion reaches its cap" in n and "stop it for a person" in n
+    assert any("widest and longest" in n and "stop it for a person" in n
                for n in result.notes), result.notes
 
 
@@ -282,3 +282,155 @@ def test_a_plan_without_an_expansion_reads_exactly_as_before():
     assert result.estimated_cost_ceiling_usd == result.estimated_cost_usd
     assert "up to" not in result.render() and "expands" not in result.render()
     assert result.to_dict()["waves"][0]["tasks"][0]["expands"] is None
+
+
+# --- verification is work the run will do, so the plan counts it ------------
+
+
+def _verified(**kw):
+    reg = _registry()
+    reg.agents["verifier"] = AgentSpec(id="verifier", role="verify", description="d",
+                                       model="sonnet", writes=False, capabilities=("verify",))
+    base = dict(id="t", name="t", role="backend", acceptance=["it works"])
+    base.update(kw)
+    return [Task(**base)], reg
+
+
+def test_a_verified_task_is_priced_with_its_verifier():
+    """The plan used to omit verification entirely, understating every verified
+    run by a model call — invisibly, and by three once a panel is declared."""
+    from vise.runtime.routing import TIER_COST_USD, tier_of
+
+    tasks, reg = _verified()
+    one = _plan(tasks, registry=reg)
+    planned = one.waves[0].tasks[0]
+    assert planned.verifiers == 1
+    assert one.estimated_cost_usd == pytest.approx(
+        planned.decision.estimated_cost_usd + TIER_COST_USD[tier_of("sonnet", "medium")]
+    )
+
+
+def test_a_panel_is_priced_as_its_own_number_of_verifier_runs():
+    # The expected number comes from the routing table, not from the plan: the
+    # first draft derived it from `estimated_cost_usd` and so agreed with a
+    # planner that priced no verifier at all.
+    from vise.runtime.routing import TIER_COST_USD, tier_of
+
+    one_verifier = TIER_COST_USD[tier_of("sonnet", "medium")]
+    tasks, reg = _verified(verifiers=3)
+    panel = _plan(tasks, registry=reg)
+    planned = panel.waves[0].tasks[0]
+
+    assert planned.verifiers == 3
+    assert planned.cost_usd == pytest.approx(
+        planned.decision.estimated_cost_usd + 3 * one_verifier
+    )
+    assert panel.estimated_cost_usd == pytest.approx(planned.cost_usd)
+    assert "+3 verifiers" in panel.render()
+    assert panel.to_dict()["waves"][0]["tasks"][0]["verifiers"] == 3
+
+
+def test_a_task_with_no_criteria_is_priced_without_a_verifier():
+    """The scheduler does not verify one, so the plan must not charge for it."""
+    tasks, reg = _verified(acceptance=[], verifiers=3)
+    result = _plan(tasks, registry=reg)
+    assert result.waves[0].tasks[0].verifiers == 0
+    assert result.estimated_cost_usd == pytest.approx(
+        result.waves[0].tasks[0].decision.estimated_cost_usd
+    )
+
+
+def test_verification_switched_off_is_not_priced():
+    tasks, reg = _verified(verifiers=3)
+    off = _plan(tasks, registry=reg, verify=False)
+    assert off.waves[0].tasks[0].verifiers == 0
+    assert "verifiers" not in off.render()
+
+
+def test_a_registry_that_staffs_no_verifier_prices_none():
+    """The scheduler will not dispatch a verifier it cannot resolve."""
+    tasks, _ = _verified(verifiers=3)
+    assert _plan(tasks, registry=_registry()).waves[0].tasks[0].verifiers == 0
+
+
+def test_a_panel_multiplies_across_an_expansion():
+    from vise.engines.graph_engine import ForEach
+
+    tasks, reg = _wide(cap=4)
+    reg.agents["verifier"] = AgentSpec(id="verifier", role="verify", description="d",
+                                       model="sonnet", writes=False, capabilities=("verify",))
+    tasks[1] = Task(id="each", name="Each", role="research", writes=False,
+                    dependencies=["split"], acceptance=["answered"], verifiers=2,
+                    for_each=ForEach(from_task="split", items="sub_questions", max_items=4))
+    result = _plan(tasks, registry=reg)
+    each = {t.task_id: t for w in result.waves for t in w.tasks}["each"]
+    # The join runs no worker and is never verified — but its children inherit
+    # its criteria and its panel, and the children are the work. So the
+    # per-instance cost is a child's, verification included.
+    assert each.verifiers == 2
+    assert each.cost_usd > each.decision.estimated_cost_usd
+    assert each.ceiling_usd == pytest.approx(each.cost_usd * 4)
+
+
+# --- a sweep costs every round it may take ---------------------------------
+
+
+def _sweeping(**kw):
+    from vise.engines.graph_engine import Until
+
+    reg = _registry()
+    reg.agents["researcher"] = AgentSpec(id="researcher", role="research", description="d",
+                                         model="sonnet", writes=False,
+                                         capabilities=("research",))
+    base = dict(id="hunt", name="Hunt", role="research", writes=False,
+                until=Until(key="findings", stable_for=2, max_rounds=5))
+    base.update(kw)
+    return [Task(**base)], reg
+
+
+def test_a_sweeps_floor_is_its_quiet_round_requirement_not_one():
+    """A task needs `stable_for` quiet rounds to stop, so the earliest it can
+    finish is that many rounds — pricing it at one understates every sweep."""
+    tasks, reg = _sweeping()
+    result = _plan(tasks, registry=reg)
+    planned = result.waves[0].tasks[0]
+    assert (planned.repeats.least, planned.repeats.most) == (2, 5)
+    assert planned.cost_usd == pytest.approx(planned.round_cost_usd * 2)
+    assert planned.ceiling_usd == pytest.approx(planned.round_cost_usd * 5)
+    assert "×2..5 rounds" in result.render()
+    assert any("repeats until it stops finding" in n for n in result.notes)
+
+
+def test_a_sweep_that_can_only_run_once_is_priced_once():
+    from vise.engines.graph_engine import Until
+
+    tasks, reg = _sweeping(until=Until(key="f", stable_for=1, max_rounds=1))
+    planned = _plan(tasks, registry=reg).waves[0].tasks[0]
+    assert (planned.repeats.least, planned.repeats.most) == (1, 1)
+    assert planned.cost_usd == pytest.approx(planned.ceiling_usd)
+
+
+def test_rounds_and_width_compose_because_a_child_inherits_the_sweep():
+    """Four items each sweeping four times is sixteen rounds, and the plan has
+    to say so before anyone runs it."""
+    from vise.engines.graph_engine import ForEach, Until
+
+    tasks, reg = _sweeping(
+        dependencies=["split"],
+        for_each=ForEach(from_task="split", items="areas", max_items=4),
+        until=Until(key="findings", stable_for=1, max_rounds=4),
+    )
+    tasks.insert(0, Task(id="split", name="Split", role="research", writes=False))
+    result = _plan(tasks, registry=reg)
+    hunt = {t.task_id: t for w in result.waves for t in w.tasks}["hunt"]
+    assert hunt.ceiling_usd == pytest.approx(hunt.round_cost_usd * 4 * 4)
+    assert "widest and longest" in result.render()
+
+
+def test_a_task_without_until_carries_no_repeats():
+    result = _plan([Task(id="t", name="t", role="test", ownership=["tests/**"])])
+    planned = result.waves[0].tasks[0]
+    assert planned.repeats is None
+    assert planned.cost_usd == pytest.approx(planned.ceiling_usd)
+    assert "rounds" not in result.render()
+    assert result.to_dict()["waves"][0]["tasks"][0]["repeats"] is None

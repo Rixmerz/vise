@@ -371,3 +371,130 @@ def test_the_builder_round_trips_for_each():
     rendered = _generate_graph_yaml(builder)
     assert "max_items" not in rendered
     assert _tasks(rendered)["each"].for_each.max_items == 0
+
+
+# --- until and verifiers: rounds, and how many opinions a pass needs --------
+
+
+SWEEP_YAML = """
+metadata:
+  name: "sweep"
+  version: "1.0"
+nodes:
+  - id: "implement"
+    name: "Implement"
+    node_type: "dag"
+    is_start: true
+    is_end: true
+    tasks:
+      - id: "hunt"
+        name: "Hunt"
+        role: "research"
+        writes: false
+        verifiers: 3
+        until:
+          key: "findings"
+          stable_for: 2
+          max_rounds: 6
+edges: []
+"""
+
+
+def test_until_and_verifiers_survive_the_parser():
+    task = _tasks(SWEEP_YAML)["hunt"]
+    assert task.verifiers == 3
+    assert (task.until.key, task.until.stable_for, task.until.max_rounds) == (
+        "findings", 2, 6
+    )
+
+
+def test_a_task_declaring_neither_runs_once_and_is_verified_once():
+    task = _tasks(PLAIN_YAML)["t1"]
+    assert task.until is None
+    assert task.verifiers == 0, "0 means nobody said, which the runtime reads as one"
+
+
+def test_the_until_defaults_are_the_runtimes_not_zero():
+    yaml_text = SWEEP_YAML.replace("          stable_for: 2\n", "").replace(
+        "          max_rounds: 6\n", "")
+    until = _tasks(yaml_text)["hunt"].until
+    assert until.stable_for >= 1 and until.max_rounds >= until.stable_for
+
+
+@pytest.mark.parametrize(
+    "block,fragment",
+    [
+        ('until:\n          stable_for: 2', "needs 'key'"),
+        ('until:\n          key: "f"\n          stable_for: 9\n          max_rounds: 3',
+         "can never be met"),
+        ('until:\n          key: "f"\n          stable_for: true', "stable_for"),
+        ('until:\n          key: "f"\n          max_rounds: 0', "max_rounds"),
+        ('until: "findings"', "not a mapping"),
+    ],
+)
+def test_a_half_said_until_fails_closed(block, fragment):
+    yaml_text = SWEEP_YAML.replace(
+        'until:\n          key: "findings"\n          stable_for: 2\n          max_rounds: 6',
+        block,
+    )
+    with pytest.raises(GraphParseError) as exc:
+        parse_graph_yaml(yaml_text)
+    assert fragment in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "true", '"three"'])
+def test_a_verifier_count_that_is_not_a_count_fails_closed(value):
+    """Zero verifiers is not one of the choices this field offers — turning
+    verification off is `--no-verify`, and it is a decision about the run."""
+    with pytest.raises(GraphParseError) as exc:
+        parse_graph_yaml(SWEEP_YAML.replace("verifiers: 3", f"verifiers: {value}"))
+    assert "verifiers" in str(exc.value)
+
+
+def test_a_template_may_also_be_a_sweep_and_its_children_inherit_it():
+    """"Sweep each area until it goes quiet" is a shape, not a contradiction.
+
+    This was refused for a release-day's worth of thinking on the grounds that
+    a join dispatches no worker and so has no round to repeat. Half true: the
+    join has none, but the declaration is not about the join. A template's
+    fields describe the work, and the children are the work — `until` is
+    inherited exactly as `verifiers` and `acceptance` are.
+    """
+    from vise.runtime.expand import expand
+
+    yaml_text = FOR_EACH_YAML.replace(
+        "        for_each:",
+        '        verifiers: 2\n        until:\n          key: "findings"\n        for_each:',
+    )
+    template = _tasks(yaml_text)["each"]
+    assert template.until is not None and template.for_each is not None
+
+    child = expand(template, ["one"], cap=4).children[0]
+    assert child.for_each is None, "a child must never expand again"
+    assert child.until == template.until, "but it does sweep"
+    assert child.verifiers == 2
+
+
+def test_the_builder_round_trips_until_and_verifiers():
+    builder = {
+        "metadata": {"name": "b", "version": "1.0"},
+        "nodes": [{
+            "id": "implement", "name": "Implement", "node_type": "dag",
+            "is_start": True, "is_end": True,
+            "tasks": [{
+                "id": "hunt", "name": "Hunt", "role": "research", "writes": False,
+                "verifiers": 3,
+                "until": {"key": "findings", "stable_for": 2, "max_rounds": 6},
+            }],
+        }],
+        "edges": [],
+    }
+    rendered = _generate_graph_yaml(builder)
+    assert "verifiers: 3" in rendered and 'key: "findings"' in rendered
+    task = _tasks(rendered)["hunt"]
+    assert task.verifiers == 3 and task.until.max_rounds == 6
+
+    builder["nodes"][0]["tasks"][0].pop("until")
+    builder["nodes"][0]["tasks"][0].pop("verifiers")
+    rendered = _generate_graph_yaml(builder)
+    assert "until" not in rendered and "verifiers" not in rendered

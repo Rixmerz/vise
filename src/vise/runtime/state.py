@@ -85,6 +85,13 @@ class TaskRecord:
     model: str = ""
     effort: str = ""
     note: str = ""
+    #: For a task declaring `until`: every finding key earlier rounds reported,
+    #: how many rounds have run, and how many of the last ones added nothing.
+    #: Persisted, because a resumed sweep that forgot what it found would
+    #: re-report all of it and call that a round that found something.
+    seen: list[str] = field(default_factory=list)
+    rounds: int = 0
+    stable: int = 0
 
     @property
     def attempt_count(self) -> int:
@@ -103,6 +110,9 @@ class TaskRecord:
             "model": self.model,
             "effort": self.effort,
             "note": self.note,
+            "seen": list(self.seen),
+            "rounds": self.rounds,
+            "stable": self.stable,
         }
 
     @classmethod
@@ -116,6 +126,9 @@ class TaskRecord:
             model=str(data.get("model") or ""),
             effort=str(data.get("effort") or ""),
             note=str(data.get("note") or ""),
+            seen=[str(s) for s in data.get("seen") or []],
+            rounds=int(data.get("rounds") or 0),
+            stable=int(data.get("stable") or 0),
         )
 
 

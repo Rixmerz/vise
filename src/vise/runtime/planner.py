@@ -19,6 +19,7 @@ from vise.runtime import ownership as _own
 from vise.runtime.budget import BudgetLedger
 from vise.runtime.contracts import RunBudget
 from vise.runtime.expand import cap_for
+from vise.runtime.routing import TIER_COST_USD, tier_of
 from vise.runtime.registry import AgentRegistry, AgentSpec, capability_hint
 from vise.runtime.routing import ModelRouter, RoutingDecision
 from vise.runtime.spec_gate import check as spec_gate_check
@@ -39,6 +40,22 @@ class Expands:
 
 
 @dataclass(frozen=True)
+class Repeats:
+    """How many times a sweep may run, at least and at most.
+
+    The floor is not one. A task needs ``stable_for`` quiet rounds to stop, and
+    the earliest that can happen is when every round from the first is quiet —
+    so ``stable_for`` rounds is the cheapest a sweep can be, not one.
+    """
+
+    least: int
+    most: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"least": self.least, "most": self.most}
+
+
+@dataclass(frozen=True)
 class PlannedTask:
     """One task, resolved to who runs it and on what."""
 
@@ -52,12 +69,38 @@ class PlannedTask:
     #: Set for a task that becomes one child per item at run time. The
     #: decision above is priced per child; ``ceiling_usd`` is the cap times it.
     expands: Expands | None = None
+    #: How many verifier runs this task's pass will take, and what one costs.
+    #: Counted because the plan used to omit verification entirely and so
+    #: understated every verified run by a model call — invisibly, and by three
+    #: model calls once a task declares a panel.
+    verifiers: int = 0
+    verify_cost_usd: float = 0.0
+    #: Set for a task that repeats until it stops finding. Both ends are real:
+    #: a sweep cannot finish in fewer than its quiet-round requirement, and it
+    #: will not run past its cap.
+    repeats: Repeats | None = None
+
+    @property
+    def round_cost_usd(self) -> float:
+        """One round of this task, its verification included."""
+        return self.decision.estimated_cost_usd + self.verifiers * self.verify_cost_usd
+
+    @property
+    def cost_usd(self) -> float:
+        """The least one instance of this task can cost."""
+        return self.round_cost_usd * (self.repeats.least if self.repeats else 1)
 
     @property
     def ceiling_usd(self) -> float:
-        """The most this task can cost: its estimate, times its cap if it expands."""
+        """The most this task can cost: every round, times its cap if it expands.
+
+        Both multipliers, because they compose: a sweep declared on a template
+        is inherited by every child, so four items each sweeping four times is
+        sixteen rounds and the plan has to say so before anyone runs it.
+        """
         width = self.expands.cap if self.expands is not None else 1
-        return self.decision.estimated_cost_usd * width
+        rounds = self.repeats.most if self.repeats else 1
+        return self.round_cost_usd * rounds * width
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +112,10 @@ class PlannedTask:
             "writes": self.writes,
             "routing": self.decision.to_dict(),
             "expands": self.expands.to_dict() if self.expands is not None else None,
+            "verifiers": self.verifiers,
+            "repeats": self.repeats.to_dict() if self.repeats is not None else None,
+            "estimated_cost_usd": round(self.cost_usd, 4),
+            "estimated_cost_ceiling_usd": round(self.ceiling_usd, 4),
         }
 
 
@@ -87,7 +134,7 @@ class PlannedWave:
 
     @property
     def estimated_cost_usd(self) -> float:
-        return sum(t.decision.estimated_cost_usd for t in self.tasks)
+        return sum(t.cost_usd for t in self.tasks)
 
     @property
     def estimated_cost_ceiling_usd(self) -> float:
@@ -166,6 +213,11 @@ class RunPlan:
                         f"  ×1..{t.expands.cap} — one per item of "
                         f"{t.expands.source}'s '{t.expands.key}'"
                     )
+                if t.repeats is not None:
+                    width += (f"  ×{t.repeats.least}..{t.repeats.most} rounds "
+                              f"until it stops finding")
+                if t.verifiers > 1:
+                    width += f"  +{t.verifiers} verifiers"
                 out.append(
                     f"  {t.task_id:<24} {agent:<20} "
                     f"{t.decision.model}/{t.decision.effort}{width}"
@@ -175,8 +227,8 @@ class RunPlan:
         total = f"\ntotal: {self.task_count} task(s), ~${self.estimated_cost_usd:.2f}"
         if self.estimated_cost_ceiling_usd > self.estimated_cost_usd:
             total += (
-                f" — up to ~${self.estimated_cost_ceiling_usd:.2f} if every "
-                f"expansion reaches its cap"
+                f" — up to ~${self.estimated_cost_ceiling_usd:.2f} at its "
+                f"widest and longest"
             )
         out.append(total)
         if self.concurrency_ceiling:
@@ -305,6 +357,20 @@ def _split_on_ownership(planned: Sequence[PlannedTask], max_parallel: int) -> li
     return chunked
 
 
+def _verify_cost(registry: AgentRegistry) -> float:
+    """What one verifier run costs, from the agent that would run it.
+
+    Zero when nobody staffs the ``verify`` role — the scheduler does not
+    dispatch a verifier it cannot resolve, so a plan that priced one would be
+    charging for a call that will not happen.
+    """
+    agent = registry.resolve("verify", writes=None).agent
+    if agent is None:
+        return 0.0
+    tier = tier_of(agent.model or "sonnet", agent.effort or "medium")
+    return TIER_COST_USD[min(tier if tier is not None else 1, len(TIER_COST_USD) - 1)]
+
+
 def plan(
     tasks: Sequence[Any],
     *,
@@ -315,6 +381,7 @@ def plan(
     project_dir: str | None = None,
     change: str = "",
     spent_usd: float = 0.0,
+    verify: bool = True,
 ) -> RunPlan:
     """Turn a DAG node's tasks into a readable, costed, checked plan.
 
@@ -336,6 +403,7 @@ def plan(
         ledger.spent = replace(ledger.spent, cost_usd=ledger.spent.cost_usd + spent_usd)
     remaining = ledger.remaining_usd()
 
+    verify_cost = _verify_cost(registry) if verify else 0.0
     raw_waves, unschedulable = dependency_waves(tasks, completed)
     problems: list[str] = []
     if project_dir is not None:
@@ -356,6 +424,7 @@ def plan(
     running_cost = 0.0
     running_ceiling = 0.0
     expanding: list[PlannedTask] = []
+    planned_repeating: list[PlannedTask] = []
     index = 0
     for raw in raw_waves:
         planned: list[PlannedTask] = []
@@ -388,7 +457,6 @@ def plan(
                     problems.append(f"task '{task.id}' is unroutable: {detail}")
             budget_left = None if remaining is None else max(0.0, remaining - running_cost)
             decision = router.route(task, agent=agent, budget_remaining_usd=budget_left)
-            running_cost += decision.estimated_cost_usd
             if not decision.affordable:
                 problems.append(
                     f"task '{task.id}' does not fit the remaining run budget "
@@ -399,6 +467,25 @@ def plan(
                 Expands(source=fe.from_task, key=fe.items, cap=cap_for(task))
                 if fe is not None else None
             )
+            # Verification engages only for a task that declares criteria — the
+            # same condition the scheduler applies, so the plan prices what the
+            # run will actually do.
+            #
+            # Counted for an expanding task too, and that is not a slip. The
+            # join itself is never verified: it dispatches no worker and so
+            # produces no pass to check. But its children inherit its criteria
+            # and its panel, and the children are the work — so the per-instance
+            # cost below is a child's, verification included, and the ceiling
+            # multiplies it by the cap.
+            verifiers = 0
+            if verify_cost and getattr(task, "acceptance", None):
+                verifiers = max(1, int(getattr(task, "verifiers", 0) or 0))
+            un = getattr(task, "until", None)
+            repeats = (
+                Repeats(least=max(1, min(un.stable_for, un.max_rounds)),
+                        most=max(1, un.max_rounds))
+                if un is not None else None
+            )
             pt = PlannedTask(
                 task_id=task.id,
                 name=getattr(task, "name", task.id),
@@ -408,10 +495,16 @@ def plan(
                 ownership=tuple(getattr(task, "ownership", ()) or ()),
                 writes=bool(getattr(task, "writes", True)),
                 expands=expands,
+                verifiers=verifiers,
+                verify_cost_usd=verify_cost,
+                repeats=repeats,
             )
+            running_cost += pt.cost_usd
             running_ceiling += pt.ceiling_usd
             if expands is not None:
                 expanding.append(pt)
+            if repeats is not None:
+                planned_repeating.append(pt)
             planned.append(pt)
         for group in _split_on_ownership(planned, (budget or RunBudget()).max_parallel):
             waves.append(PlannedWave(index=index, tasks=tuple(group)))
@@ -420,6 +513,12 @@ def plan(
     ceiling = _concurrency_ceiling(raw_waves)
     declared = (budget or RunBudget()).max_parallel
     notes: list[str] = []
+    for pt in planned_repeating:
+        notes.append(
+            f"{pt.task_id} repeats until it stops finding — at least "
+            f"{pt.repeats.least} round(s) and at most {pt.repeats.most}, each "
+            f"priced in full"
+        )
     for pt in expanding:
         # The width is not a number this plan has. Saying so is the whole of
         # what it can honestly say, plus the one fact that bounds it.
@@ -428,12 +527,13 @@ def plan(
             f"{pt.expands.source}'s '{pt.expands.key}', at most {pt.expands.cap}; "
             f"the shape line counts it once"
         )
-    if expanding and remaining is not None and running_ceiling > remaining >= running_cost:
+    if (expanding or planned_repeating) and remaining is not None \
+            and running_ceiling > remaining >= running_cost:
         # A note and not a problem, by the same rule as over-declared
         # parallelism: the plan is correct and will run, and admission stops
         # it for a person when the money runs out — which is the design.
         notes.append(
-            f"if every expansion reaches its cap the run costs ~${running_ceiling:.2f} "
+            f"at its widest and longest the run costs ~${running_ceiling:.2f} "
             f"and the budget leaves ~${remaining:.2f} — admission will stop it for a "
             f"person when the money runs out"
         )

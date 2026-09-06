@@ -123,6 +123,107 @@ the list; the count, the cap and the join are the scheduler's. A `for_each` run
 without an artifact store blocks rather than guesses, and the CLI always
 supplies one.
 
+## Convergence
+
+The other shape the task list could not express. "Find the duplicated
+helpers", "find the untested branches", "find the case against" are not one
+attempt at a known job — the right number of passes is a property of the
+repository. Run once and the tail is missed, because the last round is where
+the hard one is; run a fixed five and four are paid for to report nothing.
+
+```yaml
+- id: "hunt"
+  role: "research"
+  writes: false
+  until:
+    key: "findings"     # the payload key a round reports under
+    stable_for: 2       # quiet rounds required to stop
+    max_rounds: 5       # and the bound if it never goes quiet
+```
+
+**A round is a passing attempt, and an attempt is not a round.** A failed
+round is a failed attempt: it takes the escalation ladder, exactly as it would
+without `until`, and does not count as quiet. Folding "found nothing" into
+"was wrong" is the conflation of `INCONCLUSIVE` with `FAIL` that `Verdict`
+exists to prevent — and it would send the next round to a bigger model to fix
+code that may be fine.
+
+**The deduplication is code.** After each passing round the scheduler keys
+what it reported, counts the keys no earlier round had, and decides. Nothing
+is asked whether a finding is new: an agent asked that says yes, having no
+memory of the other rounds and every incentive to have found something. Keys
+are the item's text, matched exactly — a near-match rule would decide two
+genuinely different findings are one and the second would never be reported,
+which is a silent loss. Exact matching errs toward one more round, which
+costs money instead of a finding.
+
+Each later round's brief carries what the earlier ones found, marked as not to
+be reported again. That is not politeness: a round that cannot see them
+re-reports them, the runtime correctly counts that as nothing new, and the
+round is paid for and buys a duplicate. The list is capped, and the cap is
+stated in the line the worker reads rather than applied behind it.
+
+Where a task also declares acceptance criteria, every round is verified — the
+verifier judges that round's pass, and whether the sweep is finished is a
+different question, counted rather than asked. `seen`, `rounds` and `stable`
+live on the task's record and are persisted, so a resumed sweep continues
+rather than starting over; one that forgot what it found would re-report all
+of it and call that a round that found something.
+
+Two ways to stop, and the record says which: `stable_for` consecutive quiet
+rounds is convergence, and `max_rounds` is a bound — the note then says the
+sweep may not be finished, because it may not be.
+
+`vise runtime plan` prices a sweep as a range, and its floor is not one round:
+the earliest a sweep can stop is when every round from the first is quiet, so
+`stable_for` rounds is the cheapest it can be. Declared on a task that also
+expands, the sweep is inherited by every child and the two multiply — four
+items each sweeping four times is sixteen rounds, and the plan says so before
+anyone runs it.
+
+## The panel
+
+`SUCCEEDED` needs a verifier. A task may declare that it needs more than one:
+
+```yaml
+- id: "auth"
+  role: "backend"
+  acceptance: ["an expired token is rejected with 401"]
+  verifiers: 3
+```
+
+Each member is briefed from a different lens — the criteria as written,
+whether the quoted evidence reproduces, what an adversary would try, what the
+change broke that nobody asked it to — cycling when more are asked for than
+there are lenses. Distinct questions rather than one question asked louder:
+three agents given one prompt return one opinion three times, and the
+disagreement that makes a panel worth its price has to be built into what they
+are each asked. No member is told what the others think, or that there are
+others; a verifier who knows two colleagues already passed is deciding whether
+to disagree with them.
+
+The decision is code. A majority of passes succeeds; a majority of fails
+escalates with the union of the failing members' reasons — and only theirs,
+because a passing member's notes would send the next attempt to fix what
+somebody thought was already right. Anything else is `BLOCKED`: verifiers who
+could not decide have not decided, and this gate fails closed like every
+other. A majority rather than unanimity because the lenses differ on purpose —
+the member checking whether evidence reproduces may have nothing to say about
+a criterion that is about wording, and unanimity would let the lens least able
+to evaluate veto the ones that could.
+
+Each member's verdict is filed under its own id (`auth::verify[2]`) and
+charged to the ledger under it, so a panel leaves three readable answers and
+`vise runtime budget` can say what three opinions cost. The panel's decision
+is filed under the task, which is what a downstream task reads. A panel of one
+is exactly the single verifier that shipped before panels existed: same id,
+same brief, same artifact, and no `panel` event, because a majority of one is
+not a split.
+
+`vise runtime plan` prices the verification a task will actually get. It used
+to price none, understating every verified run by a model call — invisibly,
+and by three once a task declares a panel.
+
 ## The spec gate
 
 Asked once, before the first dispatch, whenever the run contains a task that

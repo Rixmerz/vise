@@ -6,6 +6,8 @@ who reads the argument for why the code is right is reviewing the argument.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from vise.engines.graph_engine import Task
@@ -25,7 +27,9 @@ from vise.runtime.contracts import (
 from vise.runtime.registry import AgentRegistry, AgentSpec
 from vise.runtime.scheduler import Scheduler, SchedulerConfig
 from vise.runtime.verify import (
+    LENSES,
     REVIEW_PROBES,
+    VERIFY_INSTRUCTIONS,
     Verification,
     debugger_brief,
     parse_classification,
@@ -341,3 +345,179 @@ def test_a_failed_dependency_is_not_released_by_a_rejected_verification():
     ]
     state = _run(tasks, worker)
     assert state.tasks["next"].state is not TaskState.SUCCEEDED
+
+
+# --- a panel: how many independent opinions SUCCEEDED needs -----------------
+
+
+class PanelWorker(VerifyingWorker):
+    """Answers each panel member from a script, and records their briefs."""
+
+    def __init__(self, verdicts, **kw):
+        super().__init__(verdicts, **kw)
+        self.verify_briefs = []
+
+    def run(self, brief):
+        if brief.role == "verify":
+            self.verify_briefs.append(brief)
+        return super().run(brief)
+
+
+def test_the_default_is_one_verifier_and_its_brief_is_unchanged():
+    worker = PanelWorker([Verdict.PASS])
+    state = _run([_task()], worker)
+    assert len(worker.verify_briefs) == 1
+    assert worker.verify_briefs[0].task_id == "auth::verify", "the id every reader knows"
+    assert worker.verify_briefs[0].prompt == VERIFY_INSTRUCTIONS, "no lens appended"
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED
+
+
+def test_a_panel_is_briefed_from_distinct_lenses_and_none_sees_another():
+    worker = PanelWorker([Verdict.PASS] * 3)
+    _run([_task(verifiers=3)], worker)
+
+    briefs = worker.verify_briefs
+    assert len(briefs) == 3
+    assert len({b.task_id for b in briefs}) == 3, "each files under its own id"
+    assert len({b.prompt for b in briefs}) == 3, "three questions, not one asked thrice"
+    for brief in briefs:
+        rendered = brief.render()
+        assert "SECRET IMPLEMENTER INSTRUCTIONS" not in rendered
+        assert "TRUST ME THIS IS CORRECT" not in rendered
+        for other in briefs:
+            if other is not brief:
+                assert other.task_id not in rendered, "no member knows the others exist"
+
+
+def test_a_majority_passes_and_every_verdict_is_kept(tmp_path):
+    store = ArtifactStore(tmp_path, "r1")
+    worker = PanelWorker([Verdict.PASS, Verdict.FAIL, Verdict.PASS])
+    state = _run([_task(verifiers=3)], worker, artifacts=store)
+
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED
+    assert "2 pass" in state.tasks["auth"].note and "1 fail" in state.tasks["auth"].note
+    assert store.get("auth", "verification").payload["verdict"] == "pass", "the decision"
+    kept = [store.get(f"auth::verify[{i}]", "verification") for i in (1, 2, 3)]
+    assert [k.payload["verdict"] for k in kept] == ["pass", "fail", "pass"], (
+        "the dissent survives — a panel that only recorded its conclusion "
+        "would hide the one member who disagreed"
+    )
+
+
+def test_a_majority_fails_with_the_union_of_the_failing_reasons():
+    """And only theirs. A passing member's notes in a failing panel would send
+    the next attempt to fix what somebody thought was already right."""
+
+    class _Chatty(PanelWorker):
+        """Every member speaks in `reasons`. The failing ones carry no `unmet`
+        on purpose: `unmet` outranks `reasons` in the retry's summary, so a
+        passing member's note smuggled into `reasons` would be invisible behind
+        it — which is how the first draft of this test passed with the rule
+        removed."""
+
+        def run(self, brief):
+            result = super().run(brief)
+            if brief.role != "verify" or not result.artifacts:
+                return result
+            payload = dict(result.artifacts[0].payload)
+            payload.pop("unmet", None)
+            payload["reasons"] = (
+                ["MINOR NIT FROM A MEMBER WHO PASSED IT"] if payload["verdict"] == "pass"
+                else ["the 401 path is never exercised"]
+            )
+            return replace(result, artifacts=(
+                replace(result.artifacts[0], payload=payload),))
+
+    worker = _Chatty([Verdict.FAIL, Verdict.FAIL, Verdict.PASS] + [Verdict.PASS] * 3)
+    state = _run([_task(verifiers=3)], worker)
+
+    rejected = [b for b in worker.briefs if b.role != "verify"][1]
+    assert "the 401 path is never exercised" in rejected.render()
+    assert "MINOR NIT" not in rejected.render(), (
+        "the passing member's reasons did not reach the retry"
+    )
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED, "the retry then passed"
+
+
+def test_no_majority_either_way_blocks_because_they_did_not_decide():
+    worker = PanelWorker([Verdict.PASS, Verdict.FAIL, Verdict.INCONCLUSIVE])
+    state = _run([_task(verifiers=3)], worker)
+
+    record = state.tasks["auth"]
+    assert record.state is TaskState.BLOCKED
+    assert "did not agree" in record.note
+    assert "1 pass" in record.note and "1 fail" in record.note
+
+
+def test_a_panel_of_two_that_splits_blocks_rather_than_passing():
+    """Half is not a majority, and a gate that cannot decide fails closed."""
+    worker = PanelWorker([Verdict.PASS, Verdict.FAIL])
+    assert _run([_task(verifiers=2)], worker).tasks["auth"].state is TaskState.BLOCKED
+
+
+def test_the_decision_waits_for_the_whole_panel():
+    """Deciding on the first answer would be the majority of whoever was fastest.
+
+    The verdicts are chosen so the two behaviours differ: the first answer is a
+    pass, and the panel is a majority fail. A panel that decided early would
+    accept the work on one opinion.
+    """
+    worker = PanelWorker([Verdict.PASS, Verdict.FAIL, Verdict.FAIL] + [Verdict.PASS] * 3)
+    state = _run([_task(verifiers=3)], worker)
+    assert len(worker.verify_briefs) == 6, "the first panel, then the retry's"
+    assert len([b for b in worker.briefs if b.role != "verify"]) == 2, (
+        "the majority rejected the first attempt, so there was a second"
+    )
+    # One decision per panel, not one per answer. The task outcome alone does
+    # not discriminate: a panel that decided on every arriving verdict reaches
+    # the same end by a different and much noisier route.
+    assert len([e for e in state.events if e["kind"] == "panel"]) == 2
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED
+
+
+def test_every_member_of_a_panel_is_charged_to_the_run():
+    worker = PanelWorker([Verdict.PASS] * 3)
+    state = _run([_task(verifiers=3)], worker)
+    charged = {k: v.cost_usd for k, v in state.ledger.by_task.items() if "verify" in k}
+    assert len(charged) == 3, charged
+    assert sum(charged.values()) == pytest.approx(0.85 * 3)
+
+
+def test_a_panel_that_loses_a_member_to_a_crash_still_decides():
+    class _Crashing(PanelWorker):
+        def run(self, brief):
+            if brief.role == "verify" and len(self.verify_briefs) == 1:
+                self.verify_briefs.append(brief)
+                raise RuntimeError("the verifier died")
+            return super().run(brief)
+
+    worker = _Crashing([Verdict.PASS, Verdict.PASS])
+    state = _run([_task(verifiers=3)], worker)
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED, (
+        "two passes out of three is still a majority"
+    )
+
+
+def test_the_panel_split_reaches_the_event_log():
+    worker = PanelWorker([Verdict.PASS, Verdict.PASS, Verdict.FAIL])
+    state = _run([_task(verifiers=3)], worker)
+    panel = [e for e in state.events if e["kind"] == "panel"]
+    assert len(panel) == 1 and panel[0]["verdict"] == "pass"
+    assert "2 pass" in panel[0]["split"]
+    lenses = {e.get("lens") for e in state.events if e["kind"] == "verifying"}
+    assert lenses == {name for name, _ in LENSES[:3]}
+
+
+def test_a_single_verifier_emits_no_panel_event_and_no_lens():
+    """A majority of one is not a split, and a reader of an ordinary run should
+    not have to learn what a lens is."""
+    state = _run([_task()], PanelWorker([Verdict.PASS]))
+    assert not [e for e in state.events if e["kind"] == "panel"]
+    assert all("lens" not in e for e in state.events if e["kind"] == "verifying")
+
+
+def test_a_task_with_no_criteria_gets_no_panel_however_many_it_asks_for():
+    worker = PanelWorker([Verdict.PASS] * 3)
+    state = _run([_task(acceptance=[], verifiers=3)], worker)
+    assert not worker.verify_briefs
+    assert state.tasks["auth"].state is TaskState.SUCCEEDED

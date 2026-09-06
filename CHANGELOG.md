@@ -48,6 +48,69 @@ you may already depend on, it says so under **Behaviour change**.
   sections — rounds until nothing new, and a verifier panel deciding by
   majority — are designed and open.
 
+- **`until` — a sweep that runs while it keeps finding.** The other shape a
+  `dag` node could not express. "Find the duplicated helpers", "find the
+  untested branches" are not one attempt at a known job: the right number of
+  passes is a property of the repository. Run once and the tail is missed,
+  because the last round is where the hard one is; run a fixed five and four
+  are paid for to report nothing. A task may now declare `until` — `key` names
+  the payload list a round reports under, `stable_for` how many quiet rounds
+  end it, `max_rounds` the bound if it never goes quiet.
+
+  Two rules carry it. **A round is a passing attempt, and an attempt is not a
+  round**: a failed round takes the escalation ladder exactly as it would
+  without `until` and does not count as quiet, because folding "found nothing"
+  into "was wrong" is the conflation of `INCONCLUSIVE` with `FAIL` that
+  `Verdict` exists to prevent. And **the deduplication is code** — an agent
+  asked "is this one new" says yes, so the runtime keys what each round
+  reported and counts the new ones itself, matching exactly rather than
+  fuzzily, because a near-match rule loses a finding silently while an exact
+  one costs at most another round. Each later round's brief carries what the
+  earlier ones found, capped, with the cap stated in the line the worker
+  reads. `seen`, `rounds` and `stable` are persisted, so a resumed sweep
+  continues instead of re-reporting everything and calling that a round that
+  found something. Where a task also declares acceptance criteria, every round
+  is verified.
+
+  One thing this was nearly shipped refusing: a task declaring both `for_each`
+  and `until` was rejected on the grounds that a join dispatches no worker and
+  so has no round to repeat. Half true — the join has none, but the
+  declaration is not about the join. A template's fields describe the work and
+  the children are the work, so `until` is inherited exactly as `verifiers`
+  and `acceptance` are, and "sweep each area until it goes quiet" is a shape
+  rather than a contradiction. Found by running it.
+
+- **`verifiers` — how many independent opinions `SUCCEEDED` needs.** A task
+  may declare a panel, and each member is briefed from a different lens — the
+  criteria as written, whether the quoted evidence reproduces, what an
+  adversary would try, what the change broke that nobody asked it to. Distinct
+  questions rather than one asked louder: three agents given one prompt return
+  one opinion three times. No member is told what the others think or that
+  there are others. The decision is code: a majority of passes succeeds, a
+  majority of fails escalates with the union of the *failing* members' reasons,
+  and anything else blocks, because verifiers who could not decide have not
+  decided. Each verdict is filed and charged under its own id, so the dissent
+  survives and `vise runtime budget` can say what three opinions cost; the
+  decision is filed under the task, which is what a downstream task reads. A
+  panel of one is byte-for-byte the single verifier that shipped before — same
+  id, same brief, same artifact, no `panel` event.
+
+- **Behaviour change — `vise runtime plan` now prices verification and
+  rounds.** It priced neither, so every verified run was understated by a model
+  call, invisibly. A task that declares acceptance criteria is now priced with
+  the verifier it will actually get and a panel with all of them; a sweep is
+  priced as a range whose floor is its quiet-round requirement rather than one,
+  since the earliest it can stop is when every round from the first is quiet;
+  and an expanding task carries both into its ceiling, because a template's
+  `until` and `verifiers` are inherited by every child and the multipliers
+  compose. `--no-verify` reaches the preview, so the number it prints is one
+  the run can spend. Plans will read higher than they did, in the direction of
+  the truth.
+
+- **The coverage ratchet moves to 84.** The real number is 85, and the floor
+  had been sitting at 80 while the suite ran four points above it — a ratchet
+  that lags is one that lets a regression through unnoticed.
+
 - **A declined replan says so on the task that asked for it.** Handed the live
   task list, the default replanner finds the re-specification it already
   added and declines the second time, which is the bound `replan.py` always

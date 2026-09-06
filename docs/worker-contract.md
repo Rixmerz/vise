@@ -122,6 +122,10 @@ The verifier never sees the worker's reasoning, only its output. That is the
 whole point: a reviewer who reads the argument for why the code is right is
 reviewing the argument.
 
+A task may declare `verifiers: N` and be judged by a panel: N briefs from N
+distinct lenses, none seeing another's answer or knowing the others exist, and
+a majority decided in code. `scheduler.md` § The panel has the rules.
+
 Above the verifier sits an adversarial **reviewer**, which is not asked "is this
 correct". It is asked to find reasons this should not ship, and its charter names
 the probes: boundary conditions, malformed and non-ASCII input, concurrency,
@@ -150,6 +154,11 @@ entry up to the cap, and the join writes a `collection` artifact under the
 template's id. A child's brief ends with `item i/n: …` naming the entry it
 owns, and a task downstream of the template receives the children's artifacts
 beside the collection. `scheduler.md` § Expansion has the rules.
+
+A sweep reports the same way. A task declaring `until` emits what it found
+under the declared key each round, and the runtime counts the keys no earlier
+round had; the next round's brief carries the rest, marked as not to be
+reported again. `scheduler.md` § Convergence has the rules.
 
 ## What a worker never does
 

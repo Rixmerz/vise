@@ -108,7 +108,7 @@ def _briefed(worker: MockWorker) -> list[str]:
 # --- the pure half ---------------------------------------------------------
 
 
-def test_the_default_cap_is_not_wide_research_wide():
+def test_the_default_cap_is_not_wide_research_wide():  # noqa: D401
     """A child is a `claude -p` session on this machine, not a VM on a fleet."""
     assert 1 <= ex.DEFAULT_MAX_ITEMS <= 50
 
