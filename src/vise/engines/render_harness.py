@@ -274,6 +274,15 @@ _URL_RE = re.compile(r"^(https?|file)://", re.IGNORECASE)
 _SCREENSHOT_TARGET_RE = re.compile(r"^(?:https?|file)://\S", re.IGNORECASE)
 
 
+class PageNotDelivered(RuntimeError):
+    """The server did not serve the page the gate was asked to measure.
+
+    Mirrors ``BrowserUnavailable``: both are conditions under which a render
+    gate has verified nothing, and both must reach the caller as a failure
+    rather than as an empty-and-therefore-clean result.
+    """
+
+
 class BrowserUnavailable(RuntimeError):
     """Raised when Playwright or its Chromium build is missing.
 
@@ -330,6 +339,37 @@ def _resolve_style_props(extra_style_props: list[str] | None) -> list[str]:
     return style_props
 
 
+def _navigate(page: Any, target: str, wait_until: str, timeout_ms: int) -> dict[str, Any]:
+    """Load ``target`` and report what the server actually delivered.
+
+    The gates measured whatever rendered and never looked at the HTTP status,
+    so a 404 page measured as a clean one: no overflow, no collisions, nothing
+    off-document, `ui_layout` green. A gate that fails closed on a missing
+    browser and passes on a page that was never served is inconsistent about
+    the only thing it claims — that a pass means something was checked.
+
+    Returns ``{"status", "ok", "url"}``. A ``file://`` target and inline HTML
+    have no status and report ``ok`` — there is no server to have failed.
+    """
+    if not _is_url(target):
+        page.set_content(target, wait_until=wait_until, timeout=timeout_ms)
+        return {"status": None, "ok": True, "url": "", "kind": "inline"}
+    response = page.goto(target, wait_until=wait_until, timeout=timeout_ms)
+    if response is None:
+        # A `file://` navigation, or one served from the back-forward cache.
+        # Neither is a failure and neither has a status to report.
+        return {"status": None, "ok": True, "url": target, "kind": "no-response"}
+    status = int(response.status)
+    return {
+        "status": status,
+        # 3xx is already followed by the time this returns, so anything that is
+        # not 2xx is an error document being measured as if it were the page.
+        "ok": 200 <= status < 300,
+        "url": response.url,
+        "kind": "http",
+    }
+
+
 def _extract_on_browser(
     browser: Browser,
     target: str,
@@ -342,16 +382,16 @@ def _extract_on_browser(
 ) -> dict[str, Any]:
     page = browser.new_page(viewport={"width": int(breakpoint), "height": int(height)})
     try:
-        if _is_url(target):
-            page.goto(target, wait_until=wait_until, timeout=timeout_ms)
-        else:
-            page.set_content(target, wait_until=wait_until, timeout=timeout_ms)
+        delivery = _navigate(page, target, wait_until, timeout_ms)
         # Let layout + image decode settle.
         page.wait_for_timeout(50)
-        return page.evaluate(
+        snapshot = page.evaluate(
             _EXTRACTOR_JS,
             {"selectorsById": selectors_by_id, "styleProps": style_props},
         )
+        if isinstance(snapshot, dict):
+            snapshot["delivery"] = delivery
+        return snapshot
     finally:
         page.close()
 
@@ -444,10 +484,14 @@ def extract_states(
                 viewport={"width": int(breakpoint), "height": int(height)}
             )
             try:
-                if _is_url(target):
-                    page.goto(target, wait_until=wait_until, timeout=timeout_ms)
-                else:
-                    page.set_content(target, wait_until=wait_until, timeout=timeout_ms)
+                delivery = _navigate(page, target, wait_until, timeout_ms)
+                if not delivery["ok"]:
+                    # Same reasoning as the geometry path: contrast measured on
+                    # an error document is contrast of the error document.
+                    raise PageNotDelivered(
+                        f"{target} returned HTTP {delivery['status']} — "
+                        f"the colours below would be the error page's"
+                    )
                 page.wait_for_timeout(50)
 
                 for state in states:

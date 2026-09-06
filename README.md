@@ -361,7 +361,7 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `no_new_deps` | no dependency manifest gained entries | not a git repo, no manifest, unresolvable base |
 | `diff_scope` | the diff stays inside declared `allow:` globs | not a git repo, or nothing changed |
 | `design_tokens` | colours, sizes, spacing and radii written as literals where the project declares a token | **never** — no external tool, so it always runs |
-| `ui_layout` | rendered overflow, clipping, collision and off-document content, per breakpoint | **never** — fails closed on a missing browser or an unconfigured target |
+| `ui_layout` | rendered overflow, clipping, collision and off-document content, per breakpoint | **never** — fails closed on a missing browser, an unconfigured target, or a target the server did not serve |
 | `ui_contrast` | rendered foreground against the *effective* background (nearest painting ancestor), WCAG 2.2 AA | **never** — same as `ui_layout` |
 | `symbol_index` | livespec has a finished index for this repo (`.mcp-docs/docs.db`) | only when the database exists and cannot be read — a *known* absence fails closed |
 | `trace_captured` | a flowtrace log from this run exists and holds events | only when the trace cannot be read; no trace, or an empty one, fails closed |

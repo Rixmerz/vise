@@ -51,6 +51,34 @@ Also fixed in the same pass, and the same class of error:
   Playwright demands its own Chromium revision. It is two installs. The
   orchestration skill said one.
 
+### Fixed — a 404 measured as a clean page, and both render gates passed it
+
+`ui_layout` and `ui_contrast` navigate to each `design.targets` entry and
+measure what renders. Nothing read the HTTP status. An error page has no
+overflow, no collisions and nothing off-document, so a target that 404s came
+back with a handful of boxes that pass every check — reported as "N elements
+inspected, no blocking defects".
+
+These are the gates that fail closed on a missing browser and on an empty
+target list, on the stated principle that a gate which could not check must
+never report success. They were fail-closed about their own preconditions and
+fail-open about whether they had been handed the page at all, which is the
+larger of the two questions.
+
+The harness now records what the server delivered, `check_snapshot` returns a
+single `page_not_delivered` error before running any geometry (one defect
+naming the cause beats forty about an error page's boxes), and
+`derive_candidates` refuses outright rather than deriving an inspection set
+from an error document. `file://` targets and inline HTML carry no status and
+are never flagged — there is no server that could have failed. The evidence
+says `HTTP 404`, not `ui_layout raised`, because a served error page is not
+vise's bug and an evidence line that reads like one sends the reader to the
+wrong repository.
+
+Found by reading layout-inspector 0.4.0, which added page diagnostics to every
+result for exactly this reason, and checking whether vise's own gates did the
+same. They did not.
+
 ### Added — `vise neighbours`, and the tracing node finally has a tracer
 
 `strategy-flowtrace` has carried that name since vise's first commit while

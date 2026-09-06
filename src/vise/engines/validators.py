@@ -1672,6 +1672,11 @@ class UiLayoutValidator(_RenderGate):
     name: str = "ui_layout"
 
     def run(self, goal: Goal) -> ValidatorRecord:
+        # Bound before the `try`: an `except PageNotDelivered` whose name was
+        # imported inside the block it guards raises NameError the moment
+        # anything above the import fails.
+        from vise.engines.render_harness import PageNotDelivered
+
         try:
             config, failure = self._prepare(goal)
             if failure is not None:
@@ -1718,6 +1723,12 @@ class UiLayoutValidator(_RenderGate):
                         errors.append(f"{target}: {defect.detail}")
                     else:
                         warns += 1
+        except PageNotDelivered as exc:
+            # Not an internal error: the server answered, with the wrong page.
+            # Saying so beats "ui_layout raised", which reads as vise's bug.
+            return _design_failure(
+                self.name, self.weight, f"{self.name}: {exc}"
+            )
         except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
             return _design_failure(self.name, self.weight, f"{self.name} raised: {exc}")
 
@@ -1745,6 +1756,8 @@ class UiContrastValidator(_RenderGate):
     name: str = "ui_contrast"
 
     def run(self, goal: Goal) -> ValidatorRecord:
+        from vise.engines.render_harness import PageNotDelivered
+
         try:
             config, failure = self._prepare(goal)
             if failure is not None:
@@ -1812,6 +1825,10 @@ class UiContrastValidator(_RenderGate):
                             f"{f.required}:1 ({f.foreground} on {f.background} "
                             f"from {f.background_from})"
                         )
+        except PageNotDelivered as exc:
+            return _design_failure(
+                self.name, self.weight, f"{self.name}: {exc}"
+            )
         except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
             return _design_failure(self.name, self.weight, f"{self.name} raised: {exc}")
 

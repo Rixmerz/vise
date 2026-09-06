@@ -288,6 +288,40 @@ def _check_unresolved(snapshot: dict, breakpoint: int | None) -> list[Defect]:
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+def _check_delivery(snapshot: dict, breakpoint: int | None) -> list[Defect]:
+    """Was the page served at all?
+
+    The harness measured whatever rendered and nothing read the HTTP status, so
+    a 404 measured as a clean page: no overflow, no collision, nothing
+    off-document, the gate green. `ui_layout` fails closed on a missing browser
+    and on an unconfigured target precisely because a gate that could not check
+    must not report success — and measuring an error document is not checking
+    the page either.
+
+    `file://` targets and inline HTML carry no status and are never flagged:
+    there is no server that could have failed.
+    """
+    delivery = snapshot.get("delivery")
+    if not isinstance(delivery, dict) or delivery.get("ok", True):
+        return []
+    status = delivery.get("status")
+    url = delivery.get("url") or ""
+    return [
+        Defect(
+            kind="page_not_delivered",
+            a=url or "target",
+            b=None,
+            delta_px=0.0,
+            breakpoint=breakpoint,
+            severity="error",
+            detail=(
+                f"HTTP {status} — the geometry below is the error page's, not "
+                f"this page's. Nothing here is a finding about the design."
+            ),
+        )
+    ]
+
+
 def check_snapshot(
     snapshot: dict, *, breakpoint: int | None = None, tolerance_px: float = 1.0
 ) -> list[Defect]:
@@ -298,6 +332,13 @@ def check_snapshot(
     """
     if not isinstance(snapshot, dict):
         return []
+    # First, because every other check below is arithmetic on a page that may
+    # never have been served. Returning early keeps a 404's incidental layout
+    # out of the evidence: one defect naming the cause beats forty naming
+    # elements of an error page.
+    undelivered = _check_delivery(snapshot, breakpoint)
+    if undelivered:
+        return undelivered
     nodes = _valid_nodes(snapshot)
     out: list[Defect] = []
     out.extend(_check_containment(nodes, breakpoint, tolerance_px))

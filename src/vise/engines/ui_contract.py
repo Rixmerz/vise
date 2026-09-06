@@ -27,7 +27,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from vise.engines.render_harness import BrowserUnavailable, browser_status
+from vise.engines.render_harness import (
+    BrowserUnavailable,
+    PageNotDelivered,
+    _navigate,
+    browser_status,
+)
 
 _URL_RE = re.compile(r"^(https?|file)://", re.IGNORECASE)
 
@@ -248,10 +253,17 @@ def derive_candidates(
         try:
             page = browser.new_page(viewport={"width": int(breakpoint), "height": int(height)})
             try:
-                if _is_url(target):
-                    page.goto(target, wait_until="networkidle", timeout=timeout_ms)
-                else:
-                    page.set_content(target, wait_until="networkidle", timeout=timeout_ms)
+                delivery = _navigate(page, target, "networkidle", timeout_ms)
+                if not delivery["ok"]:
+                    # A 404 derives a handful of candidates from the error
+                    # page, every one of which passes every check — which the
+                    # gate reports as "N elements inspected, no blocking
+                    # defects". Empty findings on a page that was never served
+                    # is the fail-open case these gates exist to refuse.
+                    raise PageNotDelivered(
+                        f"{target} returned HTTP {delivery['status']} — the "
+                        f"elements below would be the error page's"
+                    )
                 page.wait_for_timeout(50)  # let layout settle, same as render_harness
                 result: dict[str, Any] = page.evaluate(_DERIVE_JS, {"limit": int(limit)})
             finally:
