@@ -17,13 +17,23 @@ Reaching it is the agent's, not vise's — see design, "Correction: steps 1 and 
 are not vise's to run". So these landed as the `survey` phase's prompt, which
 is the asset that tells the agent which calls to make and what to bring back.
 
-- [x] 2.1 `compute_index_status` first; no index or a stale one takes the
-      `survey → report` edge and the report's `skipped` field carries the
-      reason — *not* a `decouple_skipped` event, because nothing in vise runs
-      to emit one
-- [x] 2.2 `search_similar` per added unit; `analyze_impact` per changed signature
-- [x] 2.3 Names go through `vise.core.livespec.LIVESPEC_TOOLS`; the graph is in
-      `test_livespec_contract.SPEAKERS` — the only *workflow* under the contract
+- [x] 2.1 No index takes the `survey → report` edge and the report's `skipped`
+      field carries the reason — *not* a `decouple_skipped` event, because
+      nothing in vise runs to emit one.
+      **Corrected 2026-09-06:** this said `compute_index_status` first, which
+      livespec removed as a tool in v0.9. The agent's first real call is the
+      check — livespec answers, or tells it to run `index_project` — and the
+      refusal is now also a gate: `symbol_index` on `move`, reading
+      `.mcp-docs/docs.db` in code, because prose is advice to the party being
+      refused
+- [x] 2.2 `search_similar` per added unit; `who_calls` per changed signature.
+      **Corrected 2026-09-06:** this said `analyze_impact`, which counts every
+      dependency — after a Graphify ingest that includes a type used only in an
+      annotation, and the rule of three is about call sites. The survey also
+      refuses on `external_edges.stale` now
+- [x] 2.3 Names go through `vise.core.neighbours.LIVESPEC_TOOLS` (renamed from
+      `livespec.py` when layout-inspector and flowtrace joined it); the graph is
+      in `test_neighbour_contract.SPEAKERS`
 - [x] 2.4 The prompt asks for exactly the fields `Candidate` declares, and a test
       parses the block to prove it — the testable half of the seam the design
       says cannot be tested end to end

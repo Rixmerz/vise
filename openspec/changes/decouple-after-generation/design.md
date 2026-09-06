@@ -97,3 +97,36 @@ with it. That is the same exposure `livespec.py` already documents for names,
 and it is bounded the same way — every field `Candidate` asks for is named in
 one place, and a caller that cannot fill one truthfully leaves it at its
 default, which refuses.
+
+## Correction: two of the three calls were not livespec's either
+
+Checked against livespec 0.33 on 2026-09-06, and the design above is wrong in
+the same way the shipped assets were.
+
+**`compute_index_status` is not a livespec tool.** It was removed as one in
+livespec v0.9 and survives as a module-level helper behind the
+`project://index/status` resource. Step 1 of "What the phase does", the
+`survey` prompt built from it, and the scenario in the delta spec all named a
+call that fails — so a phase whose entire premise is "look before proposing"
+opened by looking with something that does not exist.
+
+**`analyze_impact` is the wrong call for `consumers`.** It counts every
+dependency. After an `ingest_external_graph` of a Graphify graph that includes
+a type used only in a parameter annotation, and livespec measured what that
+does: one class went from 2 callers to 40, of which 38 were annotations. The
+rule of three is about call sites, so the count comes from `who_calls`, whose
+default edge set is invocation only.
+
+What replaces step 1 is not another call. `vise/core/neighbour_state.py` reads
+`.mcp-docs/docs.db` directly — livespec leaves a file, and a file is not a tool
+call — so "is there an index" is answered in code by the `symbol_index`
+validator on the `move` node. The prompt still tells the agent to stop and say
+"no index", because the `survey → report` edge is how a run ends cleanly; the
+difference is that the *writing* node no longer depends on the agent having
+obeyed. A refusal in prose is advice to the party being refused.
+
+Third correction, smaller: ingested edges outlive the index they were matched
+against, and livespec reports that as `stale` in the `external_edges` block of
+every graph-reading tool. Nothing read it. The survey now refuses on it, since
+a consumer count taken from a graph that no longer matches the tree is a count
+about code that has moved.

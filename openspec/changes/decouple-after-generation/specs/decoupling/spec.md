@@ -39,8 +39,10 @@ report `decouple_skipped` with the reason.
 
 #### Scenario: livespec is not mounted
 
-- **WHEN** `compute_index_status` is unavailable
-- **THEN** the phase emits `decouple_skipped` and the workflow continues
+- **WHEN** the workspace has no livespec index — the first symbol call reports
+  it, and `.mcp-docs/docs.db` says so without one
+- **THEN** the phase emits `decouple_skipped` and the workflow continues, and
+  the node that writes refuses independently of what the agent reported
 
 ### Requirement: The report is the evidence
 
