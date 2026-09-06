@@ -8,6 +8,100 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — vise taught two livespec calls that do not exist
+
+`codelayer_gate`'s deny message told an agent to run `locate("payments")`.
+livespec has never had a `locate`. The orientation call is `find_symbol`. And
+`decouple-graph.yaml` opened its survey with `compute_index_status()`, which
+livespec removed as a tool in v0.9 — it survives as a module-level helper
+behind the `project://index/status` resource, which is not something a deny
+message can tell anyone to call.
+
+So the two surfaces vise most depends on being obeyed — the wall an agent hits
+when it reads by path, and the first step of the phase that decides whether
+code may move — each named a call that fails. An agent that tries `locate`,
+gets nothing, and falls back to `cat` is behaving reasonably; the gate's own
+docstring says a deny that gets routed around is a deny that teaches the habit
+it exists to prevent.
+
+`test_neighbour_contract.py` did exactly what it promised: it kept vise
+consistent with itself. Consistency with itself is not correctness, and nothing
+in this repository could have caught this — those servers are not here. What is
+new is `MINIMUM_VERSIONS` in `vise/core/neighbours.py`: a version is the one
+fact about a neighbour a person can check in a minute, and it is now written
+next to the names.
+
+Also fixed in the same pass, and the same class of error:
+
+- **Every livespec call is taught with `workspace`.** livespec removed its
+  environment fallback; the argument is required on every call. Every example
+  vise shipped omitted it, so every one of them raised. The deny message fills
+  it in from the project the hook is already running in.
+- **The decouple survey took its consumer count from `analyze_impact`.** That
+  counts every dependency, which after an `ingest_external_graph` of a Graphify
+  graph includes a type used only in a parameter annotation — measured on
+  livespec itself, one class went from 2 to 40, of which 38 were annotations.
+  The rule of three is about call sites, so the count comes from `who_calls`
+  now, and the prompt says why the other call is wrong here.
+- **The survey now refuses a stale external graph.** Ingested edges outlive the
+  index they were matched against; livespec reports that as `stale` and nothing
+  read it.
+- **"Both need the same browser" was wrong.** vise's render gates and
+  layout-inspector each run Playwright in their own environment, and each
+  Playwright demands its own Chromium revision. It is two installs. The
+  orchestration skill said one.
+
+### Added — vise reads what its neighbours leave on disk
+
+vise cannot call livespec, flowtrace or layout-inspector: MCP has no
+server-to-server channel. That was taken to mean vise could know nothing about
+them, so every phase that depends on one asks the *agent* to check — which
+makes the check advice, re-weighable by the party being checked. It is the
+exact thing this project exists to stop doing.
+
+Two of the three leave durable artifacts in the repository, and a file is not a
+tool call. New `vise/core/neighbour_state.py` reads three facts out of two
+files with nothing but the standard library:
+
+| Artifact | Question it answers |
+|---|---|
+| `.mcp-docs/docs.db` | did a livespec index run finish here? |
+| `.flowtrace/*.jsonl` | what did the newest traced run actually do? |
+| `graphify-out/graph.json` | is livespec's ingest of it still current? |
+
+Every function returns a state object and none of them raise — the callers are
+a PreToolUse hook and a validator, and both have a contract about not taking
+the session down. The coupling is one table deep on purpose: `index_run` for
+"did an index finish", `external_ingest` (livespec migration 23) for the graph
+provenance. Counting symbols would tie vise to a schema it does not own and
+gains nothing a gate needs.
+
+**Absent and unreadable are kept apart, everywhere.** A repo with no index
+makes a gate refuse; a database that will not open must not, because a gate
+that fails on its own bug is how an override habit starts. Every state carries
+`known` for exactly this.
+
+Three validators follow from it, all failing closed on a known absence:
+
+- **`symbol_index`** — livespec has a finished index. Wired onto
+  `decouple-graph.yaml`'s `move` node, the only one that writes: the survey's
+  "no index, STOP" was prose read by the same agent being asked to move code,
+  and this is that refusal as a limit.
+- **`trace_captured`** — a flowtrace log from this run exists and holds events.
+  It separates the empty case, because flowtrace's own docs say an empty trace
+  "looks like a bug in the code" while being almost always the package prefix,
+  and a phase that cannot tell those apart sends the builder to debug the wrong
+  thing. It also records the failing call paths, so that:
+- **`trace_error_gone`** — the calls that raised during the reproduction no
+  longer raise. `tests_pass` is green for a fix that deleted the failing test;
+  this is not.
+
+**The CodeLayer gate now stands down where there is no index.** A redirection
+to a tool that cannot answer is a wall, and `read_unit` cannot answer for a
+repo livespec has never seen. Warn mode stands down too: a "would deny" on such
+a repo is a false positive by definition, and counting it dirties the one
+number warn mode exists to produce.
+
 ### Added
 
 - **`for_each` — a run as wide as the data.** A `dag` node's tasks were a list

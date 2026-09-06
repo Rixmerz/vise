@@ -1823,6 +1823,241 @@ class UiContrastValidator(_RenderGate):
             )
         return _design_pass(self.name, self.weight, f"{summary}, all at or above WCAG AA")
 
+# ---------------------------------------------------------------------------
+# Neighbour-state gates — a refusal a phase prompt could only ask for
+# ---------------------------------------------------------------------------
+#
+# vise cannot call livespec, layout-inspector or flowtrace. That was taken to
+# mean it could know nothing about them, and so every phase that depends on one
+# asks the agent to check — which makes the check advice, re-weighable by the
+# party being checked. Two of the three leave files behind, and a file is not a
+# tool call: `vise.core.neighbour_state` reads them.
+#
+# All three below fail CLOSED on a known absence and report `unverified` when
+# the artifact could not be read. The distinction is the whole point: "there is
+# no index" must block, "I could not tell" must not, because a gate that
+# refuses on its own bug is how an override habit starts.
+
+
+def _state_failure(name: str, weight: float, evidence: str) -> ValidatorRecord:
+    return ValidatorRecord(
+        name=name, passed=False, confidence_contribution=0.0, weight=weight,
+        evidence=evidence, at=_now(), source="mechanical", exit_code=None,
+        outcome="failed",
+    )
+
+
+def _state_unverified(name: str, weight: float, evidence: str) -> ValidatorRecord:
+    return ValidatorRecord(
+        name=name, passed=True, confidence_contribution=weight, weight=weight,
+        evidence=evidence, at=_now(), source="asserted", exit_code=None,
+        outcome="unverified",
+    )
+
+
+def _state_pass(name: str, weight: float, evidence: str) -> ValidatorRecord:
+    return ValidatorRecord(
+        name=name, passed=True, confidence_contribution=weight, weight=weight,
+        evidence=evidence, at=_now(), source="mechanical", exit_code=0,
+        outcome="verified",
+    )
+
+
+@dataclass
+class SymbolIndexValidator:
+    """Gate on livespec having indexed this repo. Fails closed.
+
+    The decouple workflow's survey opens with "no index, STOP" — a refusal in
+    prose, read by the same agent being asked to move code, and written against
+    a tool call that does not exist. This is that refusal as a limit, on the
+    node that writes: a boundary decision made without the call graph is the
+    guess the phase exists to prevent.
+
+    Reads `.mcp-docs/docs.db` directly. That is not a livespec API and the
+    coupling is deliberately one table deep — did an index run finish — because
+    anything more would make vise's gate depend on a schema it does not own.
+    """
+
+    weight: float = 0.5
+    name: str = "symbol_index"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            from vise.core.neighbour_state import index_state
+
+            state = index_state(goal.project_dir)
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _state_unverified(
+                self.name, self.weight, f"{self.name} raised: {exc}"
+            )
+        if not state.known:
+            return _state_unverified(self.name, self.weight, state.detail)
+        if not state.indexed:
+            return _state_failure(
+                self.name, self.weight,
+                f"{state.detail}. The symbol layer is what makes this phase's "
+                f"decisions evidence rather than guesses — run livespec's "
+                f"index_project first.",
+            )
+        return _state_pass(self.name, self.weight, state.detail)
+
+
+@dataclass
+class TraceCapturedValidator:
+    """Gate on a flowtrace run having produced a usable trace. Fails closed.
+
+    `debug-graph.yaml`'s profiling phase signals "observations collected", and
+    for a traced run that claim has an artifact: `.flowtrace/<ts>.jsonl`. Until
+    now the strongest thing downstream could do was believe it — the node is
+    listed as cognitive in `test_node_gate_coverage.py` on the grounds that it
+    "produces no artifact a machine can read", which stopped being true the
+    moment flowtrace was in the picture.
+
+    The empty case is the one worth separating. flowtrace's own command file
+    says an empty trace "is almost always the prefix" and "looks like a bug in
+    the code" while being nothing of the kind, so reporting *which* failure
+    this is, is most of the value of reading the file.
+    """
+
+    weight: float = 0.4
+    name: str = "trace_captured"
+    #: Seconds of slack before the goal started. A trace written while the
+    #: phase was being set up is still this run's.
+    grace_s: int = 300
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            from vise.core.neighbour_state import error_signature, trace_state
+
+            cutoff = _started_at_epoch(goal)
+            state = trace_state(
+                goal.project_dir,
+                newer_than=None if cutoff is None else cutoff - self.grace_s,
+            )
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _state_unverified(
+                self.name, self.weight, f"{self.name} raised: {exc}"
+            )
+        if not state.known:
+            return _state_unverified(self.name, self.weight, state.detail)
+        if state.path is None:
+            return _state_failure(
+                self.name, self.weight,
+                f"{state.detail}. Run the reproduction under "
+                f"`flowtrace run -- <command>`; the trace is the evidence this "
+                f"phase claims to have collected.",
+            )
+        if state.empty:
+            return _state_failure(
+                self.name, self.weight,
+                f"{state.path.name} has no events. Almost always the package "
+                f"prefix — the capture instrumented nothing, which looks "
+                f"exactly like a program that did nothing. Check the prefix "
+                f"before concluding anything about the code.",
+            )
+        # Record the failing call paths so `trace_error_gone` has a baseline.
+        # The verify phase's own prompt demands a before/after comparison; a
+        # comparison needs a "before" that was written down while it was true.
+        _persist_evidence(
+            goal, "trace-signature",
+            json.dumps(sorted(error_signature(goal.project_dir))),
+        )
+        note = ""
+        if state.traces > 1:
+            note = (
+                f" — {state.traces} interleaved executions in one file; scope "
+                f"to one trace_id before drawing a conclusion"
+            )
+        return _state_pass(self.name, self.weight, state.detail + note)
+
+
+@dataclass
+class TraceErrorGoneValidator:
+    """Gate on the traced failure no longer happening. Fails closed.
+
+    `tests_pass` says the suite is green, which a fix that removed the failing
+    test also achieves. This says the specific call that raised no longer
+    raises, compared against the signature `trace_captured` wrote down during
+    the reproduction.
+
+    Reports `unverified` with no baseline rather than passing quietly: nothing
+    was compared, and a gate that says "verified" on an empty comparison is
+    worse than one that says nothing.
+    """
+
+    weight: float = 0.4
+    name: str = "trace_error_gone"
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            from vise.core.neighbour_state import error_signature, trace_state
+
+            before = _latest_evidence(goal, "trace-signature")
+            if before is None:
+                return _state_unverified(
+                    self.name, self.weight,
+                    "no reproduction trace was recorded, so there is nothing to "
+                    "compare against — add trace_captured to the phase that "
+                    "reproduces the bug",
+                )
+            baseline = set(json.loads(before))
+            state = trace_state(goal.project_dir)
+            if state.path is None:
+                return _state_failure(
+                    self.name, self.weight,
+                    "no trace from the verification run. Re-run the exact "
+                    "capture the reproduction used — a fix nobody re-measured "
+                    "is a fix nobody verified.",
+                )
+            still = baseline & set(error_signature(goal.project_dir))
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _state_unverified(
+                self.name, self.weight, f"{self.name} raised: {exc}"
+            )
+        if not baseline:
+            return _state_unverified(
+                self.name, self.weight,
+                "the reproduction trace recorded no error event, so this gate "
+                "has nothing to check — the failure was not one the trace saw",
+            )
+        if still:
+            return _state_failure(
+                self.name, self.weight,
+                f"{len(still)} of {len(baseline)} traced failure(s) still "
+                f"raise: {', '.join(sorted(still)[:3])}",
+            )
+        return _state_pass(
+            self.name, self.weight,
+            f"none of the {len(baseline)} traced failure(s) raise any more: "
+            f"{', '.join(sorted(baseline)[:3])}",
+        )
+
+
+def _started_at_epoch(goal: Goal) -> float | None:
+    """`goal.started_at` as a POSIX timestamp, or None when unparseable."""
+    try:
+        raw = (goal.started_at or "").replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except Exception:  # noqa: BLE001 - an unparseable stamp means "no cutoff"
+        return None
+
+
+def _latest_evidence(goal: Goal, validator_name: str) -> str | None:
+    """The newest persisted evidence log for a validator, or None."""
+    try:
+        goal_name = _sanitize(Path(goal.project_dir).resolve().name or goal.id)
+        directory = _goal_state_dir() / "evidence" / goal_name
+        logs = sorted(directory.glob(f"{_sanitize(validator_name)}-*.log"))
+        if not logs:
+            return None
+        return logs[-1].read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 - absence, not an error
+        return None
+
+
 _REGISTRY: dict[str, Callable[..., Validator]] = {
     "tests_pass": TestsPassValidator,
     "tests_fail": TestsFailValidator,
@@ -1838,6 +2073,9 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "design_tokens": DesignTokensValidator,
     "ui_layout": UiLayoutValidator,
     "ui_contrast": UiContrastValidator,
+    "symbol_index": SymbolIndexValidator,
+    "trace_captured": TraceCapturedValidator,
+    "trace_error_gone": TraceErrorGoneValidator,
 }
 
 

@@ -34,8 +34,15 @@ BUILDER_VALIDATORS: frozenset[str] = frozenset({
     "lsp_clean",
     "no_new_deps",
     "openspec",
+    # The three neighbour-state gates read a file another tool left behind —
+    # livespec's index, a flowtrace log. They run no command the graph chooses,
+    # which is the line this allowlist draws, and their answer comes from
+    # outside the plan: a composed graph declaring one cannot influence it.
+    "symbol_index",
     "tests_fail",
     "tests_pass",
+    "trace_captured",
+    "trace_error_gone",
     "ui_contrast",
     "ui_layout",
 })

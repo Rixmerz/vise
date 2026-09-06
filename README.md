@@ -363,6 +363,9 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `design_tokens` | colours, sizes, spacing and radii written as literals where the project declares a token | **never** — no external tool, so it always runs |
 | `ui_layout` | rendered overflow, clipping, collision and off-document content, per breakpoint | **never** — fails closed on a missing browser or an unconfigured target |
 | `ui_contrast` | rendered foreground against the *effective* background (nearest painting ancestor), WCAG 2.2 AA | **never** — same as `ui_layout` |
+| `symbol_index` | livespec has a finished index for this repo (`.mcp-docs/docs.db`) | only when the database exists and cannot be read — a *known* absence fails closed |
+| `trace_captured` | a flowtrace log from this run exists and holds events | only when the trace cannot be read; no trace, or an empty one, fails closed |
+| `trace_error_gone` | the calls that raised in the reproduction trace no longer raise | no reproduction signature was recorded, or that trace held no error |
 
 A fail-open pass reports `outcome: "unverified"` and `source: "asserted"` — it
 never reads as clean, and `goal_complete` will not grade it as verified.
@@ -377,6 +380,19 @@ the bundled `quality-gate` graph for that reason — wiring them by default woul
 turn `integration` red on every repo that never opted in. The graph file carries
 the snippet that turns them on. Allowances under `design.allowances` are a
 ratchet for `design_tokens`: record what a repo has today, then lower it.
+
+The three neighbour-state gates read a file another tool left behind rather
+than running anything: livespec's `.mcp-docs/docs.db` and flowtrace's
+`.flowtrace/*.jsonl`. vise cannot call those servers — MCP has no
+server-to-server channel — which was taken to mean it could know nothing about
+them, so every phase depending on one asked the *agent* to check. That makes
+the check advice, re-weighable by the party being checked. A file is not a tool
+call, and `vise/core/neighbour_state.py` reads three facts out of two files:
+whether an index run finished, what the newest trace holds, and whether a
+Graphify graph still matches the ingest livespec recorded from it.
+
+Each separates "absent" from "unreadable" and only the first fails closed. A
+gate that refuses because of its own bug is how an override habit starts.
 
 `tests_fail` is deliberately not the negation of `tests_pass`. `returncode != 0`
 is the naive reading and it is wrong: a broken `conftest.py`, a bad flag or a

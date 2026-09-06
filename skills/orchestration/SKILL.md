@@ -200,23 +200,41 @@ A missing server never blocks the dispatch — it downgrades the evidence.
 A wave that only adds new code, touching no existing signature, needs none of
 this. Skip it and dispatch.
 
-## If the repo has a symbol index, brief for it
+## Neighbours: three servers vise names and cannot call
 
-`livespec` — a separate MCP, not part of vise — exposes the repo as a symbol
-graph. When it is mounted, a builder that reads by symbol instead of by file
-gets the body it needs plus the *signatures* of what that body calls and the
-*definitions* of the types in those signatures, in one call. Measured on a real
-repo: **86% fewer tokens than opening the files an honest reader would open**,
-median 497 tokens per unit.
+Three MCP servers do things vise's gates cannot, and a session can hold all of
+them. vise has no server-to-server channel, so none of this is something vise
+does — it is what you put in a brief, because **a builder in a fresh context
+window has no way to know these exist.**
 
-Check once, with `compute_index_status`. Not mounted, or the index is stale?
-Skip this section entirely and brief normally — nothing here is load-bearing,
-and a brief naming tools the builder does not have is worse than one that says
-nothing.
+| Server | Answers | Present when |
+|---|---|---|
+| `livespec` | what *could* run — the symbol graph | `.mcp-docs/docs.db` in the repo |
+| `flowtrace` | what *did* run — a real execution | `.flowtrace/*.jsonl` in the repo |
+| `layout-inspector` | how it *renders* — measured geometry | no repo footprint; check the tool surface |
 
-Mounted? Put these in the brief, because a builder in a fresh window has no way
-to know they exist:
+One rule covers all three: **a brief naming tools the builder does not have is
+worse than one that says nothing.** Check your own tool surface first. If a
+server is absent, say so in the brief and hold the builder to the evidence it
+does have.
 
+Each ships its own skill and subagent that cover *how* to drive it. Your job is
+*when*, and what to bring back.
+
+### livespec — brief for the symbol layer
+
+Read by symbol instead of by file and a builder gets the body it needs plus the
+*signatures* of what that body calls and the *definitions* of the types in
+those signatures, in one call. Measured on a real repo: **86% fewer tokens than
+opening the files an honest reader would open**, median 497 tokens per unit.
+
+**Every call takes `workspace`** — the absolute repo root, required, no
+environment fallback. Put it in the brief; an example that omits it teaches a
+call that raises.
+
+- **`quick_orient(qname)`** for first contact — metadata, top callers, top
+  callees, linked Specs, and `is_entry_point` so a symbol with no callers is
+  not misread as dead. **`find_symbol(query)`** when the name is a guess.
 - **`read_unit(qname)`** instead of reading the file. Say which symbols.
 - **`search_similar(code)` before writing any new helper.** This is the one
   that pays for itself: the duplicate a builder is about to create has a
@@ -224,6 +242,11 @@ to know they exist:
   builder's memory of the repo will find it.
 - **`resolve_location(path, line)`** when a stack trace or a failing test
   points at a line.
+- **`git_diff_impact(base_ref, head_ref)`** for the verification wave. It is
+  livespec's own CI entry point: changed files, the callers they reach, and
+  **which test files are likely to break**. That last list is what turns "run
+  the suite" into "run these first", and it is the single most useful thing
+  livespec offers a reviewer.
 
 Two things to pass on, because they change what the builder should trust:
 `unresolved_types` in a closure is a **real gap** — a type the closure promised
@@ -233,43 +256,126 @@ CodeLayer gate in `enforce`, reads by path are denied outright; a brief that
 tells a builder to "read `src/foo.py`" sends it into a wall.
 
 The `codelayer` skill has the full picture, including when *not* to decouple.
+It is not preloaded on any agent on purpose: it is dead weight in the repos
+that do not have the index, and it loads on its own description when they do.
 
-## If the wave touches rendered UI, the gate is not the diagnosis
+**If `graphify-out/graph.json` is also there**, a second extractor is in play
+and it installs its own hook that pushes back on raw reads. The two do not
+compete — Graphify orients at the scale of a subsystem, livespec commits at the
+scale of an edit — so the ladder is one `graphify query` to orient, then the
+symbol layer. Two cautions for the brief: `ingest_external_graph` may have
+added edges livespec's resolver missed, so **a caller count from
+`analyze_impact` can include a type used only in an annotation** (use
+`who_calls` when the number decides something); and two extractors agreeing is
+still static analysis, never evidence that a path runs.
+
+### flowtrace — when the question is what actually happened
+
+Reading the source stops helping when the call order is not what anyone
+expected, a value is already wrong before it reaches the suspected code, or a
+path nobody knew about was taken. `flowtrace run -- <command>` instruments
+Java, Python, Node/TypeScript and Go **without touching the source** and writes
+`.flowtrace/<timestamp>.jsonl`: paired enter/exit events with arguments,
+results, durations and errors, under W3C trace ids that survive a hop between
+processes.
+
+Brief for it on a performance or integration wave, and on any debug wave where
+a repro exists but the cause does not:
+
+- **`log_open(path)`** first — every other call takes the session id it
+  returns.
+- **`trace_find_error()`** for a failure: the failing span and its ancestry.
+  Read the arguments of each ancestor going down; the point where a value first
+  becomes wrong is usually several frames above where the exception surfaced.
+- **`log_aggregate(...)`** over `duration_ns` grouped by method for "why is
+  this slow", then subtract child time from parent time before concluding.
+- **`trace_tree(trace_id)`** to see what actually ran — the cheapest way to
+  discover the code you were reading was never called.
+- **`trace_diff(a, b)`** for a regression: capture the good revision and the
+  bad, and read spans present in only one against duration deltas.
+
+Four things to put in the brief, because each one turns a wrong conclusion into
+a right one:
+
+- **Scope to one `trace_id` first.** A server writes many interleaved
+  executions into one file, and a conclusion drawn across them is worthless.
+- **An absent method was not instrumented, not not-run.** Scoping to the
+  package prefix is mandatory in practice, so framework and stdlib frames are
+  missing by design — and an empty trace is almost always that prefix, not a
+  program that did nothing.
+- **A duration can exceed its parent's.** A span that starts async work and
+  returns without awaiting it closes while the child runs; negative self-time
+  means the parent did not do the work.
+- **A trace holds arguments and return values.** Secrets are redacted by key
+  name and `.flowtrace/` is gitignored by the CLI, but neither is a reason to
+  paste one into a report.
+
+### layout-inspector — the gate is not the diagnosis
 
 vise ships three gates that drive a real browser: `ui_layout` (overflow,
 clipping, collision, off-document, per breakpoint), `ui_contrast` (WCAG against
-the *effective* background, in default, hover and focus) and `design_tokens`.
-Unlike the repo checks, these **fail closed** — a gate that cannot evaluate must
-never report success — and vise deliberately does not install the browser they
-need. `playwright install chromium` once, or they fail with that command named.
+the *effective* background) and `design_tokens`. Unlike the repo checks, these
+**fail closed** — a gate that cannot evaluate must never report success.
 
 What they tell you is *whether*. They cannot tell you *why*, and a builder
 handed "ui_layout failed: 40px overlap at 375" and nothing else will guess at a
 cause, change a CSS rule, and re-run the gate to find out. That loop is
 expensive and it is not the gate's job.
 
-`layout-inspector` — a separate MCP, not part of vise — is the other half. Same
-measurement approach, different shape: tools an agent calls rather than a gate
-that blocks. If its tools are in your surface, name them in the brief:
+`layout-inspector` is the other half: same measurement approach, different
+shape — tools an agent calls rather than a gate that blocks.
 
-- **`detect_issues(url)`** to reproduce the finding as measured geometry, with
-  severity split by intent — two elements at `z-index: auto` are probably a bug,
-  one with an explicit z-index is probably a deliberate overlay.
-- **`element_context(url, selector)`** to root-cause *before* touching CSS. This
-  is the call that turns the guess-and-re-run loop into one edit.
-- **`compare_viewports(url)`** after the fix, because the repair that fixes
-  375px is the one most likely to break 1280.
+- **`check_environment()`** the moment any call fails to launch a browser,
+  before concluding anything else. It reports whether a usable Chromium is
+  there and the exact command to install it.
+- **`detect_issues(url)`** to reproduce the finding as measured geometry,
+  worst-first, with severity split by intent — two elements at `z-index: auto`
+  are probably a bug, one with an explicit z-index is probably a deliberate
+  overlay.
+- **`element_context(url, selector)`** to root-cause *before* touching CSS. The
+  stacking chain names the property that trapped a z-index; the clipping
+  ancestors name the box that hides content. This is the call that turns the
+  guess-and-re-run loop into one edit.
+- **`compare_viewports(url)`** after the fix. It already diffs:
+  `breakpoint_specific` is the responsive regression, `at_every_viewport` is a
+  general defect. The repair that fixes 375px is the one most likely to break
+  1280.
+- **`accessibility_spatial(url)`** for target sizes and covered controls — WCAG
+  2.2 SC 2.5.8. vise has **no** gate for this, so it is not a second opinion,
+  it is the only one.
 
-Not mounted? Say so in the brief and hold the builder to reading the gate's
-evidence and reasoning from the CSS — the same rule as the symbol index: a
-brief naming tools the builder does not have is worse than one that says
-nothing.
+Two things a brief has to carry, or the builder loses a cycle to each:
 
-Both need the same browser, so a repo set up for vise's render gates already
-has what `layout-inspector` needs, and the reverse. Neither installs it for the
-other.
-It is not preloaded on any agent on purpose: it is dead weight in the repos
-that do not have the index, and it loads on its own description when they do.
+**Read the `page` block before any finding.** A non-200 status or a page error
+means the measurement may be of an error page. vise's own render gates do not
+check this, so layout-inspector is where a 404 gets caught.
+
+**The two vocabularies differ.** Translate, or a builder cannot reproduce what
+the gate reported:
+
+| vise gate says | ask layout-inspector for |
+|---|---|
+| `external_collision` | `overlap`, then `element_context` on either element |
+| `container_overflow` | `clipped_by_ancestor` / `clipped_right` |
+| `offpage` | `offscreen_horizontal`, and `horizontal_scroll` for the page-level cause |
+| `unresolved_selector` | nothing — the selector matched nothing; that is vise's config, not the page |
+
+**They do not share a browser.** Each runs Playwright in its own environment
+and each Playwright demands its own Chromium revision, so this is two installs,
+not one:
+
+```
+<vise venv>/python -m pip install 'vise[design]'
+<vise venv>/python -m playwright install chromium     # for the gates
+uv run --project <layout-inspector plugin root> playwright install chromium
+```
+
+Pointing both at one binary is possible — layout-inspector reads
+`LAYOUT_INSPECTOR_CHROMIUM` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` — but
+vise reads neither, so the gates use whatever their own Playwright resolves.
+The render gates also need at least one `design.targets` entry in
+`.vise/quality.yaml`; without it they fail closed rather than skipping, which
+is deliberate and reads as a bug the first time.
 
 ## Hard rules
 

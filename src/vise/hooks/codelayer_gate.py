@@ -42,6 +42,8 @@ import re
 import sys
 from pathlib import Path
 
+from vise.core.neighbour_state import index_state
+
 MODE_ENV = "VISE_CODELAYER"
 SCOPE_ENV = "VISE_CODELAYER_SCOPE"
 _MODES = ("off", "warn", "enforce")
@@ -144,19 +146,49 @@ def _paths_in_command(cmd: str) -> list[str]:
     return out
 
 
-def _teaching_message(paths: list[str], mode: str) -> str:
+def _teaching_message(paths: list[str], mode: str, project: Path) -> str:
+    """The deny message IS the gate. Every call in it has to actually work.
+
+    It shipped naming `locate`, which is not a livespec tool and never was,
+    and it omitted `workspace`, which livespec requires on every call. So the
+    one surface built to stop an agent routing around the gate handed it two
+    calls that fail — after which `cat` is the reasonable thing to try. The
+    calls below are livespec's real names, with the argument it demands
+    already filled in from the project this hook is running in.
+    """
     target = paths[0] if paths else "this file"
     stem = Path(target).stem
     verb = "Denied" if mode == "enforce" else "Would deny"
+    ws = str(project)
     return (
         f"{verb}: reading `{target}` by path. This repo is read by symbol, "
         f"which costs a fraction of the tokens and comes with the callee "
         f"signatures and type definitions already attached.\n\n"
-        f"  locate(\"{stem}\")                 -> candidates, no bodies\n"
-        f"  read_unit(qname=\"<id>\")         -> body + contract closure\n"
-        f"  resolve_location(path, line)    -> for a stack-trace line\n\n"
+        f'  find_symbol(query="{stem}", workspace="{ws}")\n'
+        f"      -> candidates, no bodies. Start here.\n"
+        f'  read_unit(qname="<qualified name>", workspace="{ws}")\n'
+        f"      -> body + the signatures of what it calls + the types in them\n"
+        f'  resolve_location(path="{target}", line=<n>, workspace="{ws}")\n'
+        f"      -> for a stack-trace or test-failure line\n\n"
+        f"`workspace` is required on every livespec call — there is no "
+        f"environment fallback.\n\n"
         f"Config, tests, docs, migrations and manifests are not gated — read "
         f"those normally. Set {MODE_ENV}=off to disable this gate entirely."
+    )
+
+
+def _no_index_message(detail: str) -> str:
+    """Why the gate stood down. Not a warning — the honest outcome.
+
+    A gate is a redirection, and a redirection to a tool that cannot answer is
+    a wall. livespec leaves `.mcp-docs/docs.db` behind, so whether it can
+    answer is a fact on disk rather than something to ask an agent about.
+    """
+    return (
+        f"[vise.codelayer] not gating this read: {detail}. The symbol tools "
+        f"cannot answer for a repo they have not indexed, so denying would "
+        f"leave nothing to read it with. Run livespec's index_project once, "
+        f"or set {MODE_ENV}=off."
     )
 
 
@@ -218,16 +250,26 @@ def main() -> int:
             print(approve)
             return 0
 
+        # A read is only worth redirecting where something else can answer it.
+        # `refuses` is a KNOWN absence: a database that will not open leaves
+        # the gate doing what it did before, because standing down on its own
+        # bug would be a silent hole rather than an honest one.
+        index = index_state(project)
+        if index.refuses:
+            print(_no_index_message(index.detail), file=sys.stderr)
+            print(approve)
+            return 0
+
         if mode == "warn":
             _log_warning(project, payload, paths)
             print(
-                f"[vise.codelayer] {_teaching_message(paths, mode)}",
+                f"[vise.codelayer] {_teaching_message(paths, mode, project)}",
                 file=sys.stderr,
             )
             print(approve)
             return 0
 
-        reason = _teaching_message(paths, mode)
+        reason = _teaching_message(paths, mode, project)
         print(json.dumps({
             "decision": "block",
             "message": reason,

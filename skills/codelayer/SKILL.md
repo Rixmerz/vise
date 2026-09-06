@@ -1,6 +1,6 @@
 ---
 name: codelayer
-description: Read and change code through the symbol layer instead of by file path — read_unit, locate, search_similar, resolve_location. Load when working in a repo where VISE_CODELAYER is set, when a Read or Grep on source was denied, before writing a new helper, or when deciding whether a piece of code is worth decoupling. Covers when NOT to decouple, which is the part that keeps the layer from turning under-engineering into over-engineering.
+description: Read and change code through the symbol layer instead of by file path — read_unit, find_symbol, search_similar, resolve_location. Load when working in a repo where VISE_CODELAYER is set, when a Read or Grep on source was denied, before writing a new helper, or when deciding whether a piece of code is worth decoupling. Covers when NOT to decouple, which is the part that keeps the layer from turning under-engineering into over-engineering.
 ---
 
 # CodeLayer — reading and shaping code by symbol
@@ -21,15 +21,66 @@ tension, which is what makes the rest of this skill's advice affordable.
 
 | Question | Call |
 |---|---|
-| What exists around here? | `locate(query)` — candidates, no bodies |
+| What exists around here? | `find_symbol(query)` — candidates, no bodies |
 | I need to change this one | `read_unit(qname)` — the contract closure |
 | What breaks if I change it? | `analyze_impact` / `who_calls` |
 | A stack trace points at `file:42` | `resolve_location(path, line)` |
 | Does this helper already exist? | `search_similar(code)` — **before writing it** |
 
-`locate` first, always. It is deliberately cheap and body-free: orientation
-before commitment. Jumping straight to `read_unit` on a guessed name is how you
-end up reading three closures to find the one you wanted.
+`find_symbol` first, always. It is deliberately cheap and body-free:
+orientation before commitment. Jumping straight to `read_unit` on a guessed
+name is how you end up reading three closures to find the one you wanted.
+`quick_orient(qname)` collapses the next three calls into one when you already
+know the name — metadata, top callers, top callees, linked Specs, and an
+`is_entry_point` flag so a symbol with zero callers is not misread as dead.
+
+## Every call takes `workspace`
+
+Every livespec tool requires `workspace` — the absolute path of the repo root
+you are working in. There is no environment fallback; the argument was made
+mandatory so a session holding several repos cannot silently answer about the
+wrong one.
+
+```
+read_unit(qname="payments.charge_card", workspace="/abs/path/to/repo")
+```
+
+An example that omits it is an example that raises. If a call comes back
+asking for a workspace, that is this and not a deeper problem.
+
+## If the repo also has a Graphify graph
+
+`graphify-out/graph.json` in the repo means a second extractor is in play, and
+Graphify installs its own `PreToolUse` hook that pushes back on raw reads —
+soft by default, and in strict mode a one-per-session deny. With vise's gate on
+too, one `Read` can meet two objections.
+
+They are not competing, and the shapes of the tools say so:
+
+| Question | Ask |
+|---|---|
+| What is here, and how does it connect? | `graphify query "<question>"` |
+| I need to change *this* symbol | `read_unit(qname=..., workspace=...)` |
+| What breaks if I do? | `who_calls` / `analyze_impact` |
+
+Graphify answers at the scale of a subsystem — communities, god nodes, the
+path between two things. livespec answers at the scale of an edit. So the
+ladder is: **one query to orient, then the symbol layer to commit.** That
+single query also satisfies Graphify's nudge and clears its strict block for
+the session, after which this skill's rules are the ones that apply.
+
+The graph is also an *input* to livespec, not just a rival:
+`ingest_external_graph` writes the edges livespec's resolver missed — type-
+position use (`def f(x: Base)`) and inheritance produce no call edge, so a
+base class used only as a type reads as referenced by nothing. Two rules
+matter once it has been ingested:
+
+- **A type reference is not a caller.** `who_calls` counts invocation edges
+  only and reports the rest under `excluded_by_edge_type`; `analyze_impact`
+  counts every dependency. Use `who_calls` when the number is going to decide
+  something, because the wider count includes annotations.
+- **Two extractors agreeing is still static analysis.** It is not evidence
+  that a path runs. That is what a trace is for.
 
 ## Reading the closure honestly
 

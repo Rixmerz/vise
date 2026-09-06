@@ -52,7 +52,43 @@ def test_the_survey_names_the_calls_it_cannot_make(graph):
     prompt that named none would leave the agent to invent the lookup."""
     prompt = _prompt(graph, "survey")
     named = {tool for tool in LIVESPEC_TOOLS if tool in prompt}
-    assert {"compute_index_status", "search_similar", "analyze_impact"} <= named, named
+    assert {"search_similar", "who_calls"} <= named, named
+
+
+def test_the_consumer_count_comes_from_who_calls_not_from_impact(graph):
+    """The number the rule of three turns on has to be call sites.
+
+    `analyze_impact` counts every dependency, and after a Graphify ingest that
+    includes a type used only in a parameter annotation — measured on livespec
+    itself, one class went from 2 callers to 40, of which 38 were annotations.
+    A `consumers` filled from that number talks the rule of three into a move
+    it should have declined, and nothing downstream can tell.
+    """
+    prompt = _prompt(graph, "survey")
+    body = prompt.split("and no others:", 1)[1]
+    line = next(ln for ln in body.splitlines() if ln.strip().startswith("consumers"))
+    assert "who_calls" in line, line
+    assert "analyze_impact" not in line, line
+    assert "NOT `analyze_impact`" in prompt, (
+        "the survey must say why the other call is wrong here — an agent that "
+        "knows both and is told only which to use will substitute the one it "
+        "reached for last"
+    )
+
+
+def test_the_survey_teaches_the_argument_livespec_requires(graph):
+    """livespec removed its environment fallback: `workspace` is required on
+    every call, so a phase that never says so teaches calls that raise."""
+    prompt = _prompt(graph, "survey")
+    assert "workspace" in prompt and "required" in prompt
+
+
+def test_the_survey_refuses_a_stale_external_graph(graph):
+    """Ingested edges outlive the index they were matched against. livespec
+    reports that as `stale`; a survey that does not read it counts consumers
+    of code that has moved."""
+    prompt = _prompt(graph, "survey")
+    assert "external_edges" in prompt and "stale" in prompt
 
 
 def test_the_prompt_asks_for_exactly_the_fields_the_code_receives(graph):
@@ -124,7 +160,13 @@ def test_the_only_gate_is_the_suite_and_it_is_mechanical(graph):
     green before is the whole of what it can be held to — and it is held to it
     by a validator, not by the agent saying the word."""
     move = graph.nodes["move"]
-    assert [v["type"] for v in move.validators or []] == ["tests_pass"]
+    declared = [v["type"] for v in move.validators or []]
+    assert "tests_pass" in declared
+    assert "symbol_index" in declared, (
+        "the survey opens with `no index, STOP` — a refusal in prose, read by "
+        "the same agent being asked to move code. On the only node that "
+        "writes, it is a limit."
+    )
     out = [e for e in graph.edges if e.from_node == "move"]
     assert len(out) == 1 and out[0].condition.type == "validators_green", (
         "the exit from `move` is a phrase the agent can say"

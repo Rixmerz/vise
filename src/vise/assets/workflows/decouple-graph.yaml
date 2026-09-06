@@ -37,24 +37,42 @@ nodes:
       Look before proposing anything. You are reading, not moving: Edit and
       Write are blocked here on purpose.
 
-      1. `compute_index_status()`. If livespec is not mounted, or the index is
-         stale, STOP. Say "no index" and take the edge to the report. A phase
-         that guesses at structure without an index is the under-engineering
-         it exists to prevent, wearing a better name.
+      Every livespec call below takes `workspace` — the absolute repo root.
+      It is required; there is no environment fallback.
+
+      1. Your first call IS the index check. If livespec answers, there is an
+         index; if it comes back saying the workspace is not indexed and to run
+         `index_project` first, STOP. Say "no index" and take the edge to the
+         report. A phase that guesses at structure without an index is the
+         under-engineering it exists to prevent, wearing a better name. Do not
+         index the repo yourself to get past this — an index built to satisfy a
+         gate is built by the party the gate is checking.
       2. For every unit this change added or grew: `search_similar(code)` on
          its body. This is the call that pays for itself — the duplicate you
          are about to leave behind has a *different name*, which is why it got
          written, so neither grep nor your memory of the repo will find it.
-      3. For every signature this change altered: `analyze_impact(qname)`.
-         That is where the consumer count comes from, and the consumer count
-         is what the rule of three is about.
+      3. For every signature this change altered: `who_calls(qname)`. That is
+         where the consumer count comes from, and the consumer count is what
+         the rule of three is about.
+
+         NOT `analyze_impact` for this number. Both are real, and they answer
+         different questions: `analyze_impact` counts every dependency, which
+         after an `ingest_external_graph` of a Graphify graph includes a type
+         used only in an annotation. Measured on livespec itself, one class
+         went from 2 to 40 that way, and 38 were parameter types. A type
+         reference is a real dependency and it is not a call site, and the rule
+         of three is about call sites.
+      4. Read the `external_edges` block every graph-reading call returns. If
+         it says `stale`, STOP and say "no index" with that reason: the edges
+         were ingested from a graph that no longer matches this tree, so the
+         consumer counts are about code that has moved.
 
       Bring back one row per candidate, with these four fields and no others:
 
         unit          the qualified name livespec gave it
         path          its file, repo-relative
         module_lines  how many lines the module it lives in has
-        consumers     how many call sites analyze_impact found
+        consumers     how many call sites who_calls found
 
       A field you cannot fill truthfully is left out. Do not estimate one:
       every default refuses, which is the safe direction, and a guessed
@@ -101,6 +119,14 @@ nodes:
     validators:
       - type: tests_pass
         weight: 1.0
+      # The survey's first step is a refusal in prose — "no index, STOP" — and
+      # prose is what the agent being asked to move code may re-weigh. This is
+      # the same refusal as a limit, on the only node that writes: no index, no
+      # move. It fails closed on a KNOWN absence only; a database that will not
+      # open leaves this to the suite, because refusing on vise's own bug is
+      # how an override habit starts.
+      - type: symbol_index
+        weight: 0.5
     # Scope gate. Uncomment as an ADDITIONAL entry under the `validators:` key
     # above — do not re-declare `validators:`, a duplicate key silently drops
     # tests_pass. It ships commented because its `allow:` globs are this

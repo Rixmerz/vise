@@ -54,8 +54,41 @@ def _bash(cmd: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": cmd}}
 
 
+def _index(project: Path) -> None:
+    """Give the fixture a livespec index, because the gate now requires one.
+
+    A redirection to a tool that cannot answer is a wall, so the gate stands
+    down where `.mcp-docs/docs.db` records no finished run. Every test below
+    that expects a denial is therefore testing a repo the symbol layer covers
+    — which is the only repo where denying was ever the right answer.
+    """
+    import sqlite3
+
+    db = project / ".mcp-docs" / "docs.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE index_run (id INTEGER PRIMARY KEY, project_id INTEGER, "
+        "started_at TEXT, finished_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO index_run(project_id, started_at, finished_at) "
+        "VALUES (1, '2026-09-06 20:00:00', '2026-09-06 20:00:05')"
+    )
+    conn.commit()
+    conn.close()
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
+    (tmp_path / "src").mkdir()
+    _index(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def unindexed(tmp_path: Path) -> Path:
+    """A repo livespec has never seen. The gate has nothing to offer here."""
     (tmp_path / "src").mkdir()
     return tmp_path
 
@@ -162,8 +195,70 @@ def test_the_denial_carries_the_replacement_call(project: Path):
     out, _ = _run(_read("src/payments.py"), ENF, project)
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "read_unit(" in reason
-    assert "locate(" in reason
+    assert "find_symbol(" in reason
     assert "resolve_location(" in reason
+
+
+def test_every_call_the_denial_names_is_one_livespec_exposes(project: Path):
+    """The message shipped naming `locate`, which livespec has never had.
+
+    So the surface built to stop an agent routing around the gate handed it a
+    call that fails, and `cat` became the reasonable next move. The contract
+    in `vise.core.neighbours` is the list; this asserts the message against
+    it rather than against three names typed here.
+    """
+    import re
+
+    from vise.core.neighbours import LIVESPEC_TOOLS
+
+    out, _ = _run(_read("src/payments.py"), ENF, project)
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    named = set(re.findall(r"\b([a-z][a-z0-9_]{2,})\(", reason))
+    assert named, "el mensaje dejó de nombrar cualquier llamada"
+    assert named <= LIVESPEC_TOOLS, named - LIVESPEC_TOOLS
+
+
+def test_the_denial_fills_in_the_argument_livespec_requires(project: Path):
+    """livespec removed its environment fallback: `workspace` is required on
+    every call. An example that omits it teaches a call that raises, and this
+    hook is the one place that already knows the answer."""
+    out, _ = _run(_read("src/payments.py"), ENF, project)
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert f'workspace="{project}"' in reason
+    for call in ("find_symbol", "read_unit", "resolve_location"):
+        head = reason.split(call + "(", 1)[1].split(")", 1)[0]
+        assert "workspace=" in head, f"{call} se enseña sin workspace"
+
+
+# ---------------------------------------------------------------------------
+# una redirección hacia algo que no puede contestar es un muro
+# ---------------------------------------------------------------------------
+
+def test_it_does_not_deny_a_repo_livespec_never_indexed(unindexed: Path):
+    """Sin índice, `read_unit` no puede contestar. Negar la lectura no deja
+    una alternativa: deja al agente sin ninguna."""
+    out, err = _run(_read("src/payments.py"), ENF, unindexed)
+    assert not _denied(out)
+    assert "not gating" in err and "index_project" in err
+
+
+def test_warn_mode_also_stands_down_without_an_index(unindexed: Path):
+    """El punto del modo warning es medir falsos positivos. Un "habría negado"
+    sobre un repo sin índice es un falso positivo por definición, y contarlo
+    ensucia justo el número por el que existe el modo."""
+    log = unindexed / ".vise" / "codelayer-warnings.jsonl"
+    out, _ = _run(_read("src/payments.py"), {"VISE_CODELAYER": "warn"}, unindexed)
+    assert not _denied(out)
+    assert not log.exists(), "registró un aviso que no correspondía"
+
+
+def test_an_unreadable_index_still_gates(project: Path):
+    """"No hay índice" es una razón para no negar. "No pude leerlo" no lo es:
+    una puerta que se abre ante su propio bug es un agujero silencioso."""
+    db = project / ".mcp-docs" / "docs.db"
+    db.write_bytes(b"not a database")
+    out, _ = _run(_read("src/payments.py"), ENF, project)
+    assert _denied(out)
 
 
 def test_the_denial_names_the_file_it_blocked(project: Path):
