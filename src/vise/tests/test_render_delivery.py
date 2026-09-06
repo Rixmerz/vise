@@ -87,6 +87,20 @@ def test_a_snapshot_with_no_delivery_block_is_not_flagged():
     assert check_snapshot(snapshot, breakpoint=1280) == []
 
 
+def test_a_delivery_block_that_never_says_ok_is_not_read_as_a_failure():
+    """Found by re-breaking: the default in `delivery.get("ok", ...)` was
+    untested, because the only snapshot without an `ok` had no `delivery` key
+    at all and short-circuited first. A harness older or newer than this check
+    can produce the block without the key, and defaulting to "not ok" would
+    fail every gate on a page that was served fine."""
+    snapshot = {
+        "delivery": {"status": 200, "url": "http://x/"},
+        "nodes": {}, "viewport": {"width": 1280, "height": 720},
+        "document": {"width": 1280, "height": 720}, "unresolved": [],
+    }
+    assert check_snapshot(snapshot, breakpoint=1280) == []
+
+
 @pytest.mark.parametrize("kind", ["inline", "no-response"])
 def test_a_target_with_no_server_is_never_flagged(kind: str):
     snapshot = {

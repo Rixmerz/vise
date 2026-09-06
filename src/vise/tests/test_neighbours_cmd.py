@@ -133,3 +133,91 @@ def test_bootstrap_asks_the_same_quiet_way(monkeypatch):
         bootstrap_cmd, "browser_status_quiet", lambda: (True, "chromium is available")
     )
     assert "browser found" in bootstrap_cmd._design_gates_report()
+
+
+def test_the_render_line_reports_a_configured_repo(tmp_path, monkeypatch, capsys):
+    """The one path where the render gates could actually run."""
+    monkeypatch.setattr(
+        neighbours_cmd, "browser_status_quiet", lambda: (True, "chromium is available")
+    )
+    (tmp_path / ".vise").mkdir()
+    (tmp_path / ".vise" / "quality.yaml").write_text(
+        "design:\n  targets: ['file:///a.html', 'file:///b.html']\n"
+        "  breakpoints: [375, 1280]\n",
+        encoding="utf-8",
+    )
+    out = _run(tmp_path, capsys)
+    assert "ready — 2 target(s), 2 breakpoints" in out
+
+
+def test_a_browser_with_nothing_configured_is_not_reported_as_ready(tmp_path, monkeypatch, capsys):
+    """The gates fail closed on an empty target list rather than skipping, and
+    a status line saying "ready" would make that read as a bug."""
+    monkeypatch.setattr(
+        neighbours_cmd, "browser_status_quiet", lambda: (True, "chromium is available")
+    )
+    out = _run(tmp_path, capsys)
+    assert "fail closed with nothing to render" in out
+
+
+def test_the_render_line_survives_an_unreadable_quality_profile(tmp_path, monkeypatch, capsys):
+    """A status command that raises on a malformed config is a status command
+    that stops working exactly when someone needs it."""
+    monkeypatch.setattr(
+        neighbours_cmd, "browser_status_quiet", lambda: (True, "chromium is available")
+    )
+    (tmp_path / ".vise").mkdir()
+    (tmp_path / ".vise" / "quality.yaml").write_text("design: [not, a, mapping\n")
+    out = _run(tmp_path, capsys)
+    assert "render gates" in out
+
+
+def test_a_stale_graph_gets_a_note_saying_what_it_costs(tmp_path, capsys):
+    """Reporting "differs" without saying what follows leaves the reader to
+    guess whether a caller count they are about to act on is trustworthy."""
+    import sqlite3
+    import time
+
+    db = tmp_path / ".mcp-docs" / "docs.db"
+    db.parent.mkdir(parents=True)
+    graph = tmp_path / "graphify-out" / "graph.json"
+    graph.parent.mkdir(parents=True)
+    graph.write_text('{"nodes": [], "links": []}', encoding="utf-8")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE index_run (id INTEGER PRIMARY KEY, project_id INTEGER, "
+        "started_at TEXT, finished_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO index_run(project_id, started_at, finished_at) "
+        "VALUES (1,'a','2026-09-06 20:00:00')"
+    )
+    conn.execute(
+        "CREATE TABLE external_ingest (project_id INTEGER, origin TEXT, "
+        "graph_path TEXT, graph_mtime REAL, graph_size INTEGER, graph_hash TEXT, "
+        "relations TEXT, edges_written INTEGER, ingested_at REAL)"
+    )
+    conn.execute(
+        "INSERT INTO external_ingest VALUES "
+        "(1,'external:graphify',?,?,999999,'x','calls',5,?)",
+        (str(graph), graph.stat().st_mtime, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+    out = _run(tmp_path, capsys)
+    assert "no longer on disk" in out and "re-ingested" in out
+
+
+def test_a_probe_that_cannot_even_start_is_not_read_as_available(monkeypatch):
+    import subprocess
+
+    from vise.cli import _browser_probe
+
+    def boom(cmd, **kw):
+        raise OSError("no interpreter")
+
+    monkeypatch.undo()
+    monkeypatch.setattr(subprocess, "run", boom)
+    ok, why = _browser_probe.browser_status_quiet()
+    assert not ok and "OSError" in why

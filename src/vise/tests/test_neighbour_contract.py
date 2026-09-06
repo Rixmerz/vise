@@ -41,6 +41,12 @@ SPEAKERS = (
     # survey phase is a list of calls vise cannot make, written down for the
     # agent that can. A rename there is as silent as one in a skill.
     REPO / "src" / "vise" / "assets" / "workflows" / "decouple-graph.yaml",
+    # The debug workflow's tracing node is the only graph that speaks
+    # flowtrace, and the verification panel's regression lens is the only
+    # Python that names a neighbour's call in a prompt an agent will run.
+    # Both are as silent about a rename as any skill.
+    REPO / "src" / "vise" / "assets" / "workflows" / "debug-graph.yaml",
+    REPO / "src" / "vise" / "runtime" / "verify.py",
 )
 
 #: Backticked call-shaped identifiers: `read_unit(qname)`, `locate("x")`.

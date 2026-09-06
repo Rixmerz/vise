@@ -51,6 +51,13 @@ FLOWTRACE_DIR = ".flowtrace"
 FLOWTRACE_LEGACY = "flowtrace.jsonl"
 
 #: Graphify's output. livespec's `[graph] external` default points here.
+#:
+#: Safe to read while Graphify may be rebuilding: it writes through a temp file
+#: and `os.replace`, so a reader sees the old graph or the new one and never a
+#: half-written file. Worth knowing because Graphify's git post-commit hook
+#: rebuilds in the background — meaning a rebuild really can be in flight while
+#: a vise gate or snapshot is reading. Checked against `graphify/paths.py`
+#: (`write_json_atomic`) at 0.9.55, not assumed.
 GRAPHIFY_GRAPH = "graphify-out/graph.json"
 
 _SQLITE_TIMEOUT_S = 0.5

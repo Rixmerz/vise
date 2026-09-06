@@ -215,6 +215,22 @@ def test_a_half_written_line_is_reported_not_fatal(tmp_path: Path):
     assert state.events == 4 and state.malformed == 1
 
 
+def test_a_json_line_that_is_not_an_object_counts_as_malformed(tmp_path: Path):
+    """A valid JSON line is not automatically an event.
+
+    Found by re-breaking: removing the `malformed += 1` on this branch left
+    every test green, because the only bad line under test was invalid JSON.
+    A bare array or string parses fine and has no `event`, `module` or
+    `trace_id` — counting it as an event would inflate the number a gate reads.
+    """
+    path = _trace(tmp_path)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write('[1, 2, 3]\n"just a string"\n')
+    state = trace_state(tmp_path)
+    assert state.events == 4, "a non-object line was counted as an event"
+    assert state.malformed == 2
+
+
 def test_the_error_signature_names_the_failing_calls(tmp_path: Path):
     _trace(tmp_path)
     assert error_signature(tmp_path) == ("error_fixture.inner", "error_fixture.outer")
@@ -295,3 +311,62 @@ def test_summary_names_every_neighbour_even_when_absent(tmp_path: Path):
     text = summary(tmp_path)
     for name in ("livespec", "flowtrace", "Graphify"):
         assert name in text, f"{name} missing from the summary"
+
+
+# ---------------------------------------------------------------------------
+# The failure paths, which are the ones that must never raise
+# ---------------------------------------------------------------------------
+
+def test_a_trace_directory_that_cannot_be_listed_is_unknown(tmp_path: Path, monkeypatch):
+    """Callers are a PreToolUse hook and a validator. Neither survives an
+    exception from here, and neither should treat one as "no trace"."""
+    import vise.core.neighbour_state as mod
+
+    _trace(tmp_path)
+
+    def boom(project):
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(mod, "_trace_files", boom)
+    state = trace_state(tmp_path)
+    assert not state.known and "PermissionError" in state.detail
+
+
+def test_an_unreadable_graph_state_is_reported_not_raised(tmp_path: Path, monkeypatch):
+    import vise.core.neighbour_state as mod
+
+    _index(tmp_path)
+    _graph(tmp_path)
+
+    def boom(db):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(mod, "_connect", boom)
+    state = graph_state(tmp_path)
+    assert "could not read" in state.detail
+
+
+def test_the_error_signature_survives_a_broken_trace(tmp_path: Path, monkeypatch):
+    """It feeds a gate's evidence. Returning nothing is a wrong answer this
+    module can live with; raising is not."""
+    import vise.core.neighbour_state as mod
+
+    _trace(tmp_path)
+    monkeypatch.setattr(mod, "trace_state", lambda *a, **k: 1 / 0)
+    assert error_signature(tmp_path) == ()
+
+
+def test_a_malformed_line_never_stops_the_error_signature(tmp_path: Path):
+    path = _trace(tmp_path)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("{not json\n")
+    assert error_signature(tmp_path) == ("error_fixture.inner", "error_fixture.outer")
+
+
+def test_a_graph_with_no_index_beside_it_is_still_reported(tmp_path: Path):
+    """Graphify does not need livespec. A graph with nothing to ingest it is a
+    normal state, and saying "no graph" would be wrong."""
+    _graph(tmp_path)
+    state = graph_state(tmp_path)
+    assert state.present and not state.ingested
+    assert "no livespec index" in state.detail

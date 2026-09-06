@@ -521,3 +521,40 @@ def test_a_task_with_no_criteria_gets_no_panel_however_many_it_asks_for():
     state = _run([_task(acceptance=[], verifiers=3)], worker)
     assert not worker.verify_briefs
     assert state.tasks["auth"].state is TaskState.SUCCEEDED
+
+
+def test_the_regression_lens_reaches_for_the_tool_that_answers_it():
+    """Of the four lenses this is the one a tool answers better than a reader.
+
+    "What does this change that nobody asked it to" is a question about callers
+    the diff does not show — which is what `git_diff_impact` computes. The other
+    three lenses are judgement and stay judgement.
+    """
+    from vise.core.neighbours import LIVESPEC_TOOLS
+    from vise.runtime.verify import LENSES
+
+    lenses = dict(LENSES)
+    assert "git_diff_impact" in lenses["regression"]
+    assert "git_diff_impact" in LIVESPEC_TOOLS, (
+        "a lens that names a call the contract does not pin is a rename waiting "
+        "to happen silently"
+    )
+    for name in ("criteria", "evidence", "adversary"):
+        assert not any(tool in lenses[name] for tool in LIVESPEC_TOOLS), (
+            f"the {name} lens reaches for a tool; it is a judgement question"
+        )
+
+
+def test_the_regression_lens_still_works_without_the_tool():
+    """vise cannot see whether livespec is mounted, so every mention of it has
+    to carry the branch. A lens that assumes the tool turns a verifier without
+    it into one that reports inconclusive for the wrong reason."""
+    from vise.runtime.verify import LENSES
+
+    regression = dict(LENSES)["regression"]
+    assert "if `git_diff_impact` is in your tool surface" in regression.lower()
+    assert "without it" in regression.lower()
+    assert "workspace" in regression, (
+        "livespec requires it on every call; a lens that omits it teaches a "
+        "call that raises"
+    )

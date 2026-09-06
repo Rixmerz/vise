@@ -51,6 +51,33 @@ Also fixed in the same pass, and the same class of error:
   Playwright demands its own Chromium revision. It is two installs. The
   orchestration skill said one.
 
+### Added — the verification panel's regression lens reaches for a tool
+
+Of the four lenses a verifier panel cycles through, three are judgement and one
+is not: "what did this change that nobody asked it to" is a question about
+callers the diff does not show, which is exactly what livespec's
+`git_diff_impact` computes — changed files, the callers they reach, and the
+test files likely to break. The lens now says so, with the branch for a session
+that does not have it, because vise cannot see whether livespec is mounted.
+`runtime/verify.py` joins the neighbour contract's speaker list: it is the only
+Python that names another server's call inside a prompt an agent will run, and
+it was as silent about a rename as any skill.
+
+### Changed — the coverage floor rises to 85
+
+12962 statements, 1969 uncovered: **84.81%**, reproduced twice at 61 combined
+files. `coverage` compares `fail_under` against the total rounded to
+`precision` (default 0), so 85 means "at or above 84.5" and the real margin is
+about 0.3 points. That is written into `pyproject.toml` next to the number,
+because the previous floor shipped with the margin undocumented and the next
+person meets it in a red run.
+
+Also verified while doing this and worth recording: **Graphify writes
+`graph.json` atomically** (temp file plus `os.replace`, `graphify/paths.py` at
+0.9.55). Its git post-commit hook rebuilds in the background, so a rebuild
+genuinely can be in flight while a vise gate or snapshot reads that directory —
+and it is safe, which was an open question rather than an assumption.
+
 ### Fixed — a 404 measured as a clean page, and both render gates passed it
 
 `ui_layout` and `ui_contrast` navigate to each `design.targets` entry and

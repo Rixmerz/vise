@@ -77,7 +77,13 @@ LENSES: tuple[tuple[str, str], ...] = (
     ("regression", (
         "Your lens is what this changed that nobody asked it to. Read the diff "
         "for behaviour an existing caller depends on and no criterion mentions. "
-        "A criterion met by breaking something else is not met."
+        "A criterion met by breaking something else is not met.\n"
+        "If `git_diff_impact` is in your tool surface, run it over this change "
+        "before reading: it is the one question in this panel a tool answers "
+        "better than a reader, because the caller three modules away is exactly "
+        "the one a diff does not show you. Its suggested test files are where "
+        "to look first. Pass the repo root as `workspace` — it is required. "
+        "Without it, follow the changed signatures outward by hand and say so."
     )),
 )
 

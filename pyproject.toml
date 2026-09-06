@@ -87,7 +87,13 @@ concurrency = ["thread", "multiprocessing"]
 # said 71, CLAUDE.md said 74 — so "the coverage gate" meant a different number
 # depending on which one you ran, and the one that actually gated was the
 # lowest. Every caller now runs a bare `coverage report`.
-fail_under = 84
+# Raised 84 -> 85 on 2026-09-06. Reproduced twice at 61 combined files:
+# 12962 statements, 1969 uncovered, 84.81% exactly. `coverage` compares
+# fail_under against the total rounded to `precision` (default 0), so 85 here
+# means "at or above 84.5" and the real margin is about 0.3 points, not 0. Say
+# it out loud rather than letting the next person find out in a red run: the
+# fix for a drop is to cover the new code, never to lower this line.
+fail_under = 85
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

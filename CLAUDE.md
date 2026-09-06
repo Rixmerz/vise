@@ -104,9 +104,37 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_doc_call_sync.py` / `test_version_sync.py` | README claims and version strings match reality |
 | `test_asset_coverage.py` | every validator in the registry is documented in the README — a workflow author cannot use one they cannot find |
 | `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
+| `test_neighbour_contract.py` | every tool name an asset teaches belongs to vise or to a neighbour in `core/neighbours.py` — and every pinned name is still referenced somewhere |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.
+
+## The neighbours
+
+vise names tools belonging to `livespec`, `flowtrace` and `layout-inspector` in
+about thirty places and can call none of them: MCP has no server-to-server
+channel. `src/vise/core/neighbours.py` is the one place those names live, and
+`test_neighbour_contract.py` holds every asset to it.
+
+That contract keeps vise consistent with itself, which is not the same as
+correct. It shipped `locate` and `compute_index_status` — one that livespec has
+never had, one removed in its v0.9 — in the `codelayer_gate` deny message and
+the decouple survey, the two surfaces most dependent on being obeyed. Nothing
+here could have caught it. So:
+
+- **Check a name against the neighbour before you add it**, and record the
+  release you checked in `MINIMUM_VERSIONS`. A version is the one fact about
+  another repository that a person can verify in a minute.
+- **Every livespec example takes `workspace`.** It is required on every call;
+  there is no environment fallback.
+- **What vise *can* check is the file.** `core/neighbour_state.py` reads
+  livespec's index, flowtrace's newest trace and the provenance of a Graphify
+  ingest, with the standard library and without raising. Prefer that over a
+  phase prompt asking an agent to check — a refusal in prose is advice to the
+  party being checked. `vise neighbours` prints what it sees.
+- **Absent and unreadable are different.** A known absence fails a gate closed;
+  "could not tell" must report `unverified`. Collapsing them makes a gate
+  refuse on vise's own bug, which is how an override habit starts.
 
 ## Writing agents and skills
 
