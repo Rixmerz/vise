@@ -85,7 +85,14 @@ UNVERIFIED_BY_DESIGN: dict[tuple[str, str], str] = {
     ("debug", "analyze"): _COGNITIVO,
     ("debug", "hypothesize"): _COGNITIVO,
     ("debug", "strategy-tests"): _COGNITIVO,
-    ("debug", "strategy-flowtrace"): _COGNITIVO,
+    ("debug", "strategy-flowtrace"): (
+        "el nodo produce artefactos — reportes de profiler, y una traza de "
+        "flowtrace cuando ese server está en la sesión — pero ninguno existe "
+        "en un repo que no optó por esa herramienta. `trace_captured` viaja "
+        "comentado en el propio archivo, con el motivo, como `diff_scope` en "
+        "decouple: una puerta que falla cerrado sobre un artefacto que nadie "
+        "produce bloquea a todos los demás repos"
+    ),
     ("debug", "strategy-hybrid"): _COGNITIVO,
     ("debug", "unreproducible"): (
         "es la salida del caso en que NO hay reproducción; exigirle una "

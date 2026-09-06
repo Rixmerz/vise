@@ -114,7 +114,7 @@ def test_runtime_explain_of_an_unknown_run_exits_two(tmp_path, capsys):
 def test_bootstrap_dry_run_prints_a_profile_and_writes_nothing(tmp_path, capsys, monkeypatch):
     from vise.cli import bootstrap_cmd
 
-    monkeypatch.setattr(bootstrap_cmd, "browser_status", lambda: (False, "no browser here"))
+    monkeypatch.setattr(bootstrap_cmd, "browser_status_quiet", lambda: (False, "no browser here"))
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
 
     rc = main(["bootstrap", "--project-dir", str(tmp_path), "--dry-run"])

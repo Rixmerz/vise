@@ -96,7 +96,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 | UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
-| PreToolUse | `Read\|Grep\|Glob\|Bash` | `codelayer_gate.py` | Redirects source reads to the symbol tools (`read_unit`, `locate`) — **opt-in**, `warn` records what it would deny, `enforce` denies, `off` (default) is inert |
+| PreToolUse | `Read\|Grep\|Glob\|Bash` | `codelayer_gate.py` | Redirects source reads to the symbol tools (`find_symbol`, `read_unit`) — **opt-in**, `warn` records what it would deny, `enforce` denies, `off` (default) is inert, and it stands down entirely where livespec has no index |
 | PreToolUse | `Bash` | `snapshot_trigger.py --pre` | Captures **before** a shell command that would touch the working tree, so a `git reset --hard` is survivable — **opt-in**, gated in the shell so it costs ~1 ms when off |
 | PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) — **opt-in**, no-ops unless `VISE_SNAPSHOT_ON_EDIT` is truthy |
 | PostToolUse | `Edit\|Write\|MultiEdit` | `edit_feedback.py` | Runs a fast ruff-only pass on the edited Python file and prints a concise findings summary to stderr — feedback only, never blocks |
@@ -425,6 +425,46 @@ into something a gate can read. Neither bans anything:
 Both diff against `base:` (default `HEAD`, i.e. uncommitted work) and
 `diff_scope` also sees untracked files, since a brand-new file outside the
 partition is exactly the case worth catching.
+
+## Neighbouring servers
+
+vise runs *beside* other MCP servers, not above them, and MCP has no
+server-to-server channel — so vise can name their tools and never call one.
+Three come up often enough that the bundled assets teach when to reach for
+them, and `vise/core/neighbours.py` is the single place those names and the
+versions they assume are written down.
+
+| Server | Answers | Minimum vise's guidance assumes |
+|---|---|---|
+| [`livespec`](https://github.com/Rixmerz/livespec) | what *could* run — the repo as a symbol graph | 0.31 |
+| [`flowtrace`](https://github.com/Rixmerz/flowtrace-debugger) | what *did* run — a real execution, traced | 2.7.0 |
+| [`layout-inspector`](https://github.com/Rixmerz/layout-inspector-mcp) | how it *renders* — measured geometry | 0.4.0 |
+
+Two of the three leave artifacts in the repository, which is a channel that
+does exist:
+
+```
+vise neighbours          # what livespec, flowtrace and Graphify left here
+```
+
+It reads `.mcp-docs/docs.db`, `.flowtrace/*.jsonl` and `graphify-out/graph.json`
+with nothing but the standard library, and it is the same reading the
+`symbol_index`, `trace_captured` and `trace_error_gone` gates do — so a person
+debugging a refusal sees exactly what refused.
+
+A fourth name shows up in that output. [Graphify](https://github.com/Graphify-Labs/graphify)
+is not an MCP server vise talks to; it is a CLI whose `graph.json` livespec
+ingests. It earns a line because its presence changes what vise's own gates
+see: `graphify-out/` is committed by convention and rebuilt by a git
+post-commit hook, so a repo that uses it has files in every diff nobody edited
+— which `diff_scope` will fail on unless the directory is in its `allow` list,
+and which `vise bootstrap` adds when it finds one.
+
+Two cautions the assets carry, both learned from livespec's own measurements:
+after an ingest, a caller count from `analyze_impact` includes a type used only
+in an annotation, so `who_calls` is the number to use when it decides
+something; and two extractors agreeing is still static analysis, never evidence
+that a path runs.
 
 ## Project agents
 

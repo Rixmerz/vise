@@ -57,18 +57,39 @@ def _files():
                 yield from root.rglob(suffix)
 
 
+def _command_modules():
+    """Every `vise.cli.*_cmd` module that exports `add_parser`.
+
+    This list used to be typed out here, which made it a second copy of the one
+    in `main`. The copy went stale the first time a subcommand was added: the
+    new command worked, and this test — whose whole job is to catch a command
+    that does not exist — reported that it did not. Discovering them removes
+    the copy; `test_every_command_module_is_wired_into_main` closes the other
+    direction, since a module nobody wires is a command nobody can run.
+    """
+    import importlib
+    import pkgutil
+
+    import vise.cli
+
+    modules = []
+    for info in pkgutil.iter_modules(vise.cli.__path__):
+        if not info.name.endswith("_cmd"):
+            continue
+        module = importlib.import_module(f"vise.cli.{info.name}")
+        if hasattr(module, "add_parser"):
+            modules.append(module)
+    return modules
+
+
 def _parser_tree() -> dict[str, set[str]]:
     """{subcommand: {its subcommands}} straight out of the real parser."""
-    from vise.cli import approve_cmd, bootstrap_cmd, experience_cmd, graph_cmd
-    from vise.cli import insights_cmd, runtime_cmd, shot_cmd
-
     # Built the same way `main` builds it. Reaching into the modules rather
     # than skipping when no builder is exported: a doc-sync test that opts out
     # when it cannot see its subject is the exact shape this tier is against.
     parser = argparse.ArgumentParser(prog="vise")
     sub = parser.add_subparsers(dest="command")
-    for module in (graph_cmd, experience_cmd, insights_cmd, bootstrap_cmd,
-                   approve_cmd, runtime_cmd, shot_cmd):
+    for module in _command_modules():
         module.add_parser(sub)
 
     tree: dict[str, set[str]] = {name: set() for name in _PRE_PARSER}
@@ -168,4 +189,30 @@ def test_session_id_is_not_documented_as_isolation():
     assert other == "/tmp/one", (
         "a second session pointed at the same project gets the same project — "
         "which is the point: nothing is isolated"
+    )
+
+
+def test_every_command_module_is_wired_into_main():
+    """A subcommand module that `main` never dispatches to is unreachable.
+
+    `main` gates on a literal tuple of names before it builds the parser, so a
+    module can register a perfectly good subparser and still answer "unknown
+    command". That is how `vise neighbours` behaved for its first minute of
+    existence, and reading the tuple back is the only way to notice.
+    """
+    main_source = (REPO / "src" / "vise" / "cli" / "main.py").read_text(encoding="utf-8")
+    gate = main_source.split("if args[0] in (", 1)[1].split("):", 1)[0]
+    dispatched = set(re.findall(r'"([a-z][a-z0-9-]*)"', gate))
+
+    missing = set()
+    for module in _command_modules():
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        module.add_parser(sub)
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                missing |= set(action.choices) - dispatched
+    assert not missing, (
+        f"these subcommands register a parser but `main` never routes to them, "
+        f"so they answer 'unknown command': {sorted(missing)}"
     )

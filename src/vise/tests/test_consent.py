@@ -250,7 +250,7 @@ def test_bootstrap_approves_what_it_wrote(tmp_path, monkeypatch):
 
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
     monkeypatch.setattr(bootstrap_cmd, "_resolves", lambda project, cmd: cmd[0] == "ruff")
-    monkeypatch.setattr(bootstrap_cmd, "browser_status", lambda: (True, "chromium is available"))
+    monkeypatch.setattr(bootstrap_cmd, "browser_status_quiet", lambda: (True, "chromium is available"))
 
     rc = bootstrap_cmd._cmd_bootstrap(argparse.Namespace(
         project_dir=str(tmp_path), dry_run=False, force=False,

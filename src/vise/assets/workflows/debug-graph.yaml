@@ -2,9 +2,15 @@
 # Multi-strategy debugging: tests, native profiling/tracing, hybrid
 # Flow: understand -> reproduce -> classify -> [strategy] -> analyze -> hypothesize -> fix -> verify -> report
 #
-# Every instruction below uses tools that actually exist: Bash, Read, Grep,
-# Glob. vise bundles no instrumentation MCP and has no generic MCP dispatch
-# tool — see the GAP note in the strategy-flowtrace node.
+# Every instruction below uses tools that actually exist. The base path is
+# Bash, Read, Grep and Glob: vise bundles no instrumentation MCP and has no
+# generic MCP dispatch tool, so native profilers and sanitizers are what this
+# workflow can always count on. Where the `flowtrace` MCP server IS in the
+# session, the profiling and hybrid nodes say what to do with it — and the two
+# gates that read its output ship commented, for the reason at the `move` node
+# of decouple-graph.yaml: a validator whose artifact only exists in repos that
+# opted in cannot be enabled by default without failing every repo that did
+# not.
 
 metadata:
   name: "Universal Debug"
@@ -62,6 +68,19 @@ nodes:
       # decia sobre si mismo, y un bug no reproducido pasaba directo a `fix`.
       - type: "tests_fail"
         weight: 0.4
+    # If this repo traces its reproductions with flowtrace, add these two as
+    # ADDITIONAL entries under `validators:` above — do not re-declare the key,
+    # a duplicate silently drops tests_fail. They ship commented because their
+    # artifact only exists in a repo that opted into flowtrace, and a gate that
+    # fails closed on an artifact nobody produces blocks every other repo.
+    #
+    # `tests_fail` proves a test fails. `trace_captured` proves the failure was
+    # recorded as a real execution, and writes down which calls raised — which
+    # is what `trace_error_gone` on the verify node compares against. Together
+    # they close the hole `tests_pass` leaves: a fix that deleted the failing
+    # test is green, and did not stop the call from raising.
+    #   - type: "trace_captured"
+    #     weight: 0.4
     name: "Reproduce the Bug"
     model: sonnet
     mcps_enabled: []
@@ -267,12 +286,43 @@ nodes:
       For performance and integration bugs, you need to observe the
       runtime behavior. Use the language's NATIVE profiler via Bash.
 
-      GAP — no instrumentation MCP is bundled. vise ships no auto-tracer and
-      no generic MCP dispatch tool, so there is nothing to call for
-      whole-program instrumentation out of the box. If you have such an MCP,
-      bind it once with capability_set and drive it via a recipe; until then
-      this phase runs entirely on native tooling, which is sufficient for
-      almost every performance and integration bug.
+      FIRST — is `flowtrace` in your tool surface? vise bundles no tracer and
+      cannot call one, but that server, if the session has it, answers this
+      phase's question directly: what the program actually did, rather than
+      what the source suggests it does.
+
+        flowtrace run -- <the command that reproduces this>
+
+      instruments Java, Python, Node/TypeScript and Go without touching the
+      source and writes `.flowtrace/<timestamp>.jsonl`. Then:
+
+      - log_open on that path — every other call takes the session id it
+        returns.
+      - trace_find_error for an integration failure: the failing span plus its
+        ancestry. Read each ancestor's arguments going down; the point where a
+        value first becomes wrong is usually several frames above where the
+        exception surfaced.
+      - log_aggregate over duration_ns grouped by method for a performance
+        bug, then subtract child time from parent time before concluding.
+      - trace_tree on the relevant trace id to see what actually ran. This is
+        the cheapest way to discover the code you were reading was never
+        called.
+
+      Four things that turn a wrong conclusion into a right one:
+
+      - Scope to ONE trace id before concluding anything. A server writes many
+        interleaved executions into one file.
+      - Name the package prefix. Without it the capture instruments the
+        framework and the stdlib and the trace is unreadable — and an empty
+        trace is almost always that prefix, not a program that did nothing.
+      - An absent method was NOT INSTRUMENTED, not not-run.
+      - A span that starts async work without awaiting it closes while the
+        child runs, so a child's duration can exceed its parent's. Negative
+        self-time means the parent did not do the work.
+
+      No flowtrace? Everything below is the path that always works. Do not
+      hand-wire a capture layer out of a checkout to fake it: that only works
+      on the machine that happens to have it.
 
       FOR PERFORMANCE — run the profiler with Bash, write output to a file:
       - Rust:    cargo bench | tee bench.txt ; cargo flamegraph (criterion)
@@ -329,9 +379,12 @@ nodes:
       runtime's built-in instrumentation (sanitizers, race detectors,
       allocation trackers). All of it runs through Bash.
 
-      GAP — no instrumentation MCP is bundled (see the profiling strategy
-      node). Sanitizers and race detectors are shipped with the toolchains
-      themselves, so this phase needs nothing extra installed.
+      Sanitizers and race detectors ship with the toolchains themselves, so
+      this phase needs nothing extra installed. If `flowtrace` is in your tool
+      surface it adds one thing the sanitizers cannot: an ordering timeline
+      across threads, since every event carries `thread` and a span id. Run
+      the stress loop under `flowtrace run` and read the interleaving around
+      the failure. Everything below works without it.
 
       FOR CONCURRENCY:
       - Run tests with sanitizers:
@@ -506,6 +559,11 @@ nodes:
         weight: 0.4
       - type: "lint_pass"
         weight: 0.15
+    # The other half of the pair described at `reproduce`. Uncomment BOTH or
+    # neither: with no reproduction signature recorded this reports unverified,
+    # which is honest and checks nothing.
+    #   - type: "trace_error_gone"
+    #     weight: 0.4
     name: "Verify Fix"
     model: sonnet
     mcps_enabled:

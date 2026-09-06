@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from vise.core import consent
-from vise.engines.render_harness import browser_status
+from vise.cli._browser_probe import browser_status_quiet
 
 # (manifest, ecosystem). Order matters only for reporting; a polyglot repo
 # matches several and gets checks for each.
@@ -292,13 +292,49 @@ def _design_gates_report() -> str:
     so the answer belongs here — not in the first ``ui_layout`` block a week
     later, after bootstrap said the repo was ready.
     """
-    ok, reason = browser_status()
+    ok, reason = browser_status_quiet()
     if ok:
         return "\ndesign gates (ui_layout, ui_contrast): browser found — they will run."
     return (
         "\ndesign gates (ui_layout, ui_contrast): NO BROWSER — they fail closed "
         f"until one exists.\n  {reason}"
     )
+
+
+def _neighbours_report(project: Path) -> str:
+    """What the servers vise runs beside left in this repo, and what follows.
+
+    Bootstrap is where someone is already looking at what this repo can and
+    cannot check, and two of the three facts here change how vise behaves:
+    without a livespec index the CodeLayer gate stands down and `symbol_index`
+    refuses, and a Graphify graph puts files in every diff that nobody edited.
+    Both are cheaper to learn here than in the first red gate a week later.
+    """
+    from vise.core.neighbour_state import GRAPHIFY_GRAPH, graph_state, index_state
+
+    lines = ["\nneighbouring servers (vise names them and cannot call them):"]
+    index = index_state(project)
+    lines.append(f"  livespec  {index.detail}")
+    if index.refuses:
+        lines.append(
+            "            -> the CodeLayer gate stands down and `symbol_index` "
+            "fails closed until\n"
+            "               livespec indexes this repo. Nothing else is affected."
+        )
+    graph = graph_state(project)
+    if graph.present:
+        lines.append(f"  Graphify  {graph.detail}")
+        lines.append(
+            f"            -> `{GRAPHIFY_GRAPH}` is committed by convention and "
+            "rebuilt by a git\n"
+            "               post-commit hook, so it lands in diffs nobody "
+            "edited. If you wire the\n"
+            "               `diff_scope` gate, put `graphify-out/**` in its "
+            "`allow` list or it goes\n"
+            "               red on a file no human touched."
+        )
+    lines.append("  (`vise neighbours` reports this any time, with more detail)")
+    return "\n".join(lines)
 
 
 def _cmd_bootstrap(args: argparse.Namespace) -> int:
@@ -312,11 +348,13 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
         print("\nWhat detection would have written:\n")
         print(render(found))
         print(_design_gates_report())
+        print(_neighbours_report(project))
         return 0
 
     if args.dry_run:
         print(render(found))
         print(_design_gates_report())
+        print(_neighbours_report(project))
         return 0
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -337,6 +375,7 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
         )
 
     print(_design_gates_report())
+    print(_neighbours_report(project))
 
     unit = found["bound"].get("unit")
     lint = found["bound"].get("lint")

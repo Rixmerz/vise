@@ -51,6 +51,63 @@ Also fixed in the same pass, and the same class of error:
   Playwright demands its own Chromium revision. It is two installs. The
   orchestration skill said one.
 
+### Added — `vise neighbours`, and the tracing node finally has a tracer
+
+`strategy-flowtrace` has carried that name since vise's first commit while
+bundling no tracer at all. Its own prompt called that a GAP and offered a
+remedy — bind an instrumentation MCP with `capability_set` and drive it via a
+recipe — which does not work: the capability taxonomy in
+`recipes/capabilities.py` has no tracing entry, so that path validates only as
+an invented `x.*` extension with no exemplar behind it. An instruction that
+reads like a plan and is a dead end.
+
+`flowtrace` is a real server that answers exactly that node's question:
+`flowtrace run -- <command>` instruments Java, Python, Node/TypeScript and Go
+without touching the source and writes paired enter/exit events with arguments,
+results, durations and errors. The node now says so, names `log_open`,
+`trace_find_error`, `log_aggregate` and `trace_tree`, and carries the four ways
+a correct trace produces a wrong conclusion — one trace id at a time, an absent
+method was not instrumented rather than not run, an empty trace is the package
+prefix, and a span that does not await its child closes before the child
+finishes. **The native-profiler path is unchanged and still the default**; a
+bundled workflow cannot require a server the session may not have.
+
+`trace_captured` and `trace_error_gone` ship commented on `reproduce` and
+`verify`, for the reason `diff_scope` ships commented on decouple's `move`: a
+gate that fails closed on an artifact only opted-in repos produce would block
+every repo that did not.
+
+New commands and reports, all reading the same three files:
+
+- **`vise neighbours`** — what livespec, flowtrace and Graphify left in this
+  repo, plus whether vise's own render gates could run, plus the minimum
+  versions the guidance assumes. A person debugging a refusal sees exactly what
+  refused.
+- **`vise bootstrap` reports the same two facts that change behaviour**: no
+  livespec index means the CodeLayer gate stands down and `symbol_index`
+  refuses, and a Graphify graph means `graphify-out/**` belongs in
+  `diff_scope`'s `allow` list, because that directory is committed by
+  convention and rebuilt by a git post-commit hook — so it lands in diffs
+  nobody edited.
+
+### Fixed — `vise bootstrap` printed a Playwright traceback after saying the browser was fine
+
+`browser_status()` starts Playwright's driver to read the Chromium path, and
+Playwright's teardown then writes "Task was destroyed but it is pending!" and a
+`TargetClosedError` traceback to stderr at interpreter exit — after the correct
+answer has already been returned. Cosmetic inside a validator, where it lands
+in a log; in a command a person runs it reads as the tool crashing on the
+sentence that said everything was fine. Both CLI commands now ask through
+`cli/_browser_probe.py`, which contains it in a subprocess. What the gates do
+is unchanged.
+
+Also: `test_documented_commands_exist.py` kept its own copy of the CLI's module
+list, so the test whose job is to catch a command that does not exist reported
+that `vise neighbours` did not — while it worked. It discovers the modules now,
+and a new test closes the other direction, since `main` gates on a literal
+tuple of names before building the parser and a module nobody adds there
+answers "unknown command" no matter how good its parser is.
+
 ### Added — vise reads what its neighbours leave on disk
 
 vise cannot call livespec, flowtrace or layout-inspector: MCP has no
