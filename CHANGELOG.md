@@ -107,6 +107,36 @@ you may already depend on, it says so under **Behaviour change**.
   the run can spend. Plans will read higher than they did, in the direction of
   the truth.
 
+- **The orchestration skill knows about `layout-inspector`, and says how it
+  relates to the gates vise already has.** vise ships three render gates —
+  `ui_layout`, `ui_contrast`, `design_tokens` — that drive a real browser and
+  fail closed. `layout-inspector` is a separate MCP that measures the same
+  geometry, and telling an orchestrator only that it exists would leave a
+  builder with two ways to check a layout and no idea which to use when.
+
+  So the skill says the relationship instead: a gate tells you *whether*, and
+  cannot tell you *why*. A builder handed "ui_layout failed: 40px overlap at
+  375" and nothing else guesses a cause, edits CSS, and re-runs the gate to
+  find out — an expensive loop that is not the gate's job. `detect_issues`
+  reproduces the finding, `element_context` root-causes it before any CSS is
+  touched, `compare_viewports` catches the repair that fixes 375 and breaks
+  1280. The same shape as `codelayer_gate` and livespec: vise denies and names
+  the call, the neighbour serves it. Not mounted, and the section is skipped
+  entirely — a brief naming tools the builder does not have is worse than one
+  that says nothing. Both need the same browser and neither installs it for
+  the other, which is worth knowing once rather than discovering twice.
+
+- **`vise.core.livespec` is now `vise.core.neighbours`.** It held "the names
+  vise assumes another server exposes", and there are two servers now. Keeping
+  layout-inspector's names in a module called `livespec` would have been a
+  filename that lies, and a filename is the one kind of drift this repo's suite
+  cannot catch. `LIVESPEC_TOOLS` keeps its name and meaning; `LAYOUT_INSPECTOR_TOOLS`
+  joins it and `NEIGHBOUR_TOOLS` is the union every asset is checked against.
+  Two new tests: that no two neighbours claim the same name, which would make a
+  brief ambiguous about which server it meant, and that a third neighbour
+  cannot be added to the module without reaching the union — the set every
+  other test in the file checks against.
+
 - **`decouple-graph.yaml`** — the phase that moves code after the tests pass,
   which is the first moment a boundary decision has an oracle. Its refusal half
   landed earlier as `vise.runtime.decouple`; this is the rest, minus the bar it

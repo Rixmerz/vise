@@ -5,7 +5,7 @@ a boundary decision has an oracle. Its inputs come from livespec —
 ``search_similar`` for the duplicate a diff just created under a different
 name, ``analyze_impact`` for what a changed signature reaches. Those tools are
 not vise's and vise cannot call them: they live in the session, alongside the
-agent running the phase. See ``vise.core.livespec`` for the same boundary
+agent running the phase. See ``vise.core.neighbours`` for the same boundary
 written down for names.
 
 So the seam is here. The agent looks; this module *judges*, and the judgment is

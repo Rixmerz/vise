@@ -233,6 +233,41 @@ CodeLayer gate in `enforce`, reads by path are denied outright; a brief that
 tells a builder to "read `src/foo.py`" sends it into a wall.
 
 The `codelayer` skill has the full picture, including when *not* to decouple.
+
+## If the wave touches rendered UI, the gate is not the diagnosis
+
+vise ships three gates that drive a real browser: `ui_layout` (overflow,
+clipping, collision, off-document, per breakpoint), `ui_contrast` (WCAG against
+the *effective* background, in default, hover and focus) and `design_tokens`.
+Unlike the repo checks, these **fail closed** — a gate that cannot evaluate must
+never report success — and vise deliberately does not install the browser they
+need. `playwright install chromium` once, or they fail with that command named.
+
+What they tell you is *whether*. They cannot tell you *why*, and a builder
+handed "ui_layout failed: 40px overlap at 375" and nothing else will guess at a
+cause, change a CSS rule, and re-run the gate to find out. That loop is
+expensive and it is not the gate's job.
+
+`layout-inspector` — a separate MCP, not part of vise — is the other half. Same
+measurement approach, different shape: tools an agent calls rather than a gate
+that blocks. If its tools are in your surface, name them in the brief:
+
+- **`detect_issues(url)`** to reproduce the finding as measured geometry, with
+  severity split by intent — two elements at `z-index: auto` are probably a bug,
+  one with an explicit z-index is probably a deliberate overlay.
+- **`element_context(url, selector)`** to root-cause *before* touching CSS. This
+  is the call that turns the guess-and-re-run loop into one edit.
+- **`compare_viewports(url)`** after the fix, because the repair that fixes
+  375px is the one most likely to break 1280.
+
+Not mounted? Say so in the brief and hold the builder to reading the gate's
+evidence and reasoning from the CSS — the same rule as the symbol index: a
+brief naming tools the builder does not have is worse than one that says
+nothing.
+
+Both need the same browser, so a repo set up for vise's render gates already
+has what `layout-inspector` needs, and the reverse. Neither installs it for the
+other.
 It is not preloaded on any agent on purpose: it is dead weight in the repos
 that do not have the index, and it loads on its own description when they do.
 

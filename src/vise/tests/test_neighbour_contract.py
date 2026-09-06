@@ -1,22 +1,28 @@
-"""vise names livespec's tools in many places; it must name them consistently.
+"""vise names its neighbours' tools in many places; it must name them consistently.
 
-``read_unit``, ``locate``, ``search_similar`` — none of these are vise's. They
-belong to livespec, a separate MCP, and vise writes them into the deny message
-of ``codelayer_gate`` (its teaching surface: a deny that names a tool that does
-not exist is a deny that gets routed around), two skills, three commands and
-the README. Nothing in this repository can check those names against livespec.
+``read_unit``, ``search_similar``, ``detect_issues`` — none of these are vise's.
+They belong to livespec and layout-inspector, separate MCP servers that vise
+runs beside and cannot call, and vise writes them into the deny message of
+``codelayer_gate`` (its teaching surface: a deny that names a tool that does not
+exist is a deny that gets routed around), two skills, three commands, a workflow
+and the README. Nothing in this repository can check those names against either
+server.
 
 What it can check is that every such name vise writes is one vise has decided
-on, in ``vise.core.livespec.LIVESPEC_TOOLS``. A typo in a skill, a rename that
-reached the hook but not the command, a pinned name nothing references any
-more — each fails here, with the file.
+on, in ``vise.core.neighbours``. A typo in a skill, a rename that reached the
+hook but not the command, a pinned name nothing references any more — each
+fails here, with the file.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-from vise.core.livespec import LIVESPEC_TOOLS
+from vise.core.neighbours import (
+    LAYOUT_INSPECTOR_TOOLS,
+    LIVESPEC_TOOLS,
+    NEIGHBOUR_TOOLS,
+)
 
 from .test_asset_honesty import VISE_TOOLS
 
@@ -48,16 +54,16 @@ def _calls(path: Path) -> set[str]:
     return set(_CALL.findall(path.read_text(encoding="utf-8"))) - _NOT_TOOLS
 
 
-def test_every_tool_call_an_asset_teaches_belongs_to_vise_or_livespec():
-    known = LIVESPEC_TOOLS | VISE_TOOLS
+def test_every_tool_call_an_asset_teaches_belongs_to_vise_or_a_neighbour():
+    known = NEIGHBOUR_TOOLS | VISE_TOOLS
     strays: dict[str, set[str]] = {}
     for path in SPEAKERS:
         unknown = _calls(path) - known
         if unknown:
             strays[str(path.relative_to(REPO))] = unknown
     assert not strays, (
-        f"assets teach calls neither server exposes: {strays} — a rename on "
-        f"livespec's side goes in vise.core.livespec, then here"
+        f"assets teach calls no server exposes: {strays} — a rename on a "
+        f"neighbour's side goes in vise.core.neighbours, then here"
     )
 
 
@@ -72,13 +78,36 @@ def test_the_deny_message_names_only_contracted_tools():
 
 
 def test_no_contracted_name_is_dead():
-    """A name pinned that nothing says is a pin that outlived its reason."""
+    """A name pinned that nothing says is a pin that outlived its reason.
+
+    This is why a neighbour's *full* tool surface does not belong in the
+    contract — only the part vise actually teaches.
+    """
     corpus = "\n".join(p.read_text(encoding="utf-8") for p in SPEAKERS)
     corpus += (REPO / "README.md").read_text(encoding="utf-8")
-    dead = {name for name in LIVESPEC_TOOLS if name not in corpus}
+    dead = {name for name in NEIGHBOUR_TOOLS if name not in corpus}
     assert not dead, f"contracted but referenced nowhere: {sorted(dead)}"
 
 
-def test_livespec_and_vise_never_share_a_name():
-    """The same name on both servers would make the deny message ambiguous."""
-    assert not (LIVESPEC_TOOLS & VISE_TOOLS)
+def test_no_neighbour_shares_a_name_with_vise():
+    """The same name on two servers would make the deny message ambiguous."""
+    assert not (NEIGHBOUR_TOOLS & VISE_TOOLS)
+
+
+def test_the_neighbours_do_not_share_a_name_with_each_other():
+    """A brief that told a builder to call one would be naming either."""
+    assert not (LIVESPEC_TOOLS & LAYOUT_INSPECTOR_TOOLS)
+
+
+def test_the_union_is_the_whole_of_both():
+    """Guard against a third neighbour landing in the module and never
+    reaching the union every other test in this file checks against."""
+    import vise.core.neighbours as neighbours
+
+    sets = {
+        name: value for name, value in vars(neighbours).items()
+        if name.endswith("_TOOLS") and name != "NEIGHBOUR_TOOLS"
+    }
+    assert len(sets) >= 2
+    missing = {n: v - NEIGHBOUR_TOOLS for n, v in sets.items() if v - NEIGHBOUR_TOOLS}
+    assert not missing, f"contracted but outside NEIGHBOUR_TOOLS: {missing}"

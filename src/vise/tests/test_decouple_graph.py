@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from vise.core.livespec import LIVESPEC_TOOLS
+from vise.core.neighbours import LIVESPEC_TOOLS
 from vise.engines.graph_parser import load_graph_from_file
 from vise.runtime.decouple import Candidate, refuse
 
