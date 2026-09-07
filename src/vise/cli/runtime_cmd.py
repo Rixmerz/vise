@@ -632,6 +632,8 @@ def _up_to(preview) -> str:
 
 
 def _render_state(state) -> str:
+    from vise.runtime.contracts import tag
+
     lines = [f"run {state.spec.run_id} — {state.spec.goal}"]
     if state.spec.parent_run_id:
         # Without this a chain reads as unrelated runs, and the money it spent
@@ -645,7 +647,7 @@ def _render_state(state) -> str:
         lines.append("every task succeeded")
     for record in sorted(state.tasks.values(), key=lambda r: r.task_id):
         agent = record.agent_id or "—"
-        model = f"{record.model}/{record.effort}" if record.model else "—"
+        model = tag(record.model, record.effort) if record.model else "—"
         attempts = f" ({record.attempt_count} attempts)" if record.attempt_count > 1 else ""
         lines.append(f"  {record.task_id:<24} {record.state.value:<14} {agent:<18} {model}{attempts}")
         if record.note and record.state.value not in ("succeeded",):

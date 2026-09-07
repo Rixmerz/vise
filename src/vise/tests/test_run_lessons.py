@@ -15,6 +15,7 @@ from vise.runtime.contracts import (
     RunSpec,
     TaskResult,
     TaskState,
+    Usage,
     Verdict,
 )
 from vise.runtime.lessons import lessons_from, record_run_lessons
@@ -30,7 +31,7 @@ def _state(tmp_path) -> RunState:
 
 
 def test_the_new_types_are_valid_memory_types():
-    assert {"run_replanned", "run_blocked"} <= VALID_TYPES
+    assert {"run_replanned", "run_blocked", "run_succeeded"} <= VALID_TYPES
 
 
 def test_a_quiet_run_leaves_nothing(tmp_path):
@@ -117,7 +118,7 @@ def test_a_task_that_recovered_by_escalating_is_not_filed_as_a_reason(tmp_path):
     record.state = TaskState.SUCCEEDED
     state.emit("replanned", tasks=2, replans=1)
 
-    [lesson] = lessons_from(state)
+    [lesson] = [x for x in lessons_from(state) if x.type == "run_replanned"]
     assert lesson.resolution == ""
 
 
@@ -135,6 +136,100 @@ def test_a_rung_tried_twice_is_named_once(tmp_path):
 
     [lesson] = lessons_from(state)
     assert "tried sonnet/medium)" in lesson.resolution
+
+
+# --- what worked ----------------------------------------------------------
+#
+# A store of nothing but failures answers "what goes wrong here" and cannot
+# answer "what worked". The reusable half of a success is its cost shape.
+
+
+def _succeeded(state, *task_ids, cost=0.0):
+    for task_id in task_ids:
+        record = state.record(task_id)
+        record.state = TaskState.SUCCEEDED
+        record.model, record.effort = "sonnet", "medium"
+        record.attempts.append(Attempt(
+            number=1, model="sonnet", effort="medium", verdict=Verdict.PASS, summary="ok",
+        ))
+        record.result = TaskResult(task_id=task_id, verdict=Verdict.PASS, summary="ok")
+    if cost:
+        state.ledger.spend(task_ids[0], Usage(cost_usd=cost))
+    return state
+
+
+def test_a_clean_run_records_what_it_cost(tmp_path):
+    """"Every task passed on its first attempt" is a finding about the plan's
+    sizing — this node needs no climb budgeted — and it only shows across runs."""
+    state = _succeeded(_state(tmp_path), "a", "b", "c", cost=0.91)
+
+    [lesson] = lessons_from(state)
+
+    assert lesson.type == "run_succeeded"
+    assert lesson.severity == "low"
+    assert lesson.file_pattern == "run:feature-dev:implement"
+    assert "split" not in lesson.description  # the goal, whatever it is
+    assert "ship the thing" in lesson.description
+    assert "3 task(s), no replans, $0.91" in lesson.resolution
+    assert "every task passed on its first attempt" in lesson.resolution
+
+
+def test_a_success_names_the_task_that_needed_a_bigger_model(tmp_path):
+    """The one task that climbed is the lesson. The fifteen that did the expected
+    thing would bury it, so they are counted rather than listed."""
+    state = _succeeded(_state(tmp_path), "a", "b", "c")
+    record = state.record("b")
+    record.model, record.effort = "sonnet", "high"
+    record.attempts = [
+        Attempt(number=1, model="haiku", effort="", verdict=Verdict.FAIL,
+                summary="missed the guard", classification=FailureKind.CODE_BUG),
+        Attempt(number=2, model="sonnet", effort="high", verdict=Verdict.PASS,
+                summary="added the expiry guard on the parser"),
+    ]
+    record.result = TaskResult(task_id="b", verdict=Verdict.PASS,
+                               summary="added the expiry guard on the parser")
+
+    [lesson] = lessons_from(state)
+
+    assert "b (landed at sonnet/high after 2 attempts)" in lesson.resolution
+    assert "added the expiry guard on the parser" in lesson.resolution
+    assert "\na (" not in lesson.resolution and "\nc (" not in lesson.resolution
+    assert "every task passed" not in lesson.resolution
+
+
+def test_a_run_that_did_not_finish_records_no_success(tmp_path):
+    state = _succeeded(_state(tmp_path), "a", "b")
+    state.record("c").state = TaskState.FAILED
+
+    assert [x.type for x in lessons_from(state)] == []
+
+
+def test_a_run_that_replanned_and_then_worked_records_both(tmp_path):
+    """The pair worth having: the first shape was wrong for this reason, the
+    second worked and cost this much."""
+    state = _succeeded(_state(tmp_path), "a", cost=1.40)
+    record = state.record("a")
+    record.attempts.insert(0, Attempt(
+        number=1, model="haiku", effort="", verdict=Verdict.FAIL,
+        summary="the spec wants a field the schema forbids",
+        classification=FailureKind.SPEC_BUG,
+    ))
+    state.replans = 1
+    state.emit("replanned", tasks=2, replans=1)
+
+    kinds = [x.type for x in lessons_from(state)]
+
+    assert kinds == ["run_replanned", "run_succeeded"]
+
+
+def test_a_success_reaches_the_project_store(tmp_path):
+    state = _succeeded(_state(tmp_path), "a", cost=0.20)
+
+    assert record_run_lessons(state, str(tmp_path)) == 1
+
+    store = get_project_experience_store(str(tmp_path))
+    [entry] = [e for e in store.entries if e.type == "run_succeeded"]
+    assert "every task passed on its first attempt" in entry.resolution
 
 
 def test_a_run_parked_for_a_person_is_a_lesson(tmp_path):

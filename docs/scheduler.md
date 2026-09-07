@@ -487,14 +487,43 @@ failed once and then passed is still left out, and deliberately: that is the
 ladder working, and filing it here would put a solved problem in front of the
 next plan as though it were open.
 
+### And what worked
+
+A store of nothing but failures answers "what goes wrong here" and cannot answer
+"what worked", so a run where every task succeeded leaves a `run_succeeded` entry
+under the same key. The reusable half of a success is its **cost shape**, not the
+fact of it:
+
+```
+3 task(s), no replans, $0.91 — every task passed on its first attempt
+```
+
+```
+6 task(s), 1 replan(s), $2.14
+b (landed at sonnet/high after 3 attempts): added the expiry guard on the parser
+```
+
+A node whose tasks all pass at their policy rung is one nobody needs to budget a
+climb for. A node where the same task always lands a rung above its policy is one
+whose policy is short. Neither shows in a single run, which is the point of
+writing it down.
+
+Tasks that passed first try are counted, not listed. Naming fifteen tasks that
+did the expected thing buries the one that did not, and the one that did not is
+the lesson. A run that replanned and *then* succeeded leaves both entries, which
+is the pair worth having: this shape was wrong for this reason, that one worked
+and cost this much.
+
+The store merges entries by type, pattern and domain, so these accumulate as
+`occurrences` on one entry per node rather than one per run — the count is the
+useful part, and the first resolution is the one kept.
+
 What is **not** recorded yet, and is worth knowing before relying on this:
 
-- **Only failures.** A run that succeeded leaves nothing here. What worked
-  reaches memory through the commit recorder instead, as the commit's `Why:`.
 - **Project scope only.** Every entry is written with `scope="project"`, so
   nothing a run learns can reach a different repository — even a `run_replanned`
-  entry, whose `run:<graph>:<node>` key is about the workflow rather than about
-  this code and would carry across.
+  or `run_succeeded` entry, whose `run:<graph>:<node>` key is about the workflow
+  rather than about this code and would carry across.
 
 ## Three passes above the worker
 

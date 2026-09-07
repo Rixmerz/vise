@@ -8,6 +8,36 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — a run that worked leaves a record of what it cost
+
+The runtime wrote lessons only when something went wrong, so the memory could
+answer "what goes wrong here" and not "what worked". A run where every task
+succeeded now leaves a `run_succeeded` entry under the same `run:<graph>:<node>`
+key the failures use.
+
+The reusable half of a success is its cost shape rather than the fact of it:
+
+```
+3 task(s), no replans, $0.91 — every task passed on its first attempt
+```
+
+```
+6 task(s), 1 replan(s), $2.14
+b (landed at sonnet/high after 3 attempts): added the expiry guard on the parser
+```
+
+A node whose tasks all pass at their policy rung is one nobody needs to budget a
+climb for; a node where the same task always lands a rung above its policy is one
+whose policy is short. Neither shows in a single run. Tasks that passed first try
+are counted rather than listed — naming fifteen tasks that did the expected thing
+buries the one that did not — and a clean run still says so explicitly rather
+than writing an empty resolution, which is the defect the entry below fixes.
+
+A run that replanned and then succeeded leaves both entries.
+
+Also: `_render_state` built its own `model/effort` label and printed "haiku/" for
+a model with no effort dial. It uses `tag()` like everything else now.
+
 ### Fixed — a replan recorded that it happened and not what had been tried
 
 `runtime/lessons.py` writes a `run_replanned` entry into the project's memory

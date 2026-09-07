@@ -12,6 +12,13 @@ question, and the reason is on the record. A run parked for a person, a task
 nobody could route, a result the drain could not read — each names something
 about this repository that the next plan should know.
 
+Successes are recorded too, and for a reason that is easy to miss: a store of
+nothing but failures answers "what goes wrong here" and cannot answer "what
+worked". The reusable half of a success is its *cost shape* rather than the fact
+of it — a node whose tasks all pass at their policy rung is one nobody needs to
+budget a climb for, and a node where the same task always needs a rung more is
+one whose policy is short. Neither shows in a single run.
+
 This module reads the run's own event record and writes those as memory. It is
 called once, after the run, by the process that owns the run (``vise runtime
 run``); the scheduler stays ignorant of memory, which keeps the seam where the
@@ -92,7 +99,57 @@ def lessons_from(state: RunState) -> list[ExperienceEntry]:
                 scope="project",
                 project_origin=spec.project_dir,
             ))
+
+    # Read off the final state rather than an event, because "every task
+    # succeeded" is a property of the record and no single event asserts it.
+    # A run that replanned and then succeeded leaves both entries, which is the
+    # pair worth having: the first shape was wrong for this reason, the second
+    # worked and cost this much.
+    if state.succeeded():
+        add(ExperienceEntry(
+            type="run_succeeded",
+            file_pattern=pattern,
+            keywords=["succeeded", spec.graph_name or "", spec.node_id or ""],
+            domain="runtime",
+            description=(
+                f"{len(state.tasks)} task(s) succeeded in run {spec.run_id}: {spec.goal}"
+            ),
+            resolution=_success_shape(state),
+            severity="low",
+            scope="project",
+            project_origin=spec.project_dir,
+        ))
     return out
+
+
+def _success_shape(state: RunState) -> str:
+    """What it took to get there, for a run where every task passed.
+
+    Tasks that passed on the first attempt are counted, not listed: naming
+    fifteen tasks that did the expected thing buries the one that did not, and
+    the one that did not is the whole lesson.
+
+    A run where nothing climbed still says so rather than returning empty. "Every
+    task passed on its first attempt" is a finding about the plan's sizing, and
+    an empty resolution is the defect this module was just fixed for.
+    """
+    spent = state.ledger.spent
+    climbed = [
+        record for _, record in sorted(state.tasks.items())
+        if record.attempt_count > 1
+    ]
+    replans = f"{state.replans} replan(s)" if state.replans else "no replans"
+    head = f"{len(state.tasks)} task(s), {replans}, ${spent.cost_usd:.2f}"
+    if not climbed:
+        return f"{head} — every task passed on its first attempt"
+    lines = [head]
+    for record in climbed:
+        said = (record.result.summary if record.result else "") or record.note or "(no summary)"
+        lines.append(
+            f"{record.task_id} (landed at {tag(record.model, record.effort)} after "
+            f"{record.attempt_count} attempts): {said}"
+        )
+    return "\n".join(lines)[:1000]
 
 
 def _rungs_tried(attempts: list[Attempt]) -> str:

@@ -28,7 +28,7 @@ VALID_TYPES = frozenset({
     "impact_high",
     "skill_referenced",
     # Written by the runtime after a run — see vise.runtime.lessons.
-    "run_replanned", "run_blocked",
+    "run_replanned", "run_blocked", "run_succeeded",
 })
 
 VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
