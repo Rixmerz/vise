@@ -8,6 +8,48 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — the commit hook's lessons were deleted by the next unrelated save
+
+Two writers put entries in the same two files. `ExperienceMemoryStore.record`
+writes what the tools, the node gate and the runtime record; the commit hook
+writes what a commit taught, as its own interpreter, on every `git commit`. They
+disagreed about what an entry *is*:
+
+| | store | commit hook |
+|---|---|---|
+| identity | (type, file_pattern, domain) | (type, pattern, description) |
+| confidence on repeat | 0.95 × (1 − 0.7ⁿ) | min(0.95, conf + 0.1) |
+| confidence when new | 0.285 | 0.5, fixed |
+| id | uuid4[:8] | none |
+| first_seen / scope | set | never set |
+| cap | 500, least confident evicted | none |
+| write | temp file, fsync, rename | `write_text` |
+
+The identity row cost data, and not by growing the store. The store's own
+cross-process merge — `_merged_with_disk`, which is how two writers are meant to
+coexist — keeps one entry per *store* key and drops the rest of what it finds on
+disk. So two commits touching one glob, which the hook kept apart under its own
+key, became one entry the next time anything called `save()`, and the second
+commit's lesson was gone. Measured before the fix, not reasoned about.
+
+`core/experience_rules.py` holds the identity, the curve, the merge and the cap,
+on plain dicts, standard library only. Both writers use it. The store keeps its
+embedding step and the hook still does not, which is the one difference that was
+always deliberate: loading fastembed on a commit would block the session for a
+second and a half.
+
+Two more from the same file. `_save_store` used `write_text`, which truncates
+before a byte of the new content lands — on a file `core/atomic.py` was written
+for, whose docstring says the store was the one place the pattern was already
+right. It uses `write_atomic` now, and so does the store, which had kept a
+private copy of it.
+
+And the hook's imports moved past its commit gate. It runs after *every* Bash
+call and does work on almost none of them, so `uuid` (9 ms) and `tempfile`
+(12 ms) were being paid on `ls` to be useful on `git commit`. Deferring them —
+along with `_common` and `_xdg`, which were already there — takes the no-op path
+from 48 ms to 42.
+
 ### Fixed — the hook and the tools ranked the same memory differently
 
 `experience_*` ranks with `experience_memory.compute_relevance`. The `PreToolUse`

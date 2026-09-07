@@ -9,14 +9,14 @@ Storage (XDG):
 """
 
 import json
-import os
 import re
-import tempfile
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from vise.core import experience_rules as _rules
+from vise.core.atomic import write_atomic
 from vise.engines import relevance as _relevance
 
 # ============================================================================
@@ -191,12 +191,14 @@ def guess_domain(path: str) -> str:
 
 
 def update_confidence(current: float, occurrences: int) -> float:
-    """Asymptotic confidence growth: 0.30 → 0.50 → 0.65 → 0.75 → 0.82 → ...
+    """Asymptotic confidence growth. The curve lives in `core.experience_rules`.
 
-    Formula: 0.95 * (1 - 0.7^occurrences)
-    Cap at 0.95 to leave room for doubt.
+    `current` is unused and kept so callers do not have to change: the curve is
+    a function of the count alone, and reading the previous value was how the
+    commit hook ended up with a different one (+0.1 per sighting, which reaches
+    the cap in five and cannot tell five from fifty).
     """
-    return min(0.95, 0.95 * (1 - 0.7 ** occurrences))
+    return _rules.confidence_for(occurrences)
 
 
 # ============================================================================
@@ -282,7 +284,7 @@ from vise.core import paths as _paths  # noqa: E402
 
 GLOBAL_MEMORY_FILE = _paths.data_dir() / "experience_memory.json"
 PROJECT_MEMORIES_DIR = _paths.data_dir() / "project_memories"
-MAX_ENTRIES = 500
+MAX_ENTRIES = _rules.MAX_ENTRIES
 
 
 class ExperienceMemoryStore:
@@ -348,39 +350,25 @@ class ExperienceMemoryStore:
 
         self.entries = self._merged_with_disk()
 
-        # Eviction: remove lowest confidence + oldest entries
-        if len(self.entries) > MAX_ENTRIES:
-            self.entries.sort(key=lambda e: (e.confidence, e.last_seen or ""), reverse=True)
-            self.entries = self.entries[:MAX_ENTRIES]
+        # Evicted as dicts, on the shared rule, so the hook trims the same union
+        # by the same order rather than leaving the cap to whoever saves next.
+        payload_entries = _rules.evict([e.to_dict() for e in self.entries])
+        if len(payload_entries) != len(self.entries):
+            self.entries = [ExperienceEntry.from_dict(e) for e in payload_entries]
 
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            "entries": [e.to_dict() for e in self.entries],
+            "entries": payload_entries,
             "last_updated": datetime.now().isoformat(),
             "version": "1.0",
             "scope": self._scope,
             "project": self._project_name,
             "count": len(self.entries),
         }
-        payload = json.dumps(data, indent=2).encode("utf-8")
-
-        # Atomic write: same-directory temp file + rename, so a crash or an
-        # interleaved write from another vise process never truncates the
-        # store in place (see experience_gc.gc for the same pattern).
-        fd, tmp_name = tempfile.mkstemp(dir=self._file_path.parent, suffix=".tmp")
-        tmp_path = Path(tmp_name)
-        try:
-            try:
-                written = os.write(fd, payload)
-                if written != len(payload):
-                    raise OSError(f"partial write to {tmp_path}: {written}/{len(payload)} bytes")
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
-        tmp_path.replace(self._file_path)
+        # `core.atomic` exists because of this block — its docstring says this
+        # was the one place the pattern was already right. Keeping a private
+        # copy of it here is how the other four got it wrong.
+        write_atomic(self._file_path, json.dumps(data, indent=2))
 
         # Nudge the user when the store grows large (no silent auto-deletion in v1)
         try:
@@ -419,8 +407,13 @@ class ExperienceMemoryStore:
         return merged
 
     def _dedup_key(self, entry: ExperienceEntry) -> tuple:
-        """Deduplication key: same type + file_pattern + domain = same experience."""
-        return (entry.type, entry.file_pattern, entry.domain)
+        """The identity of an experience. Fields from `core.experience_rules`.
+
+        Shared because `_merged_with_disk` below applies it to what *another*
+        process wrote: a writer using a finer key does not get finer entries, it
+        gets entries this merge drops.
+        """
+        return _rules.dedup_key({f: getattr(entry, f, "") for f in _rules.DEDUP_FIELDS})
 
     def record(self, entry: ExperienceEntry) -> ExperienceEntry:
         """Add or merge an experience entry. Deduplicates by type+file_pattern+domain."""
@@ -437,27 +430,10 @@ class ExperienceMemoryStore:
         # Check for existing entry with same key
         for i, existing in enumerate(self.entries):
             if self._dedup_key(existing) == key:
-                # Merge: update existing
-                existing.occurrences += 1
-                existing.last_seen = now
-                existing.confidence = update_confidence(existing.confidence, existing.occurrences)
-                # Shapes merge ADDITIVELY — this is the one field on the entry
-                # that must never lose a repeat, because the counts are what a
-                # caller thresholds on ("the same shape twice = a pattern").
-                for shape, n in (entry.shapes or {}).items():
-                    existing.shapes[shape] = existing.shapes.get(shape, 0) + n
-                # Update description if new one is longer/better. Arbitrary, and
-                # deliberately left that way: with `shapes` carrying the counted
-                # data, description is prose again rather than a datastore, so
-                # which of two prose blurbs survives no longer loses information.
-                if len(entry.description) > len(existing.description):
-                    existing.description = entry.description
-                if entry.resolution and not existing.resolution:
-                    existing.resolution = entry.resolution
-                # Merge related files
-                for f in entry.related_files:
-                    if f not in existing.related_files:
-                        existing.related_files.append(f)
+                # Merged as dicts, on the shared rule, so the commit hook folds
+                # a repeat the same way rather than adding 0.1 and moving on.
+                merged = _rules.merge(existing.to_dict(), entry.to_dict())
+                existing = self.entries[i] = ExperienceEntry.from_dict(merged)
                 # Persist here too: the store owns its own persistence, so
                 # both branches of record() save and no caller has to
                 # remember to. Before this, only the new-entry branch below

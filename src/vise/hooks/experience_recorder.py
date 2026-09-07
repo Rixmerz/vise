@@ -20,10 +20,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from _common import extract_keywords, guess_domain
-
-from vise.hooks import _xdg
+# Everything this hook needs beyond the standard library is imported inside the
+# commit branch, not here. It runs as its own interpreter after *every* Bash
+# call and does work on almost none of them, so a module-level import is paid on
+# `ls` to be useful on `git commit`. `uuid` alone is 9 ms and `tempfile` 12; the
+# whole set was 13 ms on every command until it moved.
+#
+# Measured on this machine: the no-op path is ~35 ms with the imports deferred
+# and ~61 ms with them at module level.
 
 
 _APPROVE = json.dumps({"decision": "approve"})
@@ -131,10 +135,19 @@ def _load_store(path: Path) -> dict:
 
 
 def _save_store(path: Path, data: dict) -> None:
-    """Write experience store JSON, silently ignoring errors."""
+    """Write experience store JSON, silently ignoring errors.
+
+    `write_atomic`, not `write_text`. This file has a documented second reader
+    in another process — the MCP server and the injector both read it — and
+    `write_text` truncates before a byte of the new content lands. The store was
+    the one place `core.atomic` says the pattern was already right; this was one
+    of the places it was not.
+    """
     try:
+        from vise.core.atomic import write_atomic
+
         os.makedirs(str(path.parent), exist_ok=True)
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        write_atomic(path, json.dumps(data, indent=2))
     except Exception:
         pass
 
@@ -172,39 +185,12 @@ def _untrusted(text: str, limit: int = _MAX_UNTRUSTED) -> str:
     return flat[:limit]
 
 
-def _find_duplicate(entries: list, commit_type: str, file_pattern: str, description: str) -> int:
-    """Return index of matching entry or -1 if not found."""
-    for i, entry in enumerate(entries):
-        if (
-            entry.get("type") == commit_type
-            and entry.get("file_pattern") == file_pattern
-            and entry.get("description") == description
-        ):
-            return i
-    return -1
-
-
-def _upsert_entry(entries: list, entry: dict) -> list:
-    """Add new entry or increment occurrences/confidence if duplicate exists."""
-    idx = _find_duplicate(
-        entries,
-        entry["type"],
-        entry["file_pattern"],
-        entry["description"],
-    )
-    if idx == -1:
-        entries.append(entry)
-    else:
-        existing = entries[idx]
-        existing["occurrences"] = existing.get("occurrences", 1) + 1
-        # Increase confidence by 0.1 per recurrence, capped at 0.95
-        existing["confidence"] = min(0.95, existing.get("confidence", 0.5) + 0.1)
-        existing["last_seen"] = entry["last_seen"]
-        # Update resolution if the new commit body is more detailed
-        if entry.get("resolution") and len(entry["resolution"]) > len(existing.get("resolution", "")):
-            existing["resolution"] = entry["resolution"]
-        entries[idx] = existing
-    return entries
+# Identity, the confidence curve, the merge and the cap all come from
+# `core.experience_rules` now. This module had its own of each, and the one that
+# cost something was identity: it kept two commits on one glob apart under
+# (type, pattern, description), while the store's cross-process merge holds one
+# entry per (type, pattern, domain) and drops the rest of what it finds on disk.
+# So the second commit's lesson survived until anything else called `save()`.
 
 
 def main():
@@ -230,6 +216,14 @@ def main():
     if not _RUNS_GIT_COMMIT.search(command):
         print(_APPROVE)
         return
+
+    # Past the gate, so the work is actually going to happen. See the note at
+    # the top of the file for why these are not up there.
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _common import extract_keywords, guess_domain
+
+    from vise.core import experience_rules as _rules
+    from vise.hooks import _xdg
 
     # Resolve project dir from the command itself, fallback to env var
     project_dir = ""
@@ -324,9 +318,13 @@ def main():
             "description": _untrusted(commit_subject, 200),
             "resolution": _untrusted(commit_body, 1000),
             "severity": "medium",
-            "confidence": 0.5,
             "occurrences": 1,
+            "first_seen": now_iso,
             "last_seen": now_iso,
+            # Set because the store sets it, and an entry that names no scope
+            # reads as global to anything that groups by it. This hook writes
+            # the same commit into both files; the scope has to say which.
+            "scope": "project",
             "project_origin": project_name,
             "commit_hash": commit_hash,
         }
@@ -342,12 +340,18 @@ def main():
     project_store_path = _xdg.project_memory_path(project_dir)
     global_store_path = _xdg.experience_memory_path()
 
-    for store_path in (project_store_path, global_store_path):
+    for store_path, scope in ((project_store_path, "project"), (global_store_path, "global")):
         store = _load_store(store_path)
         entries = store.get("entries", [])
         for entry in new_entries:
-            entries = _upsert_entry(entries, entry)
-        store["entries"] = entries
+            # A copy per store: `upsert` fills in an id and a first_seen, and one
+            # dict shared between the two files would carry the project store's
+            # id into the global one and call them the same entry.
+            entries = _rules.upsert(entries, {**entry, "scope": scope})
+        # The cap belongs to whoever writes, not to whoever writes next. Skipping
+        # it here did not add headroom; it left the trim to the store's own save,
+        # on entries this hook had already grown past it.
+        store["entries"] = _rules.evict(entries)
         store["last_updated"] = now_iso
         _save_store(store_path, store)
 

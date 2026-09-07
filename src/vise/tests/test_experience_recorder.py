@@ -120,6 +120,71 @@ def _run_recorder(monkeypatch, tmp_path, repo: Path) -> str:
     return captured_stderr.getvalue()
 
 
+class TestMainWritesBothStores:
+    """The write loop itself. Everything else here tests the filters it feeds."""
+
+    def _stores(self, tmp_path: Path) -> tuple[Path, Path]:
+        root = tmp_path / "xdg" / "vise"
+        [project] = (root / "project_memories").glob("*/experience_memory.json")
+        return project, root / "experience_memory.json"
+
+    def test_each_store_gets_its_own_entry_not_a_shared_dict(self, monkeypatch, tmp_path):
+        """`upsert` fills in an id and a first_seen on the dict it is handed. One
+        dict passed to both files carries the first store's id into the second and
+        calls them the same entry — and whichever scope was set last wins."""
+        repo = _init_repo(tmp_path)
+        _commit(repo, {"src/services/authService.ts": "export const auth = 1;"},
+                "fix: token refresh raced with logout")
+        _run_recorder(monkeypatch, tmp_path, repo)
+
+        project_path, global_path = self._stores(tmp_path)
+        [project] = json.loads(project_path.read_text())["entries"]
+        [shared] = json.loads(global_path.read_text())["entries"]
+
+        assert project["file_pattern"] == shared["file_pattern"]
+        assert project["id"] != shared["id"], "one dict was written to both files"
+        assert project["scope"] == "project"
+        assert shared["scope"] == "global"
+
+    def test_two_commits_on_one_glob_become_one_counted_entry(self, monkeypatch, tmp_path):
+        repo = _init_repo(tmp_path)
+        _commit(repo, {"src/services/authService.ts": "const a = 1;"},
+                "fix: token refresh raced with logout")
+        _run_recorder(monkeypatch, tmp_path, repo)
+        _commit(repo, {"src/services/authService.ts": "const a = 2;"},
+                "fix: rate limiter counted retries twice")
+        _run_recorder(monkeypatch, tmp_path, repo)
+
+        _, global_path = self._stores(tmp_path)
+        [entry] = json.loads(global_path.read_text())["entries"]
+        assert entry["occurrences"] == 2, (
+            "the second commit's lesson reached the entry; under the hook's own "
+            "key it was a second entry the store's next merge deleted"
+        )
+
+    def test_the_hook_applies_the_cap_rather_than_leaving_it_to_the_store(
+        self, monkeypatch, tmp_path,
+    ):
+        """Skipping it did not add headroom — it left the trim to whoever saved
+        next, on a file this hook had already grown past the cap."""
+        from vise.core.experience_rules import MAX_ENTRIES
+
+        repo = _init_repo(tmp_path)
+        store_path = tmp_path / "xdg" / "vise" / "experience_memory.json"
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        store_path.write_text(json.dumps({"entries": [
+            {"type": "fix", "file_pattern": f"src/a{i}/*.py", "domain": "api",
+             "description": f"e{i}", "confidence": 0.9, "occurrences": 1,
+             "last_seen": "2026-09-01T00:00:00"}
+            for i in range(MAX_ENTRIES + 50)
+        ]}))
+
+        _commit(repo, {"src/services/authService.ts": "const a = 1;"}, "fix: something")
+        _run_recorder(monkeypatch, tmp_path, repo)
+
+        assert len(json.loads(store_path.read_text())["entries"]) == MAX_ENTRIES
+
+
 class TestMainJunkFiltering:
     def test_commit_touching_only_readme_at_root_records_nothing(self, monkeypatch, tmp_path):
         repo = _init_repo(tmp_path)
