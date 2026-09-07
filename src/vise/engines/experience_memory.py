@@ -17,6 +17,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from vise.engines import relevance as _relevance
+
 # ============================================================================
 # Data model
 # ============================================================================
@@ -202,31 +204,31 @@ def update_confidence(current: float, occurrences: int) -> float:
 # ============================================================================
 
 def _score_path_match(entry_pattern: str, target_path: str) -> float:
-    """Score how well an entry's file_pattern matches a target file path."""
+    """Score how well an entry's file_pattern matches a target file path.
+
+    Decides the three booleans; `relevance.path_score` owns what they are worth.
+    The hook decides the same booleans with string operations and used to own a
+    second, shorter set of tier values.
+    """
     if not entry_pattern or not target_path:
         return 0.0
 
-    # Exact pattern match
+    exact = False
     pattern_regex = entry_pattern.replace("*", ".*")
     try:
-        if re.fullmatch(pattern_regex, target_path):
-            return 1.0
+        exact = bool(re.fullmatch(pattern_regex, target_path))
     except re.error:
         pass
 
-    # Same directory
     entry_dir = str(Path(entry_pattern).parent)
     target_dir = str(Path(target_path).parent)
-    if entry_dir == target_dir:
-        return 0.7
-
-    # Same parent directory
     entry_parent = str(Path(entry_dir).parent)
     target_parent = str(Path(target_dir).parent)
-    if entry_parent == target_parent and entry_parent != ".":
-        return 0.4
-
-    return 0.0
+    return _relevance.path_score(
+        exact=exact,
+        same_dir=entry_dir == target_dir,
+        same_parent=entry_parent == target_parent and entry_parent != ".",
+    )
 
 
 def _score_keyword_overlap(entry_keywords: list[str], target_keywords: list[str]) -> float:
@@ -240,81 +242,35 @@ def _score_keyword_overlap(entry_keywords: list[str], target_keywords: list[str]
     return intersection / union if union else 0.0
 
 
-def _score_recency(last_seen: str) -> float:
-    """Score based on how recently the experience was observed. 1.0 = today, decays over 30 days."""
-    if not last_seen:
-        return 0.0
-    try:
-        dt = datetime.fromisoformat(last_seen)
-        days = (datetime.now() - dt).days
-        return max(0.0, 1.0 - days / 30.0)
-    except (ValueError, TypeError):
-        return 0.0
+def compute_relevance(entry: ExperienceEntry, target_path: str) -> float:
+    """Rank one entry against a target file. Weights live in `engines.relevance`.
 
+    There used to be a third parameter, a query embedding, and a branch that
+    scored cosine similarity against the cached vector for this entry. Nothing
+    ever passed one: `set_query_embedding` was the only writer of the store
+    attribute that reached it, and nothing called `set_query_embedding`. So the
+    semantic term has always been keyword overlap, and the branch was dead in a
+    way that read as a feature — the README said retrieval was semantic.
 
-def _temporal_decay_factor(entry: "ExperienceEntry") -> float:
-    """FSRS retrievability floored at 0.05 — replaces old 6-month linear decay.
-
-    Uses entry.stability and entry.last_reviewed (set on recall events).
-    Falls back to last_seen when last_reviewed is absent (pre-FSRS records).
-    """
-    from vise.engines.fsrs import DEFAULT_STABILITY_DAYS, days_since, retrievability
-    stability = entry.stability if entry.stability > 0 else DEFAULT_STABILITY_DAYS
-    anchor = entry.last_reviewed or entry.last_seen or entry.first_seen
-    t = days_since(anchor)
-    return max(0.05, retrievability(t, stability))
-
-
-def compute_relevance(entry: ExperienceEntry, target_path: str,
-                      query_embedding=None) -> float:
-    """Compute relevance score for an entry against a target file.
-
-    score = path_match * 0.25 + semantic * 0.30 + domain_match * 0.20
-            + confidence * decay * 0.15 + recency * 0.10
-
-    The semantic score is embedding cosine similarity when available,
-    otherwise keyword Jaccard overlap. The confidence component is
-    multiplied by a temporal decay factor (6-month half-life, floored
-    at 0.3) so older entries contribute less.
+    It was also quadratic. The lookup re-read the whole embedding table once per
+    entry, which measured 6.5 seconds over 500 entries against 22 milliseconds
+    without it. Wiring it up as written would have been a regression, and the
+    comparison it makes — a file path against a lesson's prose — is not the one
+    the embeddings are good at. They stay where they earn their keep:
+    `derive_implementation_checklist` scores a *task description* against that
+    same prose, which is a question of the shape embeddings answer.
     """
     target_keywords = extract_file_keywords(target_path)
     target_domain = guess_domain(target_path)
 
-    path_score = _score_path_match(entry.file_pattern, target_path)
-    keyword_score = _score_keyword_overlap(entry.keywords, target_keywords)
-    domain_score = 1.0 if entry.domain == target_domain else 0.0
-    decay = _temporal_decay_factor(entry)
-    confidence_score = entry.confidence * decay
-    recency_score = _score_recency(entry.last_seen)
-
-    # Try embedding-based similarity (replaces keyword_score if available)
-    embedding_score = None
-    try:
-        from vise.core.embed_cache import list_tools as _list_tools
-
-        if query_embedding is not None:
-            for rec in _list_tools(mcp_name="_experience"):
-                if rec.tool_name == entry.id:
-                    import numpy as np
-                    a = np.asarray(rec.embedding)
-                    b = np.asarray(query_embedding)
-                    na = float(np.linalg.norm(a))
-                    nb = float(np.linalg.norm(b))
-                    if na > 0 and nb > 0:
-                        embedding_score = float(np.dot(a, b) / (na * nb))
-                    break
-    except Exception:
-        pass
-
-    # Use embedding score if available, otherwise keyword score
-    semantic_score = embedding_score if embedding_score is not None else keyword_score
-
-    return (
-        path_score * 0.25
-        + semantic_score * 0.30
-        + domain_score * 0.20
-        + confidence_score * 0.15
-        + recency_score * 0.10
+    return _relevance.relevance(
+        path=_score_path_match(entry.file_pattern, target_path),
+        semantic=_score_keyword_overlap(entry.keywords, target_keywords),
+        domain=1.0 if entry.domain == target_domain else 0.0,
+        confidence=entry.confidence,
+        stability=entry.stability,
+        last_reviewed=entry.last_reviewed,
+        last_seen=entry.last_seen,
     )
 
 
@@ -337,7 +293,6 @@ class ExperienceMemoryStore:
         self._scope: str = "global"
         self._project_name: str | None = None
         self._file_path: Path | None = None
-        self._query_embedding = None
 
     def _resolve_path(self, scope: str, project_name: str | None,
                        project_dir: str | Path | None = None) -> Path:
@@ -547,10 +502,6 @@ class ExperienceMemoryStore:
 
         return entry
 
-    def set_query_embedding(self, embedding) -> None:
-        """Set the query embedding for semantic scoring in compute_relevance()."""
-        self._query_embedding = embedding
-
     def _bump_recall(self, entry: ExperienceEntry) -> None:
         """Record a recall event: advance last_reviewed to now, increase stability.
 
@@ -573,7 +524,7 @@ class ExperienceMemoryStore:
         """
         scored = []
         for entry in self.entries:
-            score = compute_relevance(entry, file_path, self._query_embedding)
+            score = compute_relevance(entry, file_path)
             if score > 0.05:  # Minimum threshold
                 scored.append((entry, score))
 

@@ -518,12 +518,24 @@ The store merges entries by type, pattern and domain, so these accumulate as
 `occurrences` on one entry per node rather than one per run — the count is the
 useful part, and the first resolution is the one kept.
 
-What is **not** recorded yet, and is worth knowing before relying on this:
+### Which store each one goes to
 
-- **Project scope only.** Every entry is written with `scope="project"`, so
-  nothing a run learns can reach a different repository — even a `run_replanned`
-  or `run_succeeded` entry, whose `run:<graph>:<node>` key is about the workflow
-  rather than about this code and would carry across.
+Scope is decided per kind rather than once for the module.
+
+| Entry | Scope | Why |
+|---|---|---|
+| `run_replanned` | global | `run:<graph>:<node>` names a *workflow*, and the workflow is the same one in every repository that installs vise |
+| `run_succeeded` | global | same key, same reason — a first run of that node in a new checkout can read what the last one cost |
+| `run_blocked` | project | an unroutable role, an ownership overlap, a drain that could not parse a result are facts about this checkout |
+
+Filing the third globally would fill the shared store with answers to questions
+no other repository is asking. Filing the first two locally is what kept a
+workflow-level lesson from ever reaching the run that needed it most: the first
+one in a new repo.
+
+`record_run_lessons` routes on the field. It used to write every entry to the
+project store regardless, which made `scope` describe nothing — an entry could
+say "global" and be readable only from the repository that produced it.
 
 ## Three passes above the worker
 

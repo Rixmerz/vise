@@ -6,19 +6,19 @@ Verifies:
 3. An old un-recalled entry scores below a fresh one.
 4. ExperienceEntry migration: old records without stability get DEFAULT_STABILITY_DAYS.
 5. ExperienceEntry recall bump via ExperienceMemoryStore._bump_recall.
-6. MemoryNode FSRS retrievability and recall bump.
-7. memory-gc FSRS threshold path (faded node identified without TTL expiry).
-8. experience_gc.score_entry uses FSRS (not old exponential) — monotonic decay.
+6. experience_gc.score_entry uses FSRS (not old exponential) — monotonic decay.
+
+Sections 6 and 7 covered `MemoryNode`, a second memory store under `~/.vise/`
+that nothing outside its own tests imported. It was deleted; the curve those
+tests exercised is the same one sections 1 through 3 hold.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
 from vise.engines.fsrs import (
-    ARCHIVE_THRESHOLD,
     DEFAULT_STABILITY_DAYS,
     STABILITY_BUMP,
     days_since,
@@ -161,113 +161,7 @@ def test_experience_store_bump_recall(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. MemoryNode FSRS retrievability and recall bump
-# ---------------------------------------------------------------------------
-
-def test_memory_node_retrievability_fresh() -> None:
-    """A node with last_reviewed=now should have high retrievability."""
-    pytest.importorskip("vise.engines.memory_store")  # not extracted to vise
-    from vise.engines.memory_store import MemoryNode
-
-    node = MemoryNode(
-        id="test-node",
-        name="Test",
-        description="desc",
-        type="reference",
-        stability=DEFAULT_STABILITY_DAYS,
-        last_reviewed=datetime.now().isoformat(),
-    )
-    r = node.retrievability()
-    assert r > 0.95, f"Fresh node should have R > 0.95, got {r}"
-
-
-def test_memory_node_retrievability_stale() -> None:
-    """A node last reviewed 500 days ago should have low retrievability.
-
-    With S=10d, half-life = 9*10 = 90d.
-    At t=500d: R = (1 + 500/90)^-1 ≈ 0.153 < 0.5.
-    """
-    pytest.importorskip("vise.engines.memory_store")  # not extracted to vise
-    from vise.engines.memory_store import MemoryNode
-
-    old_ts = (datetime.now() - timedelta(days=500)).isoformat()
-    node = MemoryNode(
-        id="stale-node",
-        name="Stale",
-        description="desc",
-        type="reference",
-        stability=DEFAULT_STABILITY_DAYS,
-        last_reviewed=old_ts,
-    )
-    r = node.retrievability()
-    assert r < 0.5, f"Stale node should have R < 0.5, got {r}"
-
-
-def test_memory_node_bump_recall_increases_stability(tmp_path: Path) -> None:
-    """_bump_recall applied to a MemoryNode raises stability and updates last_reviewed."""
-    pytest.importorskip("vise.engines.memory_store")  # not extracted to vise
-    from vise.engines.memory_store import MemoryNode, _bump_recall
-
-    node = MemoryNode(
-        id="bump-test",
-        name="Bump",
-        description="d",
-        type="reference",
-        stability=DEFAULT_STABILITY_DAYS,
-        last_reviewed="2020-01-01T00:00:00",
-    )
-    s_before = node.stability
-    _bump_recall(node)
-    assert node.stability > s_before, "stability must increase after _bump_recall"
-    lr = datetime.fromisoformat(node.last_reviewed)
-    assert (datetime.now() - lr).total_seconds() < 5
-
-
-# ---------------------------------------------------------------------------
-# 7. memory-gc FSRS-faded path
-# ---------------------------------------------------------------------------
-
-def test_memory_gc_identifies_fsrs_faded_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A node below ARCHIVE_THRESHOLD without TTL is flagged as FSRS-faded.
-
-    ARCHIVE_THRESHOLD=0.10; with S=10d, half-life = 9*10 = 90d.
-    To reach R < 0.10 we need t such that (1 + t/90)^-1 < 0.10 → t > 810d.
-    Use 1000 days to be safely below threshold.
-    """
-    pytest.importorskip("vise.engines.memory_store")  # not extracted to vise
-    from vise.engines.memory_store import MemoryNode
-
-    # Node with very low retrievability: 1000 days old, S=10
-    # R = (1 + 1000/90)^-1 ≈ 0.082 < 0.10
-    old_ts = (datetime.now() - timedelta(days=1000)).isoformat()
-    faded = MemoryNode(
-        id="faded",
-        name="Faded",
-        description="d",
-        type="reference",
-        stability=DEFAULT_STABILITY_DAYS,
-        last_reviewed=old_ts,
-    )
-    fresh = MemoryNode(
-        id="fresh",
-        name="Fresh",
-        description="d",
-        type="reference",
-        stability=DEFAULT_STABILITY_DAYS,
-        last_reviewed=datetime.now().isoformat(),
-    )
-
-    assert faded.retrievability() < ARCHIVE_THRESHOLD, (
-        f"Faded node should be below threshold {ARCHIVE_THRESHOLD}, "
-        f"got {faded.retrievability():.4f}"
-    )
-    assert fresh.retrievability() >= ARCHIVE_THRESHOLD, (
-        f"Fresh node should be above threshold, got {fresh.retrievability():.4f}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# 8. experience_gc.score_entry uses FSRS — monotonic over age
+# 6. experience_gc.score_entry uses FSRS — monotonic over age
 # ---------------------------------------------------------------------------
 
 def test_experience_gc_score_entry_monotonic() -> None:

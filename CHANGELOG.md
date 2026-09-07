@@ -8,6 +8,91 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — the hook and the tools ranked the same memory differently
+
+`experience_*` ranks with `experience_memory.compute_relevance`. The `PreToolUse`
+hook ranks with its own scorer, off a sidecar index, because it runs as its own
+interpreter on every edit. They scored the same entries against the same target
+and disagreed on nearly everything:
+
+| component | engine | hook |
+|---|---|---|
+| path | 0.25 | 0.30 |
+| keywords | 0.30 | 0.25 |
+| domain | 0.20 | 0.20 |
+| confidence | 0.15, decayed | 0.15, undecayed |
+| recency | 0.10 | absent |
+| same-parent tier | 0.4 | absent |
+| weights sum | 1.00 | 0.90 |
+
+Nothing failed. An entry the tool ranked first came third in the hook, a lesson
+filed one directory above the file being edited scored zero for locality there
+and 0.4 through the tools, and the FSRS decay the README promises was applied on
+the surface a person asks and not on the one that speaks into an agent's context
+unasked — because the index never carried `last_seen`, `last_reviewed` or
+`stability` for the hook to decay with.
+
+`engines/relevance.py` is now the one formula: stdlib only, plain values rather
+than entries, so the hook imports it for about a millisecond. The component
+scores stay with their callers — the hook matches globs with string operations
+against a pre-baked parent where the engine compiles a regex, and merging those
+would cost the hook more than the divergence did. What moved is what drifted:
+the weights, the tiers, and the two curves. `test_relevance_parity.py` scores the
+same entry both ways and asserts they agree.
+
+Measured on a copy of a real store: the hook stays at ~35 ms, and the top match
+for an auth file is the same one it was.
+
+### Removed — a semantic branch that was dead, quadratic, and advertised
+
+`compute_relevance` took a query embedding and scored cosine similarity against
+the cached vector for each entry. Nothing ever passed one: `set_query_embedding`
+was the only writer of the attribute that reached it, and nothing called
+`set_query_embedding`. So the semantic term has always been keyword overlap, and
+the README described retrieval as semantic.
+
+It was also quadratic — the lookup re-read the whole embedding table once per
+entry, measured at 6.5 seconds over 500 entries against 22 milliseconds without
+it — so wiring it up as written would have been a regression. And the comparison
+it makes, a file path against a lesson's prose, is not the one embeddings are
+good at. They stay where they earn their keep: `experience_derive_checklist`
+scores a *task description* against that same prose, which is the shape of
+question embeddings answer. The README says that now.
+
+### Removed — a second memory store nothing imported
+
+`engines/memory_store.py`: 166 statements implementing a frontmatter store under
+`~/.vise/memory/` with TTLs, links and priorities, imported by its own tests and
+by nothing else. Deleted with its 13 tests and the four in `test_fsrs_decay.py`
+that exercised its `MemoryNode` — the curve those held is the same one the
+sections above them hold.
+
+### Fixed — what a run learned about a workflow could not reach another repository
+
+Every runtime lesson was written with `scope="project"`, including the two whose
+key is `run:<graph>:<node>` — a statement about a *workflow*, and a workflow is
+the same one in every repository that installs vise. So the run that would gain
+most from knowing what a node cost last time, the first one in a new checkout,
+was the one that could not read it.
+
+`run_replanned` and `run_succeeded` are global now; `run_blocked` stays with the
+project, because an unroutable role or an ownership overlap is a fact about this
+checkout and filing it where every repository reads it would fill the shared
+store with answers to questions nobody else is asking.
+
+Two things had to be fixed for that to mean anything.
+
+`record_run_lessons` wrote every entry to the project store regardless of what
+its `scope` said, which made the field describe nothing. It routes on it now, per
+scope, so an unwritable global store no longer loses the project lessons it had
+nothing to do with.
+
+And `project_origin` was the project's full path here while every other writer
+records its *name*. The injector compares that field against `Path(dir).name`, so
+no runtime lesson ever matched the project that produced it and all of them were
+demoted as foreign — and globally scoped, the full local path would have printed
+into an unrelated repository's context.
+
 ### Added — a run that worked leaves a record of what it cost
 
 The runtime wrote lessons only when something went wrong, so the memory could

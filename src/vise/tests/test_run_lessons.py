@@ -7,7 +7,11 @@ would look.
 """
 from __future__ import annotations
 
-from vise.engines.experience_memory import VALID_TYPES, get_project_experience_store
+from vise.engines.experience_memory import (
+    VALID_TYPES,
+    get_experience_store,
+    get_project_experience_store,
+)
 from vise.runtime.contracts import (
     Attempt,
     FailureKind,
@@ -59,7 +63,7 @@ def test_a_replan_is_recorded_with_the_failed_attempts_reason(tmp_path):
 
     assert lesson.type == "run_replanned"
     assert lesson.severity == "high"
-    assert lesson.scope == "project"
+    assert lesson.scope == "global"
     assert lesson.file_pattern == "run:feature-dev:implement"
     assert "ship the thing" in lesson.description
     assert "a (spec_bug): the spec wants a field the schema forbids" in lesson.resolution
@@ -222,14 +226,45 @@ def test_a_run_that_replanned_and_then_worked_records_both(tmp_path):
     assert kinds == ["run_replanned", "run_succeeded"]
 
 
-def test_a_success_reaches_the_project_store(tmp_path):
+def test_a_success_reaches_the_global_store(tmp_path):
+    """`run:<graph>:<node>` is a statement about a workflow, and a workflow is the
+    same one in every repository that installs vise. A first run of that node in
+    a new checkout can read what the last one cost."""
     state = _succeeded(_state(tmp_path), "a", cost=0.20)
 
     assert record_run_lessons(state, str(tmp_path)) == 1
 
-    store = get_project_experience_store(str(tmp_path))
-    [entry] = [e for e in store.entries if e.type == "run_succeeded"]
+    [entry] = [e for e in get_experience_store().entries if e.type == "run_succeeded"]
     assert "every task passed on its first attempt" in entry.resolution
+    assert entry.project_origin == tmp_path.name
+
+
+def test_each_lesson_goes_to_the_store_its_scope_names(tmp_path):
+    """Writing them all to the project store made `scope` a field that described
+    nothing: an entry could say "global" and be readable only from the repository
+    that produced it."""
+    state = _succeeded(_state(tmp_path), "a", cost=0.20)
+    state.emit("unroutable", task="c", reason="role frobnicate")
+
+    assert record_run_lessons(state, str(tmp_path)) == 2
+
+    project = {e.type for e in get_project_experience_store(str(tmp_path)).entries}
+    shared = {e.type for e in get_experience_store().entries}
+    assert project == {"run_blocked"}, "what blocked this checkout stays in it"
+    assert "run_succeeded" in shared and "run_blocked" not in shared
+
+
+def test_the_origin_is_a_project_name_not_a_path(tmp_path):
+    """The injector compares this against `Path(project_dir).name`, so a full path
+    never matched and marked every runtime lesson foreign to the project that
+    produced it — and globally scoped, it would print a local absolute path into
+    an unrelated repository's context."""
+    state = _succeeded(_state(tmp_path), "a")
+    state.emit("unroutable", task="c", reason="role frobnicate")
+
+    origins = {e.project_origin for e in lessons_from(state)}
+    assert origins == {tmp_path.name}
+    assert not any("/" in o for o in origins)
 
 
 def test_a_run_parked_for_a_person_is_a_lesson(tmp_path):

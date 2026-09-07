@@ -68,6 +68,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
+from vise.engines import relevance as _relevance
 from vise.hooks import _xdg
 
 # ---------------------------------------------------------------------------
@@ -139,7 +140,7 @@ def _fast_glob_match(pattern: str, target: str) -> bool:
 
 # Mirrors experience_index_builder.SCHEMA_VERSION — bump both together when
 # the score/detail field split or the bucketing changes shape.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Mirrors experience_index_builder — buckets no ancestor key can name.
 NOPATTERN_KEY = "P__nopattern"
@@ -274,6 +275,16 @@ def _load_entries_from_store(store: Path) -> list[dict]:
 # Scoring — identical formula to original
 # ---------------------------------------------------------------------------
 
+def _up(path: str) -> str:
+    """The parent of a POSIX-ish path, matching `str(Path(p).parent)`.
+
+    String work rather than `Path`, for the same reason `_fast_glob_match` is:
+    this runs once per candidate and there can be five hundred of them.
+    """
+    head = path.rpartition("/")[0]
+    return head or "."
+
+
 def _score_entry(
     entry: dict,
     target_path: str,
@@ -281,30 +292,37 @@ def _score_entry(
     target_domain: str,
     target_parent: str,
 ) -> float:
-    """Compute relevance score (same weights as original).
+    """Relevance for one candidate, on the weights in `engines.relevance`.
 
-    Uses _fast_glob_match and pre-baked _parent to avoid per-entry
-    re.compile and Path() calls.  Formula unchanged.
+    This used to carry its own: path at 0.30 against the engine's 0.25, no
+    same-parent tier, no FSRS decay, no recency, and a weight sum of 0.90. The
+    component scores are still computed here — `_fast_glob_match` and the
+    pre-baked `_parent` exist to avoid a regex and a `Path()` per candidate —
+    but what they are worth is not decided here any more.
     """
     pattern = entry.get("file_pattern", "")
-    path_score = 0.0
+    exact = same_dir = same_parent = False
     if pattern:
-        if _fast_glob_match(pattern, target_path):
-            path_score = 1.0
-        else:
-            parent = entry.get("_parent") or str(Path(pattern).parent)
-            if parent == target_parent:
-                path_score = 0.7
+        entry_parent = entry.get("_parent") or str(Path(pattern).parent)
+        exact = _fast_glob_match(pattern, target_path)
+        same_dir = entry_parent == target_parent
+        grand = _up(entry_parent)
+        same_parent = grand == _up(target_parent) and grand != "."
 
     entry_kws = set(entry.get("keywords", []))
     kw_score = 0.0
     if entry_kws and target_kws:
         kw_score = len(entry_kws & target_kws) / len(entry_kws | target_kws)
 
-    domain_score = 1.0 if entry.get("domain") == target_domain else 0.0
-    conf = entry.get("confidence", 0.3)
-
-    return path_score * 0.30 + kw_score * 0.25 + domain_score * 0.20 + conf * 0.15
+    return _relevance.relevance(
+        path=_relevance.path_score(exact=exact, same_dir=same_dir, same_parent=same_parent),
+        semantic=kw_score,
+        domain=1.0 if entry.get("domain") == target_domain else 0.0,
+        confidence=entry.get("confidence", 0.3),
+        stability=float(entry.get("stability") or 0.0),
+        last_reviewed=str(entry.get("last_reviewed") or ""),
+        last_seen=str(entry.get("last_seen") or ""),
+    )
 
 
 def _project_multiplier(entry_origin: str, current_project: str) -> float:

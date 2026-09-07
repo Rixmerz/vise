@@ -28,6 +28,7 @@ import pytest
 
 import vise.hooks.experience_injector as inj
 import vise.hooks.experience_index_builder as bld
+from vise.engines import relevance as rel
 
 
 # ---------------------------------------------------------------------------
@@ -121,35 +122,47 @@ class TestScoreEntry:
         parent = parent or str(Path(file_path).parent)
         return inj._score_entry(entry, file_path, kws, domain, parent)
 
+    # These assert what the hook feeds the formula, not what the formula does
+    # with it. Re-encoding the weights here is what let them drift from the
+    # engine's in the first place — `test_relevance_parity.py` pins the numbers.
+
     def test_perfect_glob_match_boosts_path_score(self):
         e = _make_entry(file_pattern="src/foo/*.py", keywords=["bar", "foo"],
                         domain="general", confidence=0.5)
-        score = self._score(e)
-        # path=1.0*0.30, kw=1.0*0.25, domain=1.0*0.20, conf=0.5*0.15
-        expected = 0.30 + 0.25 + 0.20 + 0.075
-        assert abs(score - expected) < 1e-6
+        assert self._score(e) == pytest.approx(
+            rel.relevance(path=1.0, semantic=1.0, domain=1.0, confidence=0.5))
 
     def test_parent_dir_fallback_scores_07(self):
-        # .py pattern, .ts target — same parent dir triggers 0.7 path_score
+        # .py pattern, .ts target — same parent dir, so the middle tier
         e = _make_entry(file_pattern="src/cli/*.py", keywords=[], domain="general",
                         confidence=0.3, )
         e["_parent"] = "src/cli"
         score = inj._score_entry(e, "src/cli/run.ts", set(), "general", "src/cli")
-        # path=0.7*0.30, kw=0, domain=0.20, conf=0.3*0.15
-        expected = 0.21 + 0.0 + 0.20 + 0.045
-        assert abs(score - expected) < 1e-6
+        assert score == pytest.approx(
+            rel.relevance(path=0.7, semantic=0.0, domain=1.0, confidence=0.3))
+
+    def test_a_pattern_one_directory_up_reaches_the_third_tier(self):
+        """The hook had two tiers where the engine had three, so a lesson filed
+        one directory above the file being edited scored zero for locality
+        here and 0.4 for the same query through the tools."""
+        e = _make_entry(file_pattern="src/models/*.py", keywords=[], domain="other",
+                        confidence=0.0)
+        e["_parent"] = "src/models"
+        score = inj._score_entry(e, "src/services/pay.py", set(), "general", "src/services")
+        assert score == pytest.approx(
+            rel.relevance(path=0.4, semantic=0.0, domain=0.0, confidence=0.0))
 
     def test_no_match_no_pattern_score_is_conf_only(self):
         e = _make_entry(file_pattern="", keywords=[], domain="other", confidence=0.4)
-        score = self._score(e, domain="general")
-        # path=0, kw=0, domain=0, conf=0.4*0.15
-        assert abs(score - 0.06) < 1e-6
+        assert self._score(e, domain="general") == pytest.approx(
+            rel.relevance(path=0.0, semantic=0.0, domain=0.0, confidence=0.4))
 
     def test_keyword_jaccard_overlap(self):
         e = _make_entry(file_pattern="", keywords=["foo", "baz"], domain="general", confidence=0.0)
         score = inj._score_entry(e, "x.py", {"foo", "bar"}, "general", ".")
         # intersection={"foo"}, union={"foo","bar","baz"} → jaccard=1/3
-        assert abs(score - (1/3 * 0.25 + 0.20)) < 1e-6
+        assert score == pytest.approx(
+            rel.relevance(path=0.0, semantic=1 / 3, domain=1.0, confidence=0.0))
 
     def test_threshold_filter(self):
         e = _make_entry(file_pattern="", keywords=[], domain="other", confidence=0.0)

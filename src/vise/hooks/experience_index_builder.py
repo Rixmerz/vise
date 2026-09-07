@@ -65,7 +65,13 @@ from vise.hooks import _xdg
 # Fields written to score files — the only data read at query time.
 # project_origin is needed here (not detail) because ranking happens before
 # the top-3 cut — see experience_injector._project_multiplier.
-_SCORE_FIELDS = frozenset({"file_pattern", "keywords", "domain", "confidence", "project_origin"})
+_SCORE_FIELDS = frozenset({
+    "file_pattern", "keywords", "domain", "confidence", "project_origin",
+    # The FSRS and recency inputs. Absent from the index, the hook scored every
+    # entry as though it were fresh — so the decay the README promises was
+    # applied by the tools and not by the surface that speaks unasked.
+    "last_seen", "last_reviewed", "stability",
+})
 
 # Fields written to detail files — read only for the final top-3 winners.
 _DETAIL_FIELDS = frozenset({"description", "resolution", "occurrences"})
@@ -75,7 +81,7 @@ LOCK_TTL = 30.0
 # Bump when the score/detail field split OR the bucketing changes — forces
 # existing indexes (built under the old schema) to rebuild instead of being
 # read stale. Mirrored in experience_injector.SCHEMA_VERSION.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Buckets that no ancestor key can name, so the reader always loads them.
 # Mirrored in experience_injector.
