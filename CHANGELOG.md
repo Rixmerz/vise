@@ -190,9 +190,10 @@ not to budget for the climb again. A task that failed once and then passed stays
 out on purpose: that is the ladder working, and filing it would put a solved
 problem in front of the next plan as an open one.
 
-Two gaps are now written down in `docs/scheduler.md` rather than left to be
-discovered: only failures are recorded, and every entry is project-scoped, so
-nothing a run learns can reach a different repository yet.
+This entry named two gaps when it was written — only failures were recorded, and
+every entry was project-scoped — and both are closed by the entries above, which
+landed after it and in the same unreleased set. `docs/scheduler.md` describes
+what is there now rather than what was missing then.
 
 A third thing is written down there because the repeat check found it: the replan
 budget bounds the *run*, tasks reach it concurrently, and so which task gets the
