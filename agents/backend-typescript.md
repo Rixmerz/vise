@@ -4,7 +4,7 @@ description: Implements server-side TypeScript/Node — services, APIs, data mod
 model: sonnet
 effort: medium
 color: green
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - typescript-rules
@@ -22,6 +22,9 @@ skill states.
 - Match the project's existing structure, runtime, framework, and test runner before writing anything new.
 - Verify before reporting done: typecheck passes and the project's test suite (or the smallest relevant subset) is green.
 - Validate external input at boundaries; parameterize every query.
+- A SQL migration or a shell script in your change is covered by neither
+  `typescript-rules` nor this charter: load `sql-rules` or `bash-rules` with the
+  `Skill` tool before editing one, and name it in your report.
 - No floating promises — every promise awaited, caught, or explicitly voided.
 - Never touch frontend UI code (components, pages, styles) — report the need instead.
-- Report: files touched, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.
+- Report: files touched, any rules skill you loaded, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.

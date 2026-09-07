@@ -21,13 +21,15 @@ from vise.runtime.contracts import (
     Complexity,
     Criticality,
     Verdict,
+    supports_effort,
+    tag,
 )
 
 #: The escalation ladder, cheapest first. One rung per failed attempt where the
 #: work was attempted and was wrong. Nothing climbs past the last rung — a task
 #: that fails there goes to replanning, which asks a different question.
 LADDER: tuple[tuple[str, str], ...] = (
-    ("haiku", "low"),
+    ("haiku", ""),
     ("sonnet", "medium"),
     ("sonnet", "high"),
     ("opus", "high"),
@@ -47,12 +49,15 @@ TIER_COST_USD: tuple[float, ...] = (0.05, 0.85, 1.20, 2.10)
 #: ladder above is only the path escalation walks when this default fails.
 #:
 #: Keeping them separate matters. An earlier version mapped each role to a ladder
-#: *index*, which made any default that is not a rung — documentation at
-#: haiku/medium — inexpressible, and quietly rewrote it to the nearest rung.
-#: A policy that cannot state its own defaults is not a policy.
+#: *index*, which made any default that is not a rung inexpressible and quietly
+#: rewrote it to the nearest rung. A policy that cannot state its own defaults is
+#: not a policy. Every row happens to be a rung today; the mechanism that lets a
+#: row sit between them is still here, and `test_runtime_routing` still holds it
+#: to that with a policy of its own rather than whichever row is off-ladder this
+#: month.
 POLICY: dict[str, tuple[str, str]] = {
     # extraction and classification
-    "extract": ("haiku", "low"),
+    "extract": ("haiku", ""),
     # research. Priced at haiku/low while it meant "look something up and no
     # charter exists for it". It has a charter now, and that charter's contract
     # is citation discipline — never report a fact from memory, never invent an
@@ -60,10 +65,10 @@ POLICY: dict[str, tuple[str, str]] = {
     # paraphrase confidently is the wrong tool for a rule like that, and the
     # failure is invisible: a fabricated citation is precisely formatted.
     "research": ("sonnet", "medium"),
-    "inventory": ("haiku", "low"),
-    "classify": ("haiku", "low"),
+    "inventory": ("haiku", ""),
+    "classify": ("haiku", ""),
     # documentation
-    "docs": ("haiku", "medium"),
+    "docs": ("haiku", ""),
     # ordinary coding
     "backend": ("sonnet", "medium"),
     "frontend": ("sonnet", "medium"),
@@ -106,9 +111,9 @@ _FLOOR_BY_COMPLEXITY: dict[str, int] = {
 def _position(model: str, effort: str) -> int:
     """Where a (model, effort) default sits on the escalation ladder.
 
-    A default need not be a rung — haiku/medium is not — so this falls back to
-    the first rung carrying that model. The rung is only used to decide what
-    escalation climbs *to*; it never rewrites the default itself.
+    A default need not be a rung, so this falls back to the first rung carrying
+    that model. The rung is only used to decide what escalation climbs *to*; it
+    never rewrites the default itself.
     """
     exact = tier_of(model, effort)
     if exact is not None:
@@ -142,7 +147,7 @@ class RoutingDecision:
     affordable: bool = True
 
     def render(self, task_id: str = "") -> str:
-        head = f"{task_id + '  ' if task_id else ''}{self.model}/{self.effort}"
+        head = f"{task_id + '  ' if task_id else ''}{tag(self.model, self.effort)}"
         lines = [head]
         if self.escalated_from:
             lines.append(f"  escalated from {self.escalated_from}")
@@ -277,6 +282,15 @@ class ModelRouter:
             effort = str(pin_effort)
             reasons.append(f"task pins effort {effort}")
 
+        # Last, so it catches the policy, the ladder and a task pin alike. A pin
+        # is absolute about the *model*; an effort the model has no dial for is
+        # not a decision the router is overruling, it is one the API cannot
+        # carry out, and dropping it silently would leave the run reporting a
+        # setting that never reached anything.
+        if effort and not supports_effort(model):
+            reasons.append(f"{model} has no effort parameter — {effort} dropped")
+            effort = ""
+
         cost = TIER_COST_USD[min(tier, len(TIER_COST_USD) - 1)]
         affordable = budget_remaining_usd is None or cost <= budget_remaining_usd
         if not affordable:
@@ -310,4 +324,4 @@ class ModelRouter:
 
     def _name(self, tier: int) -> str:
         m, e = self.ladder[max(0, min(tier, TOP))]
-        return f"{m}/{e}"
+        return tag(m, e)

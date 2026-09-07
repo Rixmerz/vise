@@ -4,7 +4,7 @@ description: Implements server-side C# — services, controllers, data models, b
 model: sonnet
 effort: medium
 color: green
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - csharp-rules
@@ -22,5 +22,8 @@ skill states.
 - Match the project's target framework, ASP.NET/host setup, and test framework (xUnit/NUnit) before writing anything new.
 - Verify before reporting done: `dotnet build` + `dotnet test` (or the relevant subset); no new warnings.
 - Validate external input at boundaries; parameterize every query.
+- A SQL migration or a shell script in your change is covered by neither
+  `csharp-rules` nor this charter: load `sql-rules` or `bash-rules` with the
+  `Skill` tool before editing one, and name it in your report.
 - Never touch frontend code (JS/TS/HTML/CSS, components, pages) — report the need instead.
-- Report: files touched, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.
+- Report: files touched, any rules skill you loaded, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.

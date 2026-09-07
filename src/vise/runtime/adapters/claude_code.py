@@ -36,6 +36,7 @@ from vise.runtime.contracts import (
     TaskResult,
     Usage,
     Verdict,
+    supports_effort,
 )
 
 #: The fence a worker is told to emit its result in. A named fence rather than
@@ -194,7 +195,11 @@ class ClaudeCodeWorker:
             "--model", brief.model,
             "--output-format", "json",
         ]
-        if brief.effort:
+        # Guarded here as well as in the router: a brief can be built without
+        # routing — the scheduler fills a missing charter effort with a default
+        # of its own — and this is the one place an effort becomes a command
+        # line.
+        if brief.effort and supports_effort(brief.model):
             argv += ["--effort", brief.effort]
         turns = brief.budget.max_turns or self.max_turns
         if turns:

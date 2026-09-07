@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Judges whether finished work meets its acceptance criteria, from the diff and the evidence alone — never from the implementer's explanation. Use after any implementation or test task reports done and before its result is accepted. Returns pass, fail, or inconclusive with the evidence for the verdict. Never fixes anything.
+description: Judges whether finished work meets its acceptance criteria, from the diff and the evidence alone — never from the implementer's explanation. Use after any implementation or test task reports done and before its result is accepted. Returns pass, fail, or inconclusive with the evidence for the verdict. Not for code quality or design review — that is `reviewer`. Never fixes anything.
 model: sonnet
 effort: medium
 color: cyan

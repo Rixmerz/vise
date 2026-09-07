@@ -4,7 +4,7 @@ description: Implements server-side and embedded Lua — modules, scripts, plugi
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - lua-rules
@@ -22,6 +22,9 @@ skill states.
 - Match the project's Lua version (5.1/5.4/LuaJIT), module layout, and test framework (busted/luaunit) before writing anything new.
 - Verify before reporting done: the project's test command (`busted`, `luarocks test`, or the host's runner); `luacheck` clean where configured.
 - Validate external input at boundaries; parameterize every query.
+- A SQL migration or a shell script in your change is covered by neither
+  `lua-rules` nor this charter: load `sql-rules` or `bash-rules` with the
+  `Skill` tool before editing one, and name it in your report.
 - Declare every variable `local`; validate external input at boundaries — an accidental global is a cross-request leak in OpenResty.
 - Never touch frontend code (JS/TS/HTML/CSS, components, pages) — report the need instead.
-- Report: files touched, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.
+- Report: files touched, any rules skill you loaded, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.

@@ -1,10 +1,10 @@
 ---
 name: designer
-description: Decides what a user-facing UI should look like and writes the brief the implementer follows — palette, type scale, layout, and one signature element. Use proactively before any new UI or visual reshape, when a design reads as templated or generic, or when a task says "make it look better" and nothing states what better means. Writes the brief only; never implements it.
+description: Decides what a user-facing UI should look like and writes the brief the implementer follows — palette, type scale, layout, and one signature element. Use proactively before any new UI or visual reshape, when a design reads as templated or generic, or when a task says "make it look better" and nothing states what better means. Writes the brief only; `frontend` implements it.
 model: opus
 effort: high
 color: purple
-tools: Read, Write, Glob, Grep, Bash, Skill
+tools: Read, Write, Edit, Glob, Grep, Bash, Skill
 skills:
   - engineering-baseline
   - design-brief

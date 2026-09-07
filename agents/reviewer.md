@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Adversarial code review — runs tests, reads the diff, hunts regressions, silent breakage, and over-engineering. Use proactively after any implementation subagent reports done and before committing or merging.
+description: Adversarial code review — runs tests, reads the diff, hunts regressions, silent breakage, and over-engineering. Use proactively after any implementation subagent reports done and before committing or merging. Not for judging acceptance criteria — that is `verifier`.
 model: opus
 effort: high
 color: red

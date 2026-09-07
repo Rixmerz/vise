@@ -1,9 +1,9 @@
 """A project can staff its own roles — see openspec/changes/project-local-agents.
 
 `AgentRegistry.bundled()` read exactly one directory, so a project could not add
-a capability without forking vise. That was already binding on vise itself:
-seven of the fourteen roles the model policy prices resolve to nobody, including
-every role on the cheapest tier.
+a capability without forking vise. That was already binding on vise itself: six
+of the fourteen roles the model policy prices resolve to nobody, three of them on
+the cheapest tier.
 
 The tests here hold two halves. The obvious one is that a project's charters
 load. The one that matters more is that they are held to the *same* bar as the
@@ -12,6 +12,7 @@ the whole risk of the feature.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -101,12 +102,17 @@ def test_a_missing_project_dir_is_not_fatal(tmp_path: Path):
 
 
 def test_a_project_charter_shadows_a_bundled_one(tmp_path: Path):
+    # Derived from the bundled charter rather than hardcoded. Pinning a literal
+    # here made this test fail the day `docs-writer` moved to that very model —
+    # a false red about shadowing, caused by a change to something else.
+    bundled = AgentRegistry.bundled().agents["docs-writer"].model
+    shadow = "opus" if bundled != "opus" else "sonnet"
     root = _project(tmp_path, **{
-        "docs-writer": _charter("docs-writer", "docs", model="haiku"),
+        "docs-writer": _charter("docs-writer", "docs", model=shadow),
     })
     reg = AgentRegistry.for_project(root)
-    assert reg.resolve("docs").agent.model == "haiku"
-    assert AgentRegistry.bundled().agents["docs-writer"].model != "haiku", \
+    assert reg.resolve("docs").agent.model == shadow
+    assert AgentRegistry.bundled().agents["docs-writer"].model == bundled, \
         "the bundled charter is untouched"
 
 
@@ -213,9 +219,9 @@ PROJECT_SUPPLIED_ROLES = {
 def test_every_priced_role_is_staffed_or_declared_unstaffed():
     """The policy table and the fleet are two statements about the same thing.
 
-    Nothing pinned them together, and they drifted: seven of fourteen priced
-    roles resolve to nobody. Pinning them here means the next role added to the
-    policy either ships an agent or says out loud that it does not.
+    Nothing pinned them together, and they drifted: six of fourteen priced roles
+    resolve to nobody. Pinning them here means the next role added to the policy
+    either ships an agent or says out loud that it does not.
     """
     bundled = AgentRegistry.bundled()
     # `roles()`, not `resolve()`. A role several agents take resolves to None
@@ -237,3 +243,27 @@ def test_the_declared_gap_does_not_outlive_the_agent_that_closes_it():
     staffed = AgentRegistry.bundled().roles()
     stale = {role for role in PROJECT_SUPPLIED_ROLES if role in staffed}
     assert not stale, f"now staffed; remove from PROJECT_SUPPLIED_ROLES: {sorted(stale)}"
+
+
+def test_the_readme_names_the_same_gap_the_tests_declare():
+    """Prose restating a fact drifts from it, and this one had.
+
+    The README listed seven unstaffed roles including `research`, months after
+    `research` gained a bundled charter — a claim about vise's own fleet that was
+    wrong in the file most likely to be read before the code. The dict above is
+    the fact; this makes the sentence answer to it.
+    """
+    readme = (Path(__file__).resolve().parents[3] / "README.md").read_text(encoding="utf-8")
+    match = re.search(
+        r"\*\*(\w+) roles the model policy prices have no bundled agent\*\*:(.+?)\.",
+        readme, re.DOTALL,
+    )
+    assert match, "the README no longer states the gap; update this test or restore it"
+    counted = {"five": 5, "six": 6, "seven": 7, "eight": 8}.get(match.group(1).lower())
+    named = set(re.findall(r"`([a-z_]+)`", match.group(2)))
+    assert named == set(PROJECT_SUPPLIED_ROLES), (
+        f"README names {sorted(named)}; the declared gap is "
+        f"{sorted(PROJECT_SUPPLIED_ROLES)}"
+    )
+    assert counted == len(PROJECT_SUPPLIED_ROLES), \
+        f"README says {match.group(1)!r}; the declared gap has {len(PROJECT_SUPPLIED_ROLES)}"

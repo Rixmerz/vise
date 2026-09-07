@@ -520,11 +520,13 @@ Three rules, each load-bearing:
   whereas a charter that cannot load already reports the honest outcome — the
   agent is not there, and a task that needed it is unroutable with a reason.
 
-**Seven roles the model policy prices have no bundled agent**: `research`,
-`extract`, `inventory`, `classify`, `integration`, `architecture`, `replan` —
-including every role on the cheapest (haiku) tier. `.vise/agents/` is how a
-project staffs them. `test_project_agents.py` pins the list, so a role added to
-the policy either ships an agent or says out loud that it does not.
+**Six roles the model policy prices have no bundled agent**: `extract`,
+`inventory`, `classify`, `integration`, `architecture`, `replan`. Three of them
+are on the cheapest (haiku) tier; `docs` is the haiku row that does ship one.
+`.vise/agents/` is how a project staffs the rest. `test_project_agents.py` pins
+the list against the policy *and* against this sentence, so a role added to the
+policy either ships an agent or says out loud that it does not — here as well as
+there.
 
 ## LSP servers
 

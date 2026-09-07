@@ -20,6 +20,34 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
+#: Models with no effort dial. The effort parameter names the models it supports
+#: and Claude Haiku 4.5 is not among them, so an effort set alongside haiku is a
+#: setting the model cannot honour: a policy row claiming documentation runs at
+#: "medium" when the dial does not exist, and a `--effort` flag on a command that
+#: cannot act on it. An empty effort is how the runtime says "not applicable".
+#:
+#: This lives here, in the layer that imports nothing of its own, so the router,
+#: the brief and the adapter all answer the question the same way. Two copies of
+#: a list like this drift, and the half that drifts is the one nobody runs.
+_NO_EFFORT_MODELS: frozenset[str] = frozenset({"haiku"})
+
+
+def supports_effort(model: str) -> bool:
+    """False when *model* has no effort parameter to set.
+
+    Aliases and full model ids both resolve — a charter may say ``haiku`` and a
+    task may pin ``claude-haiku-4-5``. ``inherit`` and anything unrecognised
+    answer True: the effort then belongs to whatever model the session resolves
+    to, and guessing it away here would drop a setting that does apply.
+    """
+    name = (model or "").strip().lower()
+    return name not in _NO_EFFORT_MODELS and not name.startswith("claude-haiku")
+
+
+def tag(model: str, effort: str) -> str:
+    """``model/effort``, or just the model where effort does not apply."""
+    return f"{model}/{effort}" if effort else model
+
 
 class TaskState(StrEnum):
     """Where a task is in its lifecycle.
@@ -226,10 +254,10 @@ class Attempt:
     usage: Usage = field(default_factory=Usage)
 
     def render(self) -> str:
-        tag = f"{self.model}/{self.effort}"
+        label = tag(self.model, self.effort)
         if self.classification:
-            tag = f"{tag}, {self.classification.value}"
-        return f"  attempt {self.number} [{tag}] {self.summary or self.verdict.value}"
+            label = f"{label}, {self.classification.value}"
+        return f"  attempt {self.number} [{label}] {self.summary or self.verdict.value}"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -287,7 +315,7 @@ class TaskBrief:
         out = [f"task: {self.task_id} — {self.name}", f"role: {self.role}"]
         if self.criticality is not Criticality.ROUTINE:
             out.append(f"criticality: {self.criticality.value}")
-        out.append(f"model: {self.model}/{self.effort}")
+        out.append(f"model: {tag(self.model, self.effort)}")
         if self.acceptance:
             out.append("acceptance criteria — you are judged against these and nothing else:")
             out += [f"  - {a}" for a in self.acceptance]

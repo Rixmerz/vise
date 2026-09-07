@@ -15,9 +15,8 @@ The router reads six things and nothing else:
 
 | Input | Where it comes from | Effect |
 |---|---|---|
-| `role` | the task | picks the candidate agents |
+| `role` | the task | selects the policy row, and the candidate agents |
 | `complexity` | the planner's estimate, `trivial…high` | only `high` raises the floor; `medium` is the unstated default and must be a no-op |
-| `role` | the task | selects the policy row |
 | `criticality` | the task, `routine…critical` | `critical` pins to the top tier |
 | `attempts` | the run's own history | each prior failure climbs one rung |
 | `context_size` | resolved context, in tokens | large context raises effort, never lowers it |
@@ -42,9 +41,10 @@ nearest rung. A policy that cannot state its own defaults is not a policy.
 
 | Work | Role | Model | Effort |
 |---|---|---|---|
-| extraction, classification | `extract`, `classify` | haiku | low |
-| simple research, file inventory | `research`, `inventory` | haiku | low |
-| documentation | `docs` | haiku | medium |
+| extraction, classification | `extract`, `classify` | haiku | — |
+| file inventory | `inventory` | haiku | — |
+| research | `research` | sonnet | medium |
+| documentation | `docs` | haiku | — |
 | ordinary coding | `backend`, `frontend` | sonnet | medium |
 | testing | `test` | sonnet | medium |
 | debugging | `debug` | sonnet | high |
@@ -55,6 +55,60 @@ nearest rung. A policy that cannot state its own defaults is not a policy.
 | replanning | `replan` | opus | high |
 
 Defaults, not law. Every cell is overridable per task and per repo.
+
+Six rows have no bundled charter: `extract`, `classify`, `inventory`,
+`integration`, `architecture` and `replan`. A task declaring one gets a price and
+then a registry miss, which `resolve` reports rather than papering over by picking
+whichever agent sorts first. `PROJECT_SUPPLIED_ROLES` in `test_project_agents.py`
+names them with a reason each, and two tests there hold the list closed in both
+directions — a newly priced role must ship an agent or join the list, and a role
+that gains one must leave it.
+
+## Effort is not a dial every model has
+
+The [effort parameter][effort] names the models it supports and Claude Haiku 4.5
+is not among them. So `haiku/low` and `haiku/medium` — the cheapest rung and the
+documentation row, as first written — named a setting the model has no dial for.
+Nothing failed loudly: the adapter put `--effort medium` on the command line, and
+the run reported an effort that reached nothing.
+
+`supports_effort()` in `runtime/contracts.py` is the one answer to that question,
+and the router, the brief's own rendering and the adapter all ask it there rather
+than each keeping a list. Where it says no, the effort is empty, a decision
+renders as the bare model name, and `--effort` never reaches the command line. A
+task that *pins* an effort onto such a model keeps the model — a pin is absolute —
+and loses the effort, with the reason recorded in the decision.
+
+It sits in `contracts.py`, the layer that imports nothing of its own, for the
+usual reason: two copies of a list like this drift, and the half that drifts is
+the one nobody runs.
+
+[effort]: https://platform.claude.com/docs/en/build-with-claude/effort
+
+## The charter and the policy state the same thing
+
+A bundled agent declares its own `model` and `effort` in frontmatter, and that is
+what Claude Code reads when a session delegates to it. The table above is what
+`vise runtime` reads. Both mean "the default for this kind of work", and for
+eight roles both exist — so for eight roles vise held two answers.
+
+Six agreed. Two did not: `docs-writer` declared `sonnet`/`low` against
+documentation's `haiku`, and `backend-cpp` and `backend-rust` declared `high`
+against ordinary coding's `medium`. The same agent behaved differently depending
+on which door the work arrived through, and nothing anywhere said so.
+
+`test_agent_charters_match_the_routing_policy` now holds them equal: where a role
+has both a policy row and a bundled charter, the charter states that row. That
+leaves the precedence rule below intact and, for bundled roles, unexercised — it
+still decides what happens to a *project-local* charter, which is where a
+disagreement can still arise and where the policy should still win.
+
+Per-language variation inside one role stays inexpressible, deliberately:
+`backend` is one role for twelve charters. A C++ task that needs more than
+`sonnet/medium` says so as `complexity: high`, which raises the floor for that
+task. Difficulty is a property of the work, not of the file extension — and a
+charter that encodes it applies it to every task in that language forever,
+including the one-line ones.
 
 ### Precedence
 
@@ -81,7 +135,7 @@ top tier regardless of the row. `criticality == "elevated"` adds one rung, and
 ## The ladder
 
 ```
-haiku/low ──fail──► sonnet/medium ──fail──► sonnet/high ──fail──► opus/high
+haiku ──fail──► sonnet/medium ──fail──► sonnet/high ──fail──► opus/high
 ```
 
 One rung per failed attempt, and only for failures where the work was attempted

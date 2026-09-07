@@ -111,6 +111,78 @@ def test_skill_frontmatter_valid(path: Path):
         f"{path.parent.name}: skill name {fm['name']!r} != directory name"
 
 
+@pytest.mark.parametrize("path", AGENT_FILES, ids=lambda p: p.name)
+def test_a_charter_that_tells_its_agent_to_use_a_tool_grants_it(path: Path):
+    """A body saying "load it with the `Skill` tool" over a frontmatter that does
+    not list `Skill` is an instruction the agent cannot carry out — and the
+    failure is silent, indistinguishable from a rules skill it decided not to
+    load. The twelve `backend-*` charters were in exactly that state: every one
+    preloads a single language's rules, and none could reach `sql-rules` for the
+    migration in the same change.
+
+    `validate_charter` checks the other direction — that a granted tool resolves.
+    Nothing checked that an instruction was backed by a grant.
+    """
+    from vise.runtime.registry import BUILTIN_TOOLS
+
+    fm = _frontmatter(path)
+    body = path.read_text(encoding="utf-8").split("---", 2)[2]
+    granted = {t.strip() for t in str(fm.get("tools") or "").split(",") if t.strip()}
+    named = sorted(t for t in BUILTIN_TOOLS if f"`{t}` tool" in body)
+    missing = [t for t in named if t not in granted]
+    assert not missing, \
+        f"{path.name}: body names the {missing} tool(s); frontmatter does not grant them"
+
+
+def test_agent_charters_state_the_same_default_as_the_routing_policy():
+    """Two defaults for one kind of work is two behaviours for one agent.
+
+    A charter's frontmatter is what Claude Code reads when a session delegates to
+    that agent; `runtime.routing.POLICY` is what `vise runtime` reads. Both mean
+    "the default for this kind of work", and where both exist they have to say
+    the same thing — otherwise the same agent runs at one setting through one
+    door and another through the other, and nothing anywhere says so.
+
+    Three charters disagreed when this was written: `docs-writer` declared
+    sonnet/low against documentation's haiku, and `backend-cpp` and
+    `backend-rust` declared high against ordinary coding's medium.
+
+    This does not replace the precedence rule in `docs/model-routing.md` — the
+    policy still outranks a charter, which is what a *project-local* charter is
+    held to. It removes the disagreement for the bundled fleet, where both
+    numbers are ours to keep equal.
+    """
+    from vise.runtime.registry import load_agent
+    from vise.runtime.routing import POLICY
+
+    mismatched = []
+    for path in AGENT_FILES:
+        spec = load_agent(path)
+        if spec.role not in POLICY or spec.model is None:
+            continue
+        declared = (spec.model, spec.effort or "")
+        if declared != POLICY[spec.role]:
+            mismatched.append(
+                f"{path.name}: charter says {declared}, policy row "
+                f"{spec.role!r} says {POLICY[spec.role]}"
+            )
+    assert not mismatched, "\n".join(mismatched)
+
+
+@pytest.mark.parametrize("path", AGENT_FILES, ids=lambda p: p.name)
+def test_a_charter_naming_a_model_without_an_effort_dial_declares_no_effort(path: Path):
+    """Claude Haiku 4.5 is absent from the effort parameter's supported models,
+    so `effort:` on a haiku charter is a setting nothing can act on — and the
+    frontmatter reads as though the agent runs at that level."""
+    from vise.runtime.contracts import supports_effort
+
+    fm = _frontmatter(path)
+    model = fm.get("model")
+    if model and not supports_effort(str(model)):
+        assert not fm.get("effort"), \
+            f"{path.name}: {model} has no effort parameter; drop the field"
+
+
 def test_every_agent_resolves_to_a_runtime_role():
     """A charter the runtime cannot route to still ships, still loads in Claude
     Code, and is simply never picked. Nothing else in the suite notices."""

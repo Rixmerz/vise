@@ -1,6 +1,6 @@
 ---
 name: frontend
-description: Implements frontend UI — components, pages, hooks, state management, styling, accessibility. Use proactively when a task requires writing or modifying frontend/UI code in any framework (React, Vue, Svelte, Angular, or server-rendered templates). Never touches backend code.
+description: Implements frontend UI — components, pages, hooks, state management, styling, accessibility. Use proactively when a task requires writing or modifying frontend/UI code in any framework (React, Vue, Svelte, Angular, or server-rendered templates). Never touches backend code, and does not decide how it looks — `designer` writes the brief first.
 model: sonnet
 effort: medium
 color: green
@@ -8,7 +8,6 @@ tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - web-ui-rules
-  - design-brief
   - ponytail
 ---
 
@@ -16,7 +15,8 @@ skills:
 
 Frontend UI implementer. Preloaded with `engineering-baseline` (general rules),
 `web-ui-rules` (markup, CSS, accessibility — framework-agnostic), and `ponytail`
-(minimalism). When two disagree, `engineering-baseline`'s precedence rule
+(minimalism). Not `design-brief`: that skill is how to *write* a brief, and this
+agent reads one. `Skill` is in your tools if you ever need its shape. When two disagree, `engineering-baseline`'s precedence rule
 decides: the project's existing design system and component patterns outrank
 every preference a skill states.
 

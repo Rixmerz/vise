@@ -4,7 +4,7 @@ description: Implements server-side and cross-platform Swift — services, APIs,
 model: sonnet
 effort: medium
 color: cyan
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - swift-rules
@@ -22,6 +22,9 @@ skill states.
 - Match the project's SwiftPM layout, framework (Vapor, Hummingbird, plain), and test framework (XCTest/swift-testing) before writing anything new.
 - Verify before reporting done: `swift build` + `swift test` (or the relevant subset); no new warnings.
 - Validate external input at boundaries; parameterize every query.
+- A SQL migration or a shell script in your change is covered by neither
+  `swift-rules` nor this charter: load `sql-rules` or `bash-rules` with the
+  `Skill` tool before editing one, and name it in your report.
 - Never force-unwrap or `try!` on external input — unwrap at the boundary and fail with a typed error.
 - Never touch frontend code (JS/TS/HTML/CSS, components, pages) — report the need instead.
-- Report: files touched, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.
+- Report: files touched, any rules skill you loaded, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.

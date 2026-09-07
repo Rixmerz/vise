@@ -21,6 +21,8 @@ from vise.runtime.routing import (
     TOP,
     ModelRouter,
     escalation_steps,
+    supports_effort,
+    tag,
     tier_of,
 )
 
@@ -128,8 +130,8 @@ def test_a_task_pin_is_absolute_and_survives_escalation():
         Attempt(i, "sonnet", "medium", Verdict.FAIL, "wrong", FailureKind.CODE_BUG)
         for i in range(1, 5)
     ]
-    decision = route(model="haiku", effort="low", attempts=attempts)
-    assert (decision.model, decision.effort) == ("haiku", "low")
+    decision = route(model="opus", effort="low", attempts=attempts)
+    assert (decision.model, decision.effort) == ("opus", "low")
     assert decision.pinned is True
     assert decision.escalated_from is None
 
@@ -182,10 +184,10 @@ def test_an_unknown_role_starts_at_the_implementation_rung():
 
 
 @pytest.mark.parametrize("role,expected", [
-    ("extract", ("haiku", "low")),
+    ("extract", ("haiku", "")),
     ("research", ("sonnet", "medium")),
-    ("classify", ("haiku", "low")),
-    ("docs", ("haiku", "medium")),
+    ("classify", ("haiku", "")),
+    ("docs", ("haiku", "")),
     ("backend", ("sonnet", "medium")),
     ("frontend", ("sonnet", "medium")),
     ("test", ("sonnet", "medium")),
@@ -204,33 +206,86 @@ def test_the_policy_table_routes_as_written(role, expected):
     assert (decision.model, decision.effort) == expected
 
 
+#: An off-ladder default, supplied by the test rather than read off whichever
+#: bundled row happens to sit between rungs. Every row in POLICY is a rung
+#: today; the mechanism that lets one sit between them is still in the router,
+#: and a guard that evaporates the moment the table changes is not a guard.
+_OFF_LADDER = ("sonnet", "low")
+
+
 def test_a_default_that_is_not_a_ladder_rung_survives_routing():
-    """haiku/medium is not on the ladder. Reading the result back off the ladder
-    rewrote it to haiku/low, which is how the table became unimplementable."""
-    assert ("haiku", "medium") not in LADDER
-    assert POLICY["docs"] == ("haiku", "medium")
-    decision = route(role="docs")
-    assert (decision.model, decision.effort) == ("haiku", "medium")
+    """Reading the result back off the ladder rewrote a between-rungs default to
+    the nearest rung, which is how the table became unimplementable."""
+    assert _OFF_LADDER not in LADDER
+    decision = ModelRouter(policy={"docs": _OFF_LADDER}).route(T(role="docs"))
+    assert (decision.model, decision.effort) == _OFF_LADDER
 
 
 def test_escalating_off_a_non_rung_default_lands_on_the_ladder():
-    attempts = [Attempt(1, "haiku", "medium", Verdict.FAIL, "wrong", FailureKind.CODE_BUG)]
-    decision = route(role="docs", attempts=attempts)
-    assert (decision.model, decision.effort) == LADDER[1]
-    assert decision.escalated_from == "haiku/low"
+    """`escalated_from` names the rung the default sat on, not the default. A
+    between-rungs pair has no rung of its own to name, and inventing one would
+    put a pair in the log that the ladder does not contain."""
+    attempts = [Attempt(1, *_OFF_LADDER, Verdict.FAIL, "wrong", FailureKind.CODE_BUG)]
+    router = ModelRouter(policy={"docs": _OFF_LADDER})
+    decision = router.route(T(role="docs"), attempts=attempts)
+    assert (decision.model, decision.effort) == LADDER[2]
+    assert decision.escalated_from == "sonnet/medium"
 
 
 def test_a_haiku_pin_is_priced_as_haiku():
     """Rung 0 is falsy. `tier_of(...) or fallback` priced a haiku pin as sonnet."""
-    decision = route(model="haiku", effort="low")
+    decision = route(model="haiku")
     assert decision.tier == 0
     assert decision.estimated_cost_usd == pytest.approx(0.05)
 
 
 def test_a_pin_with_an_off_ladder_effort_keeps_the_pinned_model_rung():
+    decision = route(model="sonnet", effort="max")
+    assert (decision.model, decision.effort) == ("sonnet", "max")
+    assert decision.tier == 1
+
+
+# --- effort is not a dial every model has --------------------------------
+
+
+@pytest.mark.parametrize("model,expected", [
+    ("haiku", False),
+    ("HAIKU", False),
+    ("claude-haiku-4-5", False),
+    ("sonnet", True),
+    ("opus", True),
+    ("fable", True),
+    ("claude-opus-5", True),
+    # Unresolvable now: the session decides, and the effort belongs to whatever
+    # it decides. Answering False here would drop a setting that does apply.
+    ("inherit", True),
+    ("", True),
+])
+def test_supports_effort_answers_for_aliases_and_full_ids(model, expected):
+    assert supports_effort(model) is expected
+
+
+def test_the_cheapest_rung_names_no_effort():
+    """Claude Haiku 4.5 is absent from the effort parameter's supported models,
+    so a rung reading `haiku/low` states a setting the model cannot honour."""
+    assert LADDER[0] == ("haiku", "")
+    assert all(e == "" for m, e in POLICY.values() if not supports_effort(m))
+
+
+def test_an_effort_pinned_onto_a_model_without_the_dial_is_dropped_and_said():
+    """A pin is absolute about the model. An effort haiku has no dial for is not
+    a decision being overruled — it is one nothing downstream can carry out, and
+    keeping it would have the run report a setting that reached nothing."""
     decision = route(model="haiku", effort="max")
-    assert (decision.model, decision.effort) == ("haiku", "max")
-    assert decision.tier == 0
+    assert (decision.model, decision.effort) == ("haiku", "")
+    assert decision.pinned is True
+    assert any("no effort parameter" in r for r in decision.reasons)
+
+
+def test_a_decision_without_an_effort_renders_as_the_bare_model():
+    assert tag("haiku", "") == "haiku"
+    assert tag("sonnet", "high") == "sonnet/high"
+    assert route(role="docs").render("t1").startswith("t1  haiku\n")
 
 
 def test_an_unclassified_failure_still_escalates():

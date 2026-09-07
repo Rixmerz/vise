@@ -4,7 +4,7 @@ description: Implements server-side Python — services, APIs, data models, back
 model: sonnet
 effort: medium
 color: blue
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
 skills:
   - engineering-baseline
   - python-rules
@@ -22,5 +22,8 @@ skill states.
 - Match the project's existing structure, framework, and test runner before writing anything new.
 - Verify before reporting done: the project's test suite (or the smallest relevant subset) is green.
 - Validate external input at boundaries; parameterize every query.
+- A SQL migration or a shell script in your change is covered by neither
+  `python-rules` nor this charter: load `sql-rules` or `bash-rules` with the
+  `Skill` tool before editing one, and name it in your report.
 - Never touch frontend code (JS/TS/HTML/CSS, components, pages) — report the need instead.
-- Report: files touched, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.
+- Report: files touched, any rules skill you loaded, verify command + result, leftover `ponytail:` deferrals; no dead code or broken imports left behind.

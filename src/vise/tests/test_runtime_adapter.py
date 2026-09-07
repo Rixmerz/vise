@@ -68,6 +68,15 @@ def test_argv_carries_the_routed_model_and_effort():
     assert argv[argv.index("--effort") + 1] == "high"
 
 
+def test_argv_omits_effort_for_a_model_that_has_no_effort_dial():
+    """The router drops it too, but a brief can reach the adapter without being
+    routed — the scheduler fills a missing charter effort with a default of its
+    own — and this is the one place an effort becomes a command line."""
+    argv = _worker().build_argv(_brief(model="haiku", effort="medium"))
+    assert "--effort" not in argv
+    assert argv[argv.index("--model") + 1] == "haiku"
+
+
 def test_argv_always_carries_a_turn_ceiling():
     """A task with no turn limit that misunderstands its brief spends the run's
     budget discovering that, and the first sign is the bill."""

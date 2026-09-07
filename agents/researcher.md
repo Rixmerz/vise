@@ -5,6 +5,7 @@ model: sonnet
 effort: medium
 color: cyan
 tools: Read, Glob, Grep, Bash, WebSearch, WebFetch, LSP, Skill
+maxTurns: 30
 skills:
   - engineering-baseline
 ---

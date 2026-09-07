@@ -8,6 +8,83 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — one agent, two defaults, depending on which door the work came through
+
+A bundled charter declares its own `model` and `effort`, and that is what Claude
+Code reads when a session delegates to it. `runtime/routing.POLICY` declares a
+model and effort per role, and that is what `vise runtime` reads. Both mean "the
+default for this kind of work". For eight roles both existed, and nothing held
+them to the same answer.
+
+Six agreed. Three charters did not: `docs-writer` declared `sonnet`/`low` against
+documentation's `haiku`, and `backend-cpp` and `backend-rust` declared `high`
+against ordinary coding's `medium`. So `backend-rust` ran at `high` from a Claude
+Code session and `medium` from the runtime, and no surface said so — the kind of
+divergence you find by reading two files nobody reads together.
+
+`test_agent_charters_state_the_same_default_as_the_routing_policy` now holds them
+equal wherever both exist. The precedence rule is untouched and still decides what
+happens to a *project-local* charter, which is where a disagreement can still
+legitimately arise; what changed is that the bundled fleet no longer has one.
+
+Per-language variation inside a role stays inexpressible on purpose: `backend` is
+one role for twelve charters, and a C++ task that needs more than `sonnet/medium`
+says so as `complexity: high`, which raises the floor for that task. Difficulty is
+a property of the work. A charter that encodes it applies it to every task in that
+language forever, including the one-line ones.
+
+### Fixed — an effort set on a model that has no effort dial
+
+The effort parameter names the models it supports and Claude Haiku 4.5 is not
+among them. The cheapest ladder rung read `haiku/low` and the documentation row
+read `haiku/medium`, so both named a setting the model has no dial for — and
+`docs-writer` carried `effort: low` in its frontmatter for the same reason.
+
+Nothing failed loudly, which is the whole problem: the adapter put `--effort` on
+the command line, `vise runtime explain` reported an effort, and none of it
+reached anything. A run that reports a setting it did not apply is worse than one
+that reports nothing.
+
+`supports_effort()` lives in `runtime/contracts.py`, the layer that imports
+nothing of its own, so the router, the brief's own rendering and the adapter all
+answer the question in one place rather than each keeping a list. Where it says
+no, the effort is empty, a decision renders as the bare model name, and `--effort`
+never reaches the command line. A task that *pins* an effort onto such a model
+keeps the model — a pin is absolute — and loses the effort, with the reason
+recorded in the decision.
+
+`docs-writer` is `haiku` with no `effort`, and its report is now a fixed format
+rather than a sentence: with no effort dial, the checklist is the whole control
+surface.
+
+### Fixed — the README named a gap that had been closed
+
+The README listed seven roles the model policy prices with no bundled agent, and
+included `research` — months after `researcher` shipped. `PROJECT_SUPPLIED_ROLES`
+in `test_project_agents.py` had the right six all along; only the prose was wrong,
+in the file most likely to be read before the code. A new test holds the sentence
+to that dict, names and count.
+
+### Added — backend charters can load the rules for a file they do not own
+
+The twelve `backend-*` charters preload one language's rules and had no `Skill`
+tool, so a backend change carrying a SQL migration or a shell script had no way to
+reach `sql-rules` or `bash-rules`. `debugger`, `tester`, `reviewer` and `verifier`
+already worked this way and their charters say so; the backends now do too, and
+name what they loaded in their report.
+
+Also: `designer` gains `Edit` (with `Write` alone, putting a brief into an
+existing change proposal replaced the file whole), `researcher` gains
+`maxTurns: 30` (`WebSearch` and `WebFetch` with no ceiling, and read-only, so a
+truncated run costs a partial answer rather than a half-edited tree), and
+`frontend` stops preloading `design-brief` — that skill is how to *write* a
+brief, and `frontend` reads one.
+
+`reviewer` and `verifier` had the same trigger sentence — "after any
+implementation subagent reports done" — while their bodies excluded each other.
+The bodies are not what routes work; the description is. Each now names the other.
+
+
 ### Fixed — vise taught two livespec calls that do not exist
 
 `codelayer_gate`'s deny message told an agent to run `locate("payments")`.
