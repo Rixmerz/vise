@@ -399,6 +399,103 @@ either codebase has: an agent that cannot see what the last agent tried will try
 it again, and confidently. It costs a few hundred tokens and it is the difference
 between three attempts and three identical attempts.
 
+### When the history is not enough
+
+The block above is preventive, and it fails in one particular way: the next
+agent reads it, agrees with it, and reports the same thing in different words.
+
+That is not a failure escalation can fix. Escalating is a bet that a more capable
+model will say something new; once a more capable model already has said the same
+thing, the bet is settled and the two remaining rungs are the expensive ones.
+`recovery.repeated_answer` settles it:
+
+> Two attempts at **different rungs**, with the same verdict, the same
+> classification, and summaries that read alike, are one answer, not two.
+
+Each clause is load-bearing.
+
+- **Different rungs.** The same model at the same effort agreeing with itself is
+  determinism, not a discovery, and an environment failure retries at the same
+  rung by design. Comparing across rungs is what keeps this off both.
+- **Same classification.** It is the typed half of the answer. If it moved,
+  something was learned even when the prose reads the same.
+- **Summaries that read alike**, at the 0.85 ratio `experience_gc` already uses
+  for "do these two prose blobs describe one thing". Loosely, because the brief
+  carries the previous summary into the next attempt, so a worker with nothing
+  new to report still reports it in new words. An exact-match check here would
+  be a guard that never fires, which is worse than no guard: it reads like
+  coverage.
+- **Two empty summaries are not alike.** Absent and identical are different
+  things. A worker that reported nothing has not repeated an answer, and
+  replanning on it would spend the plan budget on vise's own missing evidence.
+
+The move is a replan, and it is checked before the attempt budget, because
+arriving early is the entire saving. A task caught at attempt 2 has spent the
+two cheap rungs; letting it run to `max_attempts` spends the two expensive ones
+to be told the same thing twice more and then replans anyway. On the planning
+estimates in [`model-routing.md`](model-routing.md) that is roughly $3.30 of a
+$4.20 climb, per task that does it.
+
+The idea is borrowed from OpenManus's `BaseAgent.is_stuck`, which counts
+identical assistant messages and then injects a "consider new strategies" prompt.
+The counting is the good part. The prompt is not the right response here: telling
+the same worker to think differently is advice, and a replan is a different agent
+re-deriving what the task should have been.
+
+### The replan budget is a run-level thing
+
+`max_replans` bounds the run, not the task, and tasks reach the replan path
+concurrently. Which task gets the last replan therefore depends on which one
+finishes first, and a run where more tasks want a replan than the budget allows
+does not have one determined outcome — the same seed can park a different task.
+
+This is older than the repeat check (`max_attempts` and `at_top_rung` reach the
+same path) and was simply rare enough not to show. The repeat check made it
+common enough that `test_the_same_seed_produces_the_same_outcome` started
+failing about two runs in five, which is how it was found: the stress suite's
+injected failures all carried one summary string, so every task that failed
+twice read as a task repeating itself. Independent failures now read as
+independent findings, which is what `_fails` already modelled them as.
+
+Worth knowing before reading a stress run's task states as a specification. The
+run's *outcome* is deterministic; which task is the one parked is not.
+
+### What the run remembers about it
+
+A replan is the strongest thing a run can say about a repository, and it is worth
+nothing if it dies with the run. `runtime/lessons.py` reads the run's own event
+record afterwards and writes it into the project's experience memory as a
+`run_replanned` entry, keyed `run:<graph>:<node>` so the next run of the same
+node retrieves it.
+
+The entry carries the goal and, in its resolution, **what was tried**:
+
+```
+a (code_bug, tried haiku → sonnet/medium → sonnet/high → opus/high):
+  the orders repository still imports the billing module
+```
+
+The rung list is the part that makes it reusable. "It failed" is not a lesson.
+"It failed at every rung" says the ladder was not the missing piece, so a later
+plan reading it knows not to budget for the climb again.
+
+That list used to be missing on most replans. The reasons were filtered to
+`SPEC_BUG` and `ARCHITECTURE_BUG`, which are two of the four ways a replan
+happens — so a task that burned the whole ladder on one wrong answer wrote an
+entry saying a replan occurred and nothing about what had been tried. A task that
+failed once and then passed is still left out, and deliberately: that is the
+ladder working, and filing it here would put a solved problem in front of the
+next plan as though it were open.
+
+What is **not** recorded yet, and is worth knowing before relying on this:
+
+- **Only failures.** A run that succeeded leaves nothing here. What worked
+  reaches memory through the commit recorder instead, as the commit's `Why:`.
+- **Project scope only.** Every entry is written with `scope="project"`, so
+  nothing a run learns can reach a different repository — even a `run_replanned`
+  entry, whose `run:<graph>:<node>` key is about the workflow rather than about
+  this code and would carry across.
+
 ## Three passes above the worker
 
 Each answers a question the worker cannot answer about itself.

@@ -74,7 +74,67 @@ def test_the_reason_falls_back_to_the_last_attempt(tmp_path):
     state.emit("replanned", tasks=2, replans=1)
 
     [lesson] = lessons_from(state)
-    assert "a (architecture_bug): wrong question" in lesson.resolution
+    assert "a (architecture_bug, tried m/e): wrong question" in lesson.resolution
+
+
+def test_a_task_that_burned_the_ladder_records_what_it_tried(tmp_path):
+    """The case the old filter dropped. Only SPEC_BUG and ARCHITECTURE_BUG
+    contributed a line, so a task that spent all four rungs on one wrong answer
+    left a lesson reading "replan #1" and an empty resolution: the memory knew a
+    replan happened and nothing about what had already been tried."""
+    state = _state(tmp_path)
+    record = state.record("a")
+    for number, (model, effort) in enumerate(
+        [("haiku", ""), ("sonnet", "medium"), ("sonnet", "high"), ("opus", "high")], 1
+    ):
+        record.attempts.append(Attempt(
+            number=number, model=model, effort=effort, verdict=Verdict.FAIL,
+            summary="the orders repository still imports billing",
+            classification=FailureKind.CODE_BUG,
+        ))
+    record.state = TaskState.FAILED
+    state.emit("replanned", tasks=2, replans=1)
+
+    [lesson] = lessons_from(state)
+
+    assert "a (code_bug, tried haiku → sonnet/medium → sonnet/high → opus/high)" \
+        in lesson.resolution
+    assert "the orders repository still imports billing" in lesson.resolution
+
+
+def test_a_task_that_recovered_by_escalating_is_not_filed_as_a_reason(tmp_path):
+    """One failure then a pass is the ladder working. Filing it here would put a
+    solved problem in front of the next plan as though it were open."""
+    state = _state(tmp_path)
+    record = state.record("a")
+    record.attempts.append(Attempt(
+        number=1, model="haiku", effort="", verdict=Verdict.FAIL,
+        summary="missed the guard clause", classification=FailureKind.CODE_BUG,
+    ))
+    record.attempts.append(Attempt(
+        number=2, model="sonnet", effort="medium", verdict=Verdict.PASS, summary="done",
+    ))
+    record.state = TaskState.SUCCEEDED
+    state.emit("replanned", tasks=2, replans=1)
+
+    [lesson] = lessons_from(state)
+    assert lesson.resolution == ""
+
+
+def test_a_rung_tried_twice_is_named_once(tmp_path):
+    """An environment failure retries at the same rung. Listing it twice would
+    read as a climb that never happened."""
+    state = _state(tmp_path)
+    record = state.record("a")
+    for number in (1, 2):
+        record.attempts.append(Attempt(
+            number=number, model="sonnet", effort="medium", verdict=Verdict.FAIL,
+            summary="the database was not up", classification=FailureKind.ENVIRONMENT_BUG,
+        ))
+    state.emit("replanned", tasks=2, replans=1)
+
+    [lesson] = lessons_from(state)
+    assert "tried sonnet/medium)" in lesson.resolution
 
 
 def test_a_run_parked_for_a_person_is_a_lesson(tmp_path):

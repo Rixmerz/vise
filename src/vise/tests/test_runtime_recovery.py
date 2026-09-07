@@ -22,6 +22,7 @@ from vise.runtime.recovery import (
     Recovery,
     classify_from_text,
     decide,
+    repeated_answer,
 )
 
 
@@ -197,3 +198,128 @@ def test_the_fallback_classifier_returns_none_rather_than_guessing(text):
     """Guessing ENVIRONMENT_BUG would park a broken task at the cheapest rung
     and retry it until the attempt budget ran out."""
     assert classify_from_text(text) is None
+
+
+# --- the ladder answering itself -----------------------------------------
+#
+# Escalating is only worth paying for while a bigger model might say something
+# new. Two rungs reaching the same answer is evidence that it will not, and the
+# ladder is four rungs of which the top two are most of the cost.
+
+SAID = "the auth test still fails on an expired token"
+REWORDED = "the auth test still fails for an expired token"
+OTHER = "the migration could not find the orders table"
+
+
+def _at(number, model, effort, summary=SAID, classification=FailureKind.CODE_BUG,
+        verdict=Verdict.FAIL) -> Attempt:
+    return Attempt(number, model, effort, verdict, summary, classification, Usage())
+
+
+def test_two_rungs_reaching_the_same_answer_replan_instead_of_climbing():
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium")]
+    move = decide(_result(classification=FailureKind.CODE_BUG), attempts)
+    assert move.action is Recovery.REPLAN
+    assert "haiku" in move.reason and "sonnet/medium" in move.reason
+
+
+def test_a_reworded_repeat_still_counts():
+    """The next attempt's brief carries the previous summary into it, so a worker
+    with nothing new to report still reports it in new words. An exact-match
+    check would be a guard that never fires."""
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium", REWORDED)]
+    assert decide(_result(), attempts).action is Recovery.REPLAN
+
+
+def test_whitespace_and_case_do_not_make_an_answer_new():
+    shouted = "  The AUTH test\n still  fails on an expired token "
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium", shouted)]
+    assert decide(_result(), attempts).action is Recovery.REPLAN
+
+
+def test_the_same_rung_agreeing_with_itself_is_not_a_repeat():
+    """Determinism is not a discovery, and an environment failure retries at the
+    same rung by design — reading that as a loop would replan a task whose only
+    problem was a missing binary."""
+    attempts = [_at(1, "sonnet", "medium"), _at(2, "sonnet", "medium")]
+    assert decide(_result(), attempts).action is Recovery.ESCALATE
+
+
+def test_two_rungs_reaching_different_answers_still_climb():
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium", OTHER)]
+    assert decide(_result(), attempts).action is Recovery.ESCALATE
+
+
+def test_the_same_words_about_a_different_failure_still_climb():
+    """Same prose, different classification. The classification is the typed
+    half of the answer and it moved, so something was learned."""
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium",
+                                         classification=FailureKind.TEST_BUG)]
+    assert decide(_result(), attempts).action is Recovery.ESCALATE
+
+
+def test_saying_nothing_twice_is_an_absence_not_a_repeat():
+    """Absent and identical are different. A worker that reported nothing has not
+    repeated an answer, and replanning on it would spend the plan budget on
+    vise's own missing evidence."""
+    attempts = [_at(1, "haiku", "", summary=""), _at(2, "sonnet", "medium", summary="")]
+    assert decide(_result(), attempts).action is Recovery.ESCALATE
+
+
+def test_a_repeat_past_the_replan_budget_stops_for_a_person():
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium")]
+    move = decide(_result(), attempts, replans_used=2, max_replans=2)
+    assert move.action is Recovery.HUMAN
+    assert move.state is TaskState.BLOCKED
+
+
+def test_any_earlier_rung_counts_not_only_the_last_one():
+    """Once a rung has produced this answer the ladder has been tried against
+    it, whatever the task did in between."""
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium", OTHER),
+                _at(3, "sonnet", "high")]
+    move = decide(_result(), attempts)
+    assert move.action is Recovery.REPLAN
+    assert "attempt 1" in move.reason
+
+
+def test_a_repeat_is_caught_before_the_attempt_budget_runs_out():
+    """The whole saving is arriving early. Caught at attempt 2 the task has spent
+    the two cheap rungs; running to `max_attempts` spends the two expensive ones
+    to be told the same thing twice more, and replans anyway."""
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium")]
+    assert len(attempts) < DEFAULT_MAX_ATTEMPTS
+    move = decide(_result(), attempts)
+    assert move.action is Recovery.REPLAN
+    assert "attempts spent" not in move.reason
+
+
+def test_an_environment_repeat_is_still_an_environment_retry():
+    """RETRY_KINDS is answered before this check. A missing binary reported twice
+    is the same missing binary, and no plan fixes it either."""
+    attempts = [_at(1, "haiku", "", classification=FailureKind.ENVIRONMENT_BUG),
+                _at(2, "sonnet", "medium", classification=FailureKind.ENVIRONMENT_BUG)]
+    move = decide(_result(classification=FailureKind.ENVIRONMENT_BUG), attempts)
+    assert move.action is Recovery.HUMAN
+    assert "environment" in move.reason
+
+
+def test_a_claim_the_gates_refused_twice_is_a_repeat():
+    """The most expensive loop there is: two rungs claiming the same thing, both
+    refused for not showing it. `decide` accepts a pass the gates accepted long
+    before this check, so the only passes that reach it are refused ones."""
+    attempts = [_at(1, "haiku", "", verdict=Verdict.PASS),
+                _at(2, "sonnet", "medium", verdict=Verdict.PASS)]
+    move = decide(_result(Verdict.PASS), attempts, gates_accepted=False)
+    assert move.action is Recovery.REPLAN
+
+
+def test_a_pass_does_not_repeat_a_failure_that_read_the_same():
+    """The verdict moved, so the answer did. It went from wrong to unproven."""
+    attempts = [_at(1, "haiku", ""), _at(2, "sonnet", "medium", verdict=Verdict.PASS)]
+    assert repeated_answer(attempts) is None
+
+
+def test_one_attempt_cannot_repeat_anything():
+    assert repeated_answer([_at(1, "haiku", "")]) is None
+    assert repeated_answer([]) is None

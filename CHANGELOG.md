@@ -8,6 +8,78 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — a replan recorded that it happened and not what had been tried
+
+`runtime/lessons.py` writes a `run_replanned` entry into the project's memory
+after every run, and its resolution is meant to carry the reason. It collected
+reasons only from tasks classified `SPEC_BUG` or `ARCHITECTURE_BUG`, which are
+two of the four ways a replan happens. The other two — the attempt budget running
+out, and the new repeated-answer check — wrote an entry that said a replan
+occurred and left the resolution empty. The memory knew a plan had been thrown
+away and nothing about what had already been attempted, which is the half a later
+plan needs.
+
+Every task that failed more than once now contributes, with the rungs it was
+tried at:
+
+```
+a (code_bug, tried haiku → sonnet/medium → sonnet/high → opus/high):
+  the orders repository still imports the billing module
+```
+
+The rung list is what makes it reusable. "It failed" is not a lesson; "it failed
+at every rung" says the ladder was not the missing piece, so a later plan knows
+not to budget for the climb again. A task that failed once and then passed stays
+out on purpose: that is the ladder working, and filing it would put a solved
+problem in front of the next plan as an open one.
+
+Two gaps are now written down in `docs/scheduler.md` rather than left to be
+discovered: only failures are recorded, and every entry is project-scoped, so
+nothing a run learns can reach a different repository yet.
+
+A third thing is written down there because the repeat check found it: the replan
+budget bounds the *run*, tasks reach it concurrently, and so which task gets the
+last replan depends on which finishes first. That is older than this change and
+was rare enough not to show. It showed as a determinism test failing two runs in
+five, because the stress suite's injected failures all carried one summary
+string — so every task that failed twice read as a task repeating itself.
+Independent failures now read as independent findings, which is what the
+injector already modelled them as.
+
+### Added — the ladder stops climbing once two rungs give the same answer
+
+Escalation is a bet that a more capable model will say something new. Nothing
+checked whether that bet had already been settled, so a task whose real problem
+was the plan climbed all four rungs to be told the same thing four times, and
+then replanned anyway on the attempt budget.
+
+`recovery.repeated_answer` reads the attempt history for it: two attempts at
+**different rungs**, with the same verdict, the same classification, and
+summaries that read alike, are one answer rather than two. The move is a replan,
+checked before the attempt budget, because arriving early is the whole saving. A
+task caught at attempt 2 has spent the two cheap rungs; running it to
+`max_attempts` spends the two expensive ones first. On the planning estimates in
+`docs/model-routing.md` that is roughly $3.30 of a $4.20 climb.
+
+Each clause earns its place. Requiring the rungs to differ keeps it off
+determinism and off environment retries, which repeat at the same rung by design.
+The classification has to match because it is the typed half of the answer, and a
+classification that moved means something was learned even when the prose reads
+the same. Summaries are compared loosely, at the 0.85 ratio `experience_gc`
+already uses, because the brief carries the previous summary into the next
+attempt and a worker with nothing new to report still reports it in new words —
+an exact-match check would be a guard that never fires, which is worse than no
+guard because it reads like coverage. And two empty summaries are not alike:
+absent and identical are different, and replanning on an absence would spend the
+plan budget on vise's own missing evidence.
+
+Borrowed from OpenManus's `BaseAgent.is_stuck`, which counts identical assistant
+messages and then injects a "consider new strategies" prompt. The counting is the
+good part; the prompt is not the right response here, because telling the same
+worker to think differently is advice, and a replan is a different agent
+re-deriving what the task should have been.
+
+
 ### Fixed — one agent, two defaults, depending on which door the work came through
 
 A bundled charter declares its own `model` and `effort`, and that is what Claude

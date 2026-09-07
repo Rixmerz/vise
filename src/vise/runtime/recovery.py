@@ -19,6 +19,7 @@ no I/O, no clock — the decision has to be reproducible from the record, or
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any, Sequence
 
@@ -30,6 +31,7 @@ from vise.runtime.contracts import (
     TaskResult,
     TaskState,
     Verdict,
+    tag,
 )
 
 #: How many times a task may be attempted before the runtime stops asking the
@@ -45,6 +47,12 @@ DEFAULT_MAX_REPLANS = 2
 #: How many times an environment failure is retried at the same rung. One. If
 #: the database is still down on the second try, waiting is not the fix.
 DEFAULT_MAX_ENV_RETRIES = 1
+
+#: How alike two summaries have to read before they count as the same answer.
+#: The same number `experience_gc.CONSOLIDATE_SIMILARITY` uses, because it is the
+#: same judgement — when do two prose blobs describe one thing. A second, freshly
+#: invented number for it would mean one of the two is unexamined.
+SAME_ANSWER_RATIO: float = 0.85
 
 
 class Recovery(StrEnum):
@@ -71,6 +79,63 @@ class RecoveryDecision:
 
 def _env_retries(attempts: Sequence[Attempt]) -> int:
     return sum(1 for a in attempts if a.classification in RETRY_KINDS)
+
+
+def _reads_alike(left: str, right: str) -> bool:
+    """Whether two summaries say the same thing, allowing for rewording.
+
+    Loosely, on purpose. The next attempt's brief carries the previous summary
+    into it, so a worker with nothing new to report still reports it in new
+    words — an exact-match check would be a guard that never fires, which is
+    worse than no guard because it reads like coverage.
+
+    Two empty summaries are not alike. Saying nothing twice is an absence, and
+    an absence is not evidence that the same thing was said: a task whose worker
+    reported nothing would otherwise be replanned for having no answer rather
+    than for repeating one.
+    """
+    a = " ".join(left.split()).casefold()
+    b = " ".join(right.split()).casefold()
+    if not a or not b:
+        return False
+    return a == b or SequenceMatcher(None, a, b).ratio() >= SAME_ANSWER_RATIO
+
+
+def repeated_answer(attempts: Sequence[Attempt]) -> Attempt | None:
+    """The earlier attempt the latest one merely repeats, or None.
+
+    Not "it failed twice" — that is what the ladder is for, and every escalation
+    starts there. This is *two different rungs reaching the same answer*: same
+    verdict, same classification, and summaries that read alike. A bigger model
+    already had its turn on this task and said what the smaller one said, so the
+    next rung is unlikely to say anything new, and there are only ever four.
+
+    Requiring the rungs to differ is what keeps it off determinism. The same
+    model at the same effort agreeing with itself is not a discovery, and an
+    environment failure retries at the same rung by design — reading that as a
+    loop would replan a task whose only problem was a missing binary.
+
+    Every earlier attempt is compared, not just the previous one: once a rung
+    has produced this answer, the ladder has been tried against it, whatever the
+    task did in between.
+
+    Verdicts are compared rather than filtered, so a ``PASS`` can only match
+    another ``PASS`` — which is deliberate. ``decide`` accepts a pass the gates
+    accepted long before it gets here, so the only passes that reach this are
+    ones the honesty gates refused, and two rungs claiming the same thing they
+    both cannot show is the most expensive loop of the lot.
+    """
+    if len(attempts) < 2:
+        return None
+    latest = attempts[-1]
+    for prior in reversed(attempts[:-1]):
+        if (prior.model, prior.effort) == (latest.model, latest.effort):
+            continue
+        if (prior.verdict, prior.classification) != (latest.verdict, latest.classification):
+            continue
+        if _reads_alike(prior.summary, latest.summary):
+            return prior
+    return None
 
 
 def decide(
@@ -146,6 +211,24 @@ def decide(
         return RecoveryDecision(
             Recovery.HUMAN, TaskState.BLOCKED,
             "environment failure persisted through its retry — waiting is not the fix",
+        )
+
+    # Before the attempt count, because it fires earlier and explains more. A
+    # task caught here at attempt 2 has spent the two cheap rungs; letting it
+    # run to `max_attempts` spends the two expensive ones to be told the same
+    # thing a third and fourth time, and then replans anyway.
+    echo = repeated_answer(attempts)
+    if echo is not None:
+        rungs = f"{tag(echo.model, echo.effort)} and {tag(attempts[-1].model, attempts[-1].effort)}"
+        if replans_used < max_replans:
+            return RecoveryDecision(
+                Recovery.REPLAN, TaskState.PENDING,
+                f"attempt {echo.number} already reached this answer — {rungs} agree, "
+                f"which is evidence about the plan rather than about the model",
+            )
+        return RecoveryDecision(
+            Recovery.HUMAN, TaskState.BLOCKED,
+            f"{rungs} reached the same answer and the replan budget is spent",
         )
 
     if used >= max_attempts:

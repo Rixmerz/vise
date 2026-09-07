@@ -23,7 +23,7 @@ import logging
 from collections.abc import Iterable
 
 from vise.engines.experience_memory import ExperienceEntry, get_project_experience_store
-from vise.runtime.contracts import REPLAN_KINDS
+from vise.runtime.contracts import REPLAN_KINDS, Attempt, Verdict, tag
 from vise.runtime.state import RunState
 
 log = logging.getLogger(__name__)
@@ -95,8 +95,35 @@ def lessons_from(state: RunState) -> list[ExperienceEntry]:
     return out
 
 
+def _rungs_tried(attempts: list[Attempt]) -> str:
+    """The distinct rungs a task was attempted at, cheapest first, in order.
+
+    This is the strategy half of the lesson. "It failed" is not reusable; "it
+    failed at all four rungs" says the ladder was not the missing piece, and a
+    later plan reading that knows not to budget for the climb again.
+    """
+    seen: list[str] = []
+    for attempt in attempts:
+        label = tag(attempt.model, attempt.effort)
+        if label and label not in seen:
+            seen.append(label)
+    return " → ".join(seen)
+
+
 def _replan_reasons(state: RunState) -> str:
-    """What the failed attempts said, for every task whose failure caused a replan."""
+    """What was tried and what it said, for every task that failed on the way here.
+
+    Not only the tasks classified as plan-level. A task that burned the whole
+    ladder on one wrong answer *is* why the run replanned, and filtering to
+    ``SPEC_BUG`` and ``ARCHITECTURE_BUG`` left exactly that case writing an empty
+    string: the memory recorded that a replan happened and nothing about what had
+    been tried, which is the half a later plan actually needs.
+
+    A task with one failure and no plan-level classification is left out on
+    purpose. One failure followed by a pass is the ladder working — that task
+    recovered, and filing it here would put a solved problem in front of the next
+    plan as though it were an open one.
+    """
     kinds = {k.value for k in REPLAN_KINDS}
     lines: list[str] = []
     for task_id, record in sorted(state.tasks.items()):
@@ -112,10 +139,15 @@ def _replan_reasons(state: RunState) -> str:
                 if getattr(attempt, "classification", None):
                     classified = (str(attempt.classification), attempt.summary)
                     break
-        if classified is None or classified[0] not in kinds:
+        if classified is None:
+            continue
+        failures = [a for a in record.attempts if a.verdict is not Verdict.PASS]
+        if classified[0] not in kinds and len(failures) < 2:
             continue
         kind, said = classified
-        lines.append(f"{task_id} ({kind}): {said or record.note or '(no summary)'}")
+        rungs = _rungs_tried(failures)
+        head = f"{task_id} ({kind}, tried {rungs})" if rungs else f"{task_id} ({kind})"
+        lines.append(f"{head}: {said or record.note or '(no summary)'}")
     return "\n".join(lines)[:1000]
 
 

@@ -188,6 +188,23 @@ def test_read_only_tasks_pack_freely():
 # --- failure injection ----------------------------------------------------
 
 
+#: One distinct finding per attempt number. `_fails` models failures as
+#: independent draws, so the summaries have to read as independent findings: a
+#: worker whose every failure reads the same is not a worker, and
+#: `recovery.repeated_answer` reads summaries loosely, so "attempt 1" against
+#: "attempt 2" is a 0.97 match and counts as one answer repeated.
+#:
+#: Indexed by attempt rather than drawn, so within a task no two attempts can
+#: collide while `max_attempts` stays below this many.
+_FINDINGS: tuple[str, ...] = (
+    "the parser dropped a trailing comma",
+    "an expired token was accepted at the boundary",
+    "the migration held a lock on the orders table",
+    "the cache key ignored the tenant",
+    "a goroutine outlived the request that started it",
+)
+
+
 class _Flaky(MockWorker):
     """Fails a deterministic fraction of attempts.
 
@@ -220,7 +237,8 @@ class _Flaky(MockWorker):
             self.briefs.append(brief)
         if self._fails(brief.task_id, attempt):
             return TaskResult(
-                task_id=brief.task_id, verdict=Verdict.FAIL, summary="injected failure",
+                task_id=brief.task_id, verdict=Verdict.FAIL,
+                summary=f"{brief.task_id}: {_FINDINGS[(attempt - 1) % len(_FINDINGS)]}",
                 classification=self.kind, usage=Usage(cost_usd=0.01),
                 model=brief.model, effort=brief.effort,
             )
@@ -229,6 +247,42 @@ class _Flaky(MockWorker):
             evidence="$ mock\nok", checks="$ mock\nok",
             usage=Usage(cost_usd=0.01), model=brief.model, effort=brief.effort,
         )
+
+
+class _Stuck(MockWorker):
+    """Always fails, always with the same answer. What a real loop looks like."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.models: list[str] = []
+        self._lock = threading.Lock()
+
+    def run(self, brief):
+        with self._lock:
+            self.models.append(brief.model)
+        return TaskResult(
+            task_id=brief.task_id, verdict=Verdict.FAIL,
+            summary="the orders repository still imports the billing module",
+            classification=FailureKind.CODE_BUG, usage=Usage(cost_usd=0.01),
+            model=brief.model, effort=brief.effort,
+        )
+
+
+def test_a_task_repeating_its_answer_never_reaches_the_top_rung():
+    """The saving, at the level where it is spent.
+
+    Two rungs reaching the same answer settles the bet escalation makes, so the
+    two expensive rungs are never bought. Without the check this climbs all four
+    and replans anyway, having paid for the climb to be told the same thing twice
+    more.
+    """
+    worker = _Stuck()
+    tasks = [Task(id="t0", name="t0", role="backend", ownership=["src/a/**"])]
+    state = _run(tasks, worker, spec=_spec(budget=RunBudget(max_parallel=1)))
+
+    assert state.is_done()
+    assert "opus" not in worker.models, f"climbed to {worker.models}"
+    assert len(worker.models) <= 2, f"kept trying: {worker.models}"
 
 
 @pytest.mark.parametrize("seed", [5, 13, 29])
