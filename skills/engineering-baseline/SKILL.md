@@ -140,6 +140,36 @@ the name as well. And **no server, no answer**: if the language has none
 installed, `LSP` returns nothing, and that is a reason to fall back to text
 search and say so, never to report a caller list as complete.
 
+### Writing against a library — the installed source before recall
+
+The API you remember is the API of whatever version you were trained on, and
+you have no error bar on that. A renamed method, an argument that moved, a
+default that flipped — each one reads fine in review and fails at runtime.
+
+Before writing a call into a library you do not have open:
+
+1. **Check the version this repo pins**, in the lockfile rather than the
+   manifest range. Documentation for 3.x answers nothing about the 2.x that is
+   installed.
+2. **Read the installed source.** It is already on disk — `site-packages`,
+   `node_modules`, `vendor/`. `hover` and `goToDefinition` answer "what does
+   this actually take" from the code that will run, which outranks every
+   description of it.
+3. **Only then go outward**, to the project's own documentation — or to a
+   documentation tool if the session happens to have one.
+
+A documentation server or CLI, where one is configured, is a faster step 3 than
+a search engine. It does not replace steps 1 and 2: it answers from an index of
+published docs, not from the version on this disk, and that index is a third
+party's summary of a source you can read directly.
+
+Two honest limits, the same shape as the language server's. **No source, no
+claim** — when the library is not vendored and no docs tool is configured, name
+the call you could not verify instead of writing it confidently. And **an index
+can be right about the library and wrong about your version**: where it
+disagrees with the installed source, the installed source wins, and the
+disagreement is worth reporting rather than quietly resolving.
+
 ### Changing a signature
 - Before changing a public signature, resolve the caller set with `LSP`
   (`findReferences`, plus `goToImplementation` for an interface member).
