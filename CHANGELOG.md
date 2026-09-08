@@ -8,6 +8,61 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — `experience gc` deleted an id that an asset was still pointing at
+
+`experience_gc`'s module docstring says an id named in a project's
+`experience_refs` is never dropped. It was half true. `gc()` consulted
+`protected_ids` in the score-and-filter loop only, which runs *after*
+`consolidate()` has already absorbed near-duplicates and deleted their ids.
+Protection held against the retention threshold and failed on the one path that
+removes an id somebody still references.
+
+Run with a protected id and an asset journal naming it:
+
+| | before | after |
+|---|---|---|
+| ids surviving in the store | `['NEW-WINS']` | `['NEW-WINS', 'OLD-REFD']` |
+| `report["dropped"]` | `0` | `0` |
+| `report["protected_kept"]` | `0` | `0` |
+
+Both counters read zero in the broken case, which is why nothing surfaced it:
+an absorbed entry is not a dropped one, so the report was telling the truth and
+still not answering the question.
+
+`consolidate()` now takes the protected set and never absorbs one. A protected
+duplicate is still marked `_superseded` and ranked below the entry that
+replaced it, so protection costs retention priority rather than correctness.
+
+`consolidate()` has also always returned `{absorbed_id: kept_id}`, and `gc()`
+bound it to a local it never read — the answer to "where did that id go",
+computed and discarded. It is now `report["merged"]`, which
+`vise experience gc --json` prints. The table output is unchanged.
+
+Latent rather than live: nothing in vise writes `experience_refs` yet —
+`protected_ids_for` only reads it — so the protected set is empty in practice
+today. It bites the day a writer is wired up.
+
+### Added — the baseline says to check a library's API before writing against it
+
+vise said "never from memory" in three places — `security-auditor`,
+`security-baseline`, and `engineering-baseline`'s Dependencies section — and
+all three were about CVEs and advisories. Nothing said it about the API an
+agent is actually writing against, which is the one that fails silently: a
+renamed method or a moved argument reads fine in review.
+
+The rule goes in `engineering-baseline`, which all 22 charters preload, so it
+lands once and reaches every code-touching agent. The order is the point: the
+lockfile first, because it says which release runs here; then the installed
+source on disk; then anything outward.
+
+It names no documentation vendor, and a parametrized test keeps it that way.
+`core/neighbours.py` records what an unverifiable name costs — vise shipped
+`locate` and `compute_index_status`, one that never existed and one removed in
+livespec v0.9, into its two most-obeyed surfaces. Those came from a repository
+someone could open and read. A hosted documentation service is further away,
+not closer: the tool every guide still calls `get-library-docs` had already
+been renamed by its vendor when this was written.
+
 ### Fixed — the commit hook's lessons were deleted by the next unrelated save
 
 Two writers put entries in the same two files. `ExperienceMemoryStore.record`
