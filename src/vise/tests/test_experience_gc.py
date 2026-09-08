@@ -250,6 +250,30 @@ class TestConsolidate:
         if low_entry is not None:
             assert low_entry.get("_superseded"), "Lower-confidence same-key entry should be superseded"
 
+    def test_a_protected_entry_is_never_absorbed(self):
+        """An absorbed entry loses its id. Something still points at this one."""
+        winner = _entry(id="winner", confidence=0.9,
+                        description="Token refresh races when two renew at once.")
+        referenced = _entry(id="referenced", confidence=0.4,
+                            description="Token refresh races when two renew at once")
+
+        kept, merged = consolidate([winner, referenced], {"referenced"})
+
+        assert {e["id"] for e in kept} == {"winner", "referenced"}
+        assert "referenced" not in merged
+
+    def test_an_unprotected_near_duplicate_is_still_absorbed(self):
+        """Protecting one id must not turn consolidation off for the rest."""
+        winner = _entry(id="winner", confidence=0.9,
+                        description="Token refresh races when two renew at once.")
+        other = _entry(id="other", confidence=0.4,
+                       description="Token refresh races when two renew at once")
+
+        kept, merged = consolidate([winner, other], {"unrelated"})
+
+        assert [e["id"] for e in kept] == ["winner"]
+        assert merged == {"other": "winner"}
+
     def test_superseded_key_stripped_from_output_in_gc(self, tmp_path):
         """_superseded key is stripped from entries that survive in gc()."""
         store = tmp_path / "experience_memory.json"
@@ -379,6 +403,42 @@ class TestGC:
         assert report["after"] == 1, "Protected entry must survive even with threshold=1.0"
         assert report["protected_kept"] == 1
 
+    def test_an_id_an_asset_references_survives_consolidation(self, tmp_path):
+        """The module docstring promises an id named in `experience_refs` is
+        never dropped. Protection used to be applied only against the score
+        threshold, after consolidate() had already absorbed the entry — so the
+        promise held for the cheap case and broke for the one that deletes an
+        id somebody is still pointing at."""
+        store = tmp_path / "experience_memory.json"
+        winner = _entry(id="winner", confidence=0.9,
+                        description="Token refresh races when two renew at once.")
+        referenced = _entry(id="referenced", confidence=0.4,
+                            description="Token refresh races when two renew at once")
+        _store_file(store, [winner, referenced])
+
+        gc(store, apply=True, protected_ids={"referenced"})
+
+        surviving = {
+            e["id"] for e in json.loads(store.read_text(encoding="utf-8"))["entries"]
+        }
+        assert "referenced" in surviving
+
+    def test_the_report_says_where_an_absorbed_entry_went(self, tmp_path):
+        """consolidate() has always computed this map and gc() dropped it,
+        which left "why is that id gone" unanswerable from the one command a
+        person runs."""
+        store = tmp_path / "experience_memory.json"
+        _store_file(store, [
+            _entry(id="winner", confidence=0.9,
+                   description="Token refresh races when two renew at once."),
+            _entry(id="absorbed", confidence=0.4,
+                   description="Token refresh races when two renew at once"),
+        ])
+
+        report = gc(store, apply=False)
+
+        assert report["merged"] == {"absorbed": "winner"}
+
     def test_recent_entries_survive_regardless_of_score(self, tmp_path):
         store = tmp_path / "experience_memory.json"
         recent_entry = _entry(
@@ -432,7 +492,7 @@ class TestGC:
 
         required = {
             "store_path", "before", "after", "consolidated",
-            "dropped", "protected_kept", "bytes_before", "bytes_after",
+            "dropped", "merged", "protected_kept", "bytes_before", "bytes_after",
             "dry_run", "error",
         }
         assert required.issubset(report.keys()), f"Missing keys: {required - report.keys()}"

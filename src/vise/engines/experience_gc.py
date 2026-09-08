@@ -126,6 +126,7 @@ def _dedup_key(entry: dict[str, Any]) -> tuple[str, str, str]:
 
 def consolidate(
     entries: list[dict[str, Any]],
+    protected_ids: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Merge near-duplicates; return (kept_entries, merged_map).
 
@@ -138,8 +139,15 @@ def consolidate(
       - Take max confidence.
       - Append distinct resolution texts separated by " | ".
       - Mark older entries with ``_superseded=True``.
+      - Never absorb an entry in ``protected_ids``.
 
     merged_map: {old_id -> kept_id}  (old_ids that were absorbed)
+
+    ``protected_ids`` has to be honoured *here*, not only against the score
+    threshold afterwards. An absorbed entry loses its id, and an asset that
+    referenced that id is left pointing at nothing — which is the one outcome
+    protection exists to prevent. A protected duplicate stays, and the
+    ``_superseded`` pass below still ranks it below the entry that replaced it.
     """
     if not entries:
         return [], {}
@@ -160,6 +168,10 @@ def consolidate(
         c_key = _dedup_key(candidate)
         c_desc = str(candidate.get("description") or "")
         c_id = str(candidate.get("id") or "")
+
+        if c_id and c_id in protected_ids:
+            kept.append(dict(candidate))
+            continue
 
         matched = False
         for existing in kept:
@@ -308,6 +320,7 @@ def gc(
           "before": int,            # entries before GC
           "after": int,             # entries after GC
           "consolidated": int,      # entries merged (absorbed)
+          "merged": dict,           # {absorbed_id: surviving_id}
           "dropped": int,           # entries dropped by score threshold
           "protected_kept": int,    # entries kept because of protected_ids
           "bytes_before": int,
@@ -325,6 +338,7 @@ def gc(
         "before": 0,
         "after": 0,
         "consolidated": 0,
+        "merged": {},
         "dropped": 0,
         "protected_kept": 0,
         "bytes_before": 0,
@@ -350,9 +364,13 @@ def gc(
     report["before"] = len(entries)
 
     # ── Consolidate ───────────────────────────────────────────────────────────
-    kept_after_consolidate, merged_map = consolidate(entries)
+    kept_after_consolidate, merged_map = consolidate(entries, protected_ids)
     consolidated_count = len(entries) - len(kept_after_consolidate)
     report["consolidated"] = consolidated_count
+    # Where each absorbed entry went. consolidate() has always computed this
+    # and gc() used to drop it on the floor, which left "why is that id gone"
+    # unanswerable by the one command a person runs.
+    report["merged"] = merged_map
 
     # ── Score & filter ────────────────────────────────────────────────────────
     final_entries: list[dict] = []
