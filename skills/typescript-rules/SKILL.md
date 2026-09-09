@@ -34,6 +34,14 @@ stated below.
 - Don't create wrapper types for primitives without branded types
 - Don't use `!` (non-null assertion) except in tests
 - Don't ignore TypeScript errors with `@ts-ignore` — use `@ts-expect-error` if unavoidable
+- Don't take a green test as proof the module loads. A failed ESM import breaks
+  the whole module, not the one call, and a test that mocks that import never
+  loads the real one — so it passes on a module nothing can import. Check it:
+  `node -e "import('./path.js').then(m => console.log(Object.keys(m)))"`
+- Don't reach for `--forceExit` to get a clean run. It kills the process before
+  resources close, hiding the leaked timer or unclosed connection a route test
+  exists to surface. A suite that won't exit is a finding — run it with
+  `--detectOpenHandles` and report what it names.
 
 ## Tooling — greenfield defaults only
 

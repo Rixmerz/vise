@@ -94,6 +94,10 @@ language's own footguns live in that language's `*-rules` skill.
   If the name does not say what is inside, the module has no single job.
 - Match the file's existing structure and idiom before introducing a new one.
 - Delete dead code rather than commenting it out. Version control remembers.
+- A linter at zero is never bought by widening the public API. Exporting an
+  unused function to silence an unused-symbol warning announces it as something
+  callers may depend on, which is worse than the warning. Delete it, or keep it
+  private with a comment saying why it still exists.
 
 ### Comments
 - Comment *why*, never *what*. The code says what.
@@ -103,8 +107,21 @@ language's own footguns live in that language's `*-rules` skill.
 
 ### Tests
 - A test that has never been observed failing has not been shown to test
-  anything.
+  anything. Observe it: invert its assertion, run it, confirm red, restore.
+  Mutate the test you just wrote, never production code — dying mid-mutation
+  leaves the tree broken.
+- **A mutation that stays green is a finding, not a pass.** It says the path
+  you think you covered never ran. Find out why before you report anything;
+  "the mutation didn't go red" is the sentence that precedes discovering the
+  test was never exercising the code.
+- When the broken path and the correct path produce the same value in the test
+  environment — an empty result either way, a default that matches the real
+  loader's output — comparing results discriminates nothing. Assert on the
+  **call** instead, or get an environment where the two values differ.
 - Test the entrypoint the system actually calls, not a helper it may bypass.
+- Never add a flag to make the suite pass or exit. A suite that will not close
+  on its own is a finding about the code — a leaked handle, an unclosed
+  connection — and the flag that hides it also hides the next one.
 - No sleeps for async — poll or await a condition.
 - Each test owns its data; no order dependence, no shared mutable state.
 
@@ -169,6 +186,40 @@ the call you could not verify instead of writing it confidently. And **an index
 can be right about the library and wrong about your version**: where it
 disagrees with the installed source, the installed source wins, and the
 disagreement is worth reporting rather than quietly resolving.
+
+### Before you write a helper — the duplicate has a different name
+
+The helper you are about to write may already exist, and the reason you are
+about to write it is that you searched for *your* name for it and found
+nothing. That silence is not evidence. The copy that ends up in the repo is
+never named the same as the original — if it were, you would have found it.
+
+So before writing a new function, in this order:
+
+1. **Read the export list of the module you are already importing from.** Not
+   your memory of it, and not the part of it your current import line names.
+2. **Search by shape, not by name**, where the session has something that can —
+   `codelayer` is exactly this, and it takes the body you are about to write
+   rather than a guess at what it was called.
+3. **Only then write it.**
+
+Two outcomes are not "write your own", and both get mistaken for it:
+
+- **It exists but is not exported.** One word is missing. Report it as a
+  pending splice — name the file, the symbol, and that it needs exporting.
+- **It exists in a file you do not own.** The rule against editing another
+  agent's file and the rule against duplicating do not conflict here. Report
+  it; the coordinator applies the one-word change.
+
+Reporting the splice costs one round trip. It is the cheapest instruction in
+this file, and copying instead is among the most expensive: the copies drift
+apart, and by the time anyone counts them there are several that no longer
+agree.
+
+**A copy is not a deferral.** `ponytail:` records work you chose not to do, not
+a rule you decided to break — and a duplicate filed as a future cleanup, in the
+vocabulary of good practice, is harder to catch than one filed as nothing at
+all. If you copied anyway, say you copied.
 
 ### Changing a signature
 - Before changing a public signature, resolve the caller set with `LSP`

@@ -240,6 +240,18 @@ it saved:
   telegraphed.
 - The **verbatim quote** in a re-brief stays verbatim.
 
+Two obligations that come with citing instead of pasting, and with dispatching
+at all:
+
+- **`ls` every path the brief cites, in the environment the agent will run in.**
+  A reference is only cheaper than a paste if it resolves. Working in a
+  worktree it often does not — a file you wrote in the main checkout is not
+  there — and an agent that cannot find a cited file stops without writing a
+  line. That is the behaviour you want and it still costs the whole dispatch.
+- **When the deliverable is the report rather than the file, say to write it to
+  disk as it goes.** An agent that dies mid-task takes an unwritten finding
+  with it, and you will not know which of them you lost.
+
 Where a run's money actually goes is measured above: the orchestrator, at
 60-65%. Trimming prose in the brief is not that lever. Not pre-reading the
 files the builder is about to read is.
