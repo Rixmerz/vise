@@ -6,6 +6,55 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Added — the agent-to-agent channel gets a language and a size
+
+Nothing in this repository said which language the orchestrator and its
+subagents speak to each other in. `grep -r "English"` across `agents/`,
+`skills/`, `commands/` and `src/vise/assets/` returned nothing. In a session
+conducted in another language the brief drifts into that language while
+everything the subagent loads next — its charter, `engineering-baseline`, its
+rules skill, every validator deny message, the failing test the orchestrator is
+required to quote verbatim — stays English. The agent translates the constraint
+into the language of its own rules before it can apply it, and a constraint
+that comes through that trip slightly changed still reads like a plausible
+instruction.
+
+Both directions are now stated as English, and both places say the user-facing
+answer is not: that one stays in the user's language.
+
+The size half is a rule that was missing its counterweight. `orchestration` has
+always said **every prompt is self-contained**, which reads as *tell it
+everything* — and that reading is how a brief ends up restating
+`engineering-baseline` to an agent that preloaded it, and pasting a file the
+agent is about to open. The new section says what self-contained means (the
+agent needs nothing out of *your* window) and names the three omissions: no
+rule the agent already preloads, no pasted file body (`path.py:118-140` is the
+whole reference), no narration.
+
+It also says where the cutting stops, which is the half worth having. The
+acceptance criterion stays exact. Constraints and what-not-to-touch stay whole
+sentences, because they are negations and a negation with words missing reads
+as its opposite. The verbatim quote in a re-brief stays verbatim.
+
+On the return leg, `engineering-baseline`'s `### Reporting done` now says to
+report the fields and not the story — whoever dispatched you re-derives the
+diff itself, so the account of how the work went is read once and thrown away —
+and that the cutting stops at the evidence: the verify command and its actual
+output stay verbatim, because a summarised error is not a result.
+
+A telegraphic house style for briefs was considered and not shipped. The
+measurement already in `orchestration` is that the orchestrator is 60-65% of a
+run's spend, and a brief is a few hundred tokens of that; a builder that
+misreads a compressed negation costs a whole wave, which is worth more than
+every word it saved. The saving is in what the brief leaves out, not in its
+grammar.
+
+`test_agent_comms.py` pins both halves, the limits as hard as the rules, and
+the carve-out that keeps `general-purpose` — which preloads nothing — allowed
+to name its skills.
+
 ## [0.1.0a23] — 2026-09-08
 
 ### Fixed — `experience gc` deleted an id that an asset was still pointing at

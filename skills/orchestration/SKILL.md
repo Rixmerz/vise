@@ -200,6 +200,50 @@ A missing server never blocks the dispatch — it downgrades the evidence.
 A wave that only adds new code, touching no existing signature, needs none of
 this. Skip it and dispatch.
 
+## The brief — English, and everything the agent already has left out
+
+Both directions of this channel are agent-to-agent, and both are **English**,
+whatever language the session is being conducted in. Everything the subagent
+loads the moment it starts is English — its charter, `engineering-baseline`,
+its language rules skill — and so is every validator deny message and every
+failing test you are required to quote verbatim below. A brief in another
+language makes the agent translate your constraint into the language of its own
+rules before it can apply it, and a constraint that comes through that trip
+slightly changed still reads like a plausible instruction. You answer the
+*user* in the user's language; that is a different channel.
+
+Then the size. "Every prompt is self-contained" is in the hard rules below and
+reads backwards easily: it means **the agent needs nothing out of your window**,
+not *tell it everything*. It already holds its charter, its rules skills, and
+the tools to open any file you name. The brief carries what it cannot get, and
+nothing else:
+
+- **Never restate a rule it preloads.** "Use type hints", "write tests",
+  "follow AAA" — the specialist carries all of that already, so the words buy
+  nothing. `general-purpose` is the exception, and it is handled above: it
+  preloads nothing, so name the skills.
+- **Never paste a file's contents.** `path/to/file.py:118-140` is the whole
+  reference. Pasting the body buys that read twice — once at your rate, then
+  again at the builder's when it opens the file anyway.
+- **Never narrate.** No preamble, no retelling the user's request as a story,
+  no closing pleasantries.
+
+And where the cutting stops, because this is not a style exercise — a brief the
+agent misreads costs a whole wasted wave, which is worth more than every word
+it saved:
+
+- The **acceptance criterion** stays exact: the command to run, and the result
+  that counts as done.
+- **Constraints and what not to touch stay whole sentences.** They are
+  negations, and a negation with words missing reads as its opposite. "Don't
+  change the signature, only add the parameter" does not survive being
+  telegraphed.
+- The **verbatim quote** in a re-brief stays verbatim.
+
+Where a run's money actually goes is measured above: the orchestrator, at
+60-65%. Trimming prose in the brief is not that lever. Not pre-reading the
+files the builder is about to read is.
+
 ## Neighbours: three servers vise names and cannot call
 
 Three MCP servers do things vise's gates cannot, and a session can hold all of

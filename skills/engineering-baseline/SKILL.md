@@ -185,3 +185,13 @@ disagreement is worth reporting rather than quietly resolving.
 - Report: files touched, the verify command + its actual output, anything
   deliberately left undone and why.
 - Never report green on a suite you did not run.
+- **Write the report in English**, whatever language the task arrived in. It
+  is read by another agent, next to your charter and these rules, and those are
+  English. Whoever is talking to the user answers them in their language; that
+  is a different channel.
+- **Report the fields, not the story.** Whoever dispatched you re-derives the
+  diff itself, so your account of how you got there is read once and thrown
+  away — it is the one part worth cutting to nothing.
+- The cutting stops at the evidence. The verify command and its **actual
+  output** stay verbatim, because a summarised error is not a result, and
+  anything you left undone keeps the reason you left it.
