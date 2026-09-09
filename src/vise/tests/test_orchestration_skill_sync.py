@@ -31,6 +31,9 @@ def _bundled_graph_names() -> set[str]:
     return {p.name.removesuffix("-graph.yaml") for p in _WORKFLOWS.glob("*-graph.yaml")}
 
 
+_TABLE_HEADING = "## Step 0 — is there a workflow for this?"
+
+
 def _routed_names() -> list[str]:
     """Every `graph_activate(graph_name=X)` target named in the skill's table.
 
@@ -39,7 +42,10 @@ def _routed_names() -> list[str]:
     column, which is what an agent copies into the call.
     """
     text = _SKILL.read_text(encoding="utf-8")
-    table = text.split("## Step 0")[1].split("### The conflict rule")[0]
+    # Anchored on the whole heading, not the "## Step 0" prefix: a section
+    # titled "## Step 0 comes second ..." once split here and left the
+    # parser reading prose with no table in it.
+    table = text.split(_TABLE_HEADING)[1].split("### The conflict rule")[0]
     return re.findall(r"\|\s*`([a-z0-9-]+)`\s*\|", table)
 
 

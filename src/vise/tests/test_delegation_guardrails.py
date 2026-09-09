@@ -152,3 +152,23 @@ def test_typescript_rules_keep_security_last():
         if line.startswith("## ")
     ]
     assert headings[-1].startswith("## Security"), headings
+
+
+# --- the gate that never ran ------------------------------------------------
+
+def test_orchestration_checks_the_profile_before_dispatching(orchestration: str):
+    """Nothing in this repository routed to `/bootstrap`: zero mentions in
+    `orchestration`, in the workflow suggester hook, or in any bundled
+    workflow. Without a profile `tests_pass` falls back to `pytest -q` and
+    returns `passed=True` / `outcome="unverified"` on a repo whose suite is
+    Jest — a gate that reads green and never ran. The reported migration was
+    exactly such a repo."""
+    assert "`/bootstrap` first" in orchestration
+    assert "the difference between a gate and a decoration" in orchestration
+    assert "outcome=\"unverified\"" in orchestration
+
+
+def test_a_cloned_profile_is_not_an_approved_one(orchestration: str):
+    """Presence is not approval — the same absent/unreadable distinction the
+    rest of vise runs on."""
+    assert "was never approved on this machine" in orchestration

@@ -11,6 +11,26 @@ work from a self-contained brief. Never delegate thinking — architecture,
 naming, tradeoff analysis stay with the engineer. Aggressively delegate
 execution — grepping, multi-file edits, test writing, scans.
 
+## Before Step 0 — can the gates in that workflow actually run?
+
+Once per repo, before the first dispatch. A workflow's gates run *the repo's
+own* commands, and it only knows them if somebody ran `/bootstrap` here. Absent
+a profile, `tests_pass` falls back to `pytest -q`: on a repo whose suite is
+Jest, `go test` or `cargo test`, that is "not on PATH — skipped" or "no tests
+collected", and the record comes back `passed=True` with `outcome="unverified"`.
+Nothing lied — but the gate never ran, and anything reading `passed` reads it
+as green. You can orchestrate an entire migration behind a test gate that never
+executed a test.
+
+So: `.vise/quality.yaml` present, and `VISE_TEST_CMD` / `VISE_LINT_CMD` set in
+`.claude/settings.json`. Missing either → `/bootstrap` first. It is one command,
+and it is the difference between a gate and a decoration.
+
+A `.vise/quality.yaml` that arrived with the clone was never approved on this
+machine, so its checks report `unverified` until someone reads the file and
+runs `vise approve`. Say that rather than assuming the profile's presence means
+it is live.
+
 ## Step 0 — is there a workflow for this?
 
 Do this before dispatching anything. Delegation says *who does the work*; a

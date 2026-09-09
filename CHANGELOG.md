@@ -6,6 +6,84 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a25] — 2026-09-09
+
+### Added — the delegation guardrails move to where the builder loads them
+
+A field report from a real Python-to-Node migration recorded thirteen subagent
+failures across six parallel agents. The useful finding was not the list. It
+was that most of the mitigations already existed in this repository, in a file
+the agent that needed them does not load.
+
+`search_similar` before writing a helper is described in `orchestration` as
+"the one that pays for itself", with the exact reasoning the failure needed:
+the duplicate a builder is about to create has a *different name*, so neither
+grep nor memory finds it. `orchestration` is loaded by the coordinator, who is
+not the one writing helpers, and no charter preloads `codelayer`. The mutation
+procedure — invert, run, confirm red, restore — is in `tester`'s charter only,
+so a builder writing a test inside an implementation task got the belief ("a
+test never observed failing has not been shown to test anything") without the
+action. Both tests that passed with the code broken were written by agents that
+are not `tester`.
+
+`engineering-baseline`, which all 22 charters preload, now carries:
+
+- **Before you write a helper.** The search came back empty because you
+  searched your own name for it. Read the module's export list; search by shape
+  where the session can. Two outcomes are not "write your own": it exists but
+  is not exported, and it exists in a file you do not own — both are a pending
+  splice to report. That report is the one-word change that ended six
+  non-equivalent copies of one function. And **a copy is not a deferral**: the
+  reported violation arrived as a `ponytail:` note, the duplication rationalised
+  in the vocabulary of good practice, which is harder to catch than a bare copy.
+- **The mutation procedure itself**, not only the belief — plus the half that
+  caught the event-loop bug: *a mutation that stays green is a finding, not a
+  pass.* Three tasks reached their first `await` synchronously, so the queueing
+  branch never ran and the mutated line was never executed.
+- **The indistinguishable-value trap.** Sixteen tests passed with a splice
+  undone because the broken default and the real loader both returned `{}`
+  without a database. Assert on the call when both paths produce the same value.
+- **No flag manufactures a clean run.** A suite that will not exit is a finding.
+- **A linter at zero is never bought by widening the public API.**
+
+`orchestration` gains the two obligations that come with citing paths instead
+of pasting them, which 0.1.0a24 introduced: `ls` every path the brief cites in
+the environment the agent will run in — a brief pointed into a worktree at a
+file written in the main checkout, and the agent stopped without writing a line
+— and, when the deliverable is the report rather than the file, say to write it
+to disk as it goes, because two agents died holding findings nobody can recover.
+
+`typescript-rules` gains the two language-specific halves: a failed ESM import
+breaks the whole module, so a test that mocks that import passes on a module
+nothing can load; and `--forceExit` hides the leaked handle a route test exists
+to find.
+
+### Added — `orchestration` finally routes to `/bootstrap`
+
+Nothing did. Zero mentions of bootstrap in `orchestration`, in the workflow
+suggester hook, or in any bundled workflow — it was a command you had to know
+existed.
+
+Without a profile, `tests_pass` falls back to `pytest -q`. On a repo whose
+suite is Jest, `go test` or `cargo test`, that is "not on PATH — skipped" or
+pytest exit 5, and the record comes back `passed=True` with
+`outcome="unverified"`. Nothing lies — `goal_complete` still refuses to grade it
+verified — but the gate never ran, and anything reading `passed` reads it as
+green. The reported migration was exactly such a repo.
+
+A new section before Step 0 checks `.vise/quality.yaml` and the two env vars
+before the first dispatch, and says the other half: a profile that arrived with
+a clone was never approved on this machine, so its checks report `unverified`
+until someone reads the file and runs `vise approve`.
+
+### Fixed — the Step 0 routing-table parser could be shadowed by a heading
+
+`test_orchestration_skill_sync.py` split the skill on the prefix `"## Step 0"`
+and read the table out of what followed. A new section titled "## Step 0 comes
+second …" split there instead and left the parser reading prose with no table
+in it — caught by the test, which is what it is for. It now anchors on the whole
+heading, so a section whose title starts the same way cannot shadow it.
+
 ## [0.1.0a24] — 2026-09-09
 
 ### Added — the agent-to-agent channel gets a language and a size
