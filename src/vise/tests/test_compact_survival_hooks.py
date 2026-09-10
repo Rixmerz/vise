@@ -120,3 +120,169 @@ def test_hooks_fail_open_on_reader_exception(isolated: Path) -> None:
             out, code = _run(module, isolated)
             assert code == 0
             assert out == ""
+
+
+# ---------------------------------------------------------------------------
+# Open blockers — the second half of what survives a compaction
+# ---------------------------------------------------------------------------
+
+def _write_project_memory(project: Path, entries: list[dict]) -> None:
+    from vise.hooks import _xdg
+    path = _xdg.project_memory_path(str(project))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"entries": entries}))
+
+
+def _entry(**over: object) -> dict:
+    from datetime import datetime
+    base = {
+        "type": "run_blocked",
+        "file_pattern": "run:feature-dev:implement",
+        "domain": "runtime",
+        "description": "drain_failed in run r1 — task 3: could not parse result",
+        "severity": "high",
+        "last_seen": datetime.now().isoformat(),
+    }
+    base.update(over)  # type: ignore[arg-type]
+    return base
+
+
+def test_an_open_blocker_is_reported(isolated: Path) -> None:
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [_entry()])
+    found = read_open_blockers(str(isolated))
+    assert len(found) == 1
+    assert found[0]["description"].startswith("drain_failed")
+
+
+def test_a_blocker_with_its_resolver_present_is_closed(isolated: Path) -> None:
+    """`run_blocked` and `run_succeeded` meet on (file_pattern, domain)."""
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [
+        _entry(),
+        _entry(type="run_succeeded", description="2 task(s) succeeded in run r2"),
+    ])
+    assert read_open_blockers(str(isolated)) == []
+
+
+def test_a_blocker_outside_the_window_is_dropped(isolated: Path) -> None:
+    from datetime import datetime, timedelta
+
+    from vise.hooks._common import read_open_blockers
+
+    old = (datetime.now() - timedelta(days=40)).isoformat()
+    _write_project_memory(isolated, [_entry(last_seen=old)])
+    assert read_open_blockers(str(isolated)) == []
+
+
+@pytest.mark.parametrize("stamp", ["", "not-a-date"])
+def test_an_undatable_blocker_is_dropped(isolated: Path, stamp: str) -> None:
+    """The opposite of the rule a gate follows, because nothing is decided here.
+
+    An undated line cannot be ranked against dated ones without claiming a
+    position it has not earned.
+    """
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [_entry(last_seen=stamp)])
+    assert read_open_blockers(str(isolated)) == []
+
+
+def test_a_node_gate_failure_stays_open_because_nothing_writes_smell_fixed(
+    isolated: Path,
+) -> None:
+    """Pins a limitation, not a preference.
+
+    `smell_fixed`, `gate_resolved` and `tension_resolved` are all in
+    `VALID_TYPES` and no writer in vise emits any of them. Mapping
+    `smell_introduced` to `smell_fixed` would therefore close nothing while
+    looking like it closed something. If a writer appears, this test is the
+    place that has to change on purpose.
+    """
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [
+        _entry(type="smell_introduced", file_pattern="node:implement",
+               domain="", description="Node gate failed at 'implement': coverage"),
+        _entry(type="smell_fixed", file_pattern="node:implement", domain="",
+               description="fixed"),
+    ])
+    found = read_open_blockers(str(isolated))
+    assert len(found) == 1
+    assert found[0]["type"] == "smell_introduced"
+
+
+def test_blockers_are_ranked_worst_first_and_capped(isolated: Path) -> None:
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [
+        _entry(file_pattern=f"run:g:n{i}", severity=sev, description=f"e{i}")
+        for i, sev in enumerate(["low", "critical", "medium", "high", "low", "high"])
+    ])
+    found = read_open_blockers(str(isolated), limit=3)
+    assert [e["severity"] for e in found] == ["critical", "high", "high"]
+
+
+def test_a_corrupt_store_reports_nothing_rather_than_raising(isolated: Path) -> None:
+    from vise.hooks import _xdg
+    from vise.hooks._common import read_open_blockers
+
+    path = _xdg.project_memory_path(str(isolated))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    assert read_open_blockers(str(isolated)) == []
+
+
+def test_reading_blockers_does_not_write_to_the_store(isolated: Path) -> None:
+    """`ExperienceMemoryStore.query` bumps FSRS recall and saves.
+
+    A hook on that path would raise the stability of whatever was recent every
+    time a session compacted — the store would learn from being read.
+    """
+    from vise.hooks import _xdg
+    from vise.hooks._common import read_open_blockers
+
+    _write_project_memory(isolated, [_entry()])
+    path = _xdg.project_memory_path(str(isolated))
+    before = path.read_bytes()
+    read_open_blockers(str(isolated))
+    assert path.read_bytes() == before
+
+
+def test_precompact_reports_blockers_with_no_workflow_active(isolated: Path) -> None:
+    """An open failure is worth carrying even when no workflow is running."""
+    _write_project_memory(isolated, [_entry()])
+    out, code = _run(precompact_state, isolated)
+    assert code == 0
+    message = json.loads(out)["systemMessage"]
+    assert "could not parse result" in message
+    assert "[high]" in message
+
+
+def test_the_blocker_section_is_not_labelled_preserve_verbatim(
+    isolated: Path,
+) -> None:
+    """It may never have been mentioned in the conversation being summarized.
+
+    Telling a summarizer to preserve a line that was never there is how a
+    summary acquires things that did not happen.
+    """
+    _write_project_memory(isolated, [_entry()])
+    _write_graph_state(isolated)
+    out, _ = _run(precompact_state, isolated)
+    message = json.loads(out)["systemMessage"]
+    preserve, blockers = message.split("Known unresolved failures")
+    assert "verbatim" in preserve
+    assert "verbatim" not in blockers
+    assert "do not introduce the rest" in blockers
+
+
+def test_precompact_still_silent_when_nothing_active_and_nothing_open(
+    isolated: Path,
+) -> None:
+    _write_project_memory(isolated, [])
+    out, code = _run(precompact_state, isolated)
+    assert out == ""
+    assert code == 0

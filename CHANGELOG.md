@@ -6,6 +6,62 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a26] — 2026-09-10
+
+### Added — a credential in a commit message no longer crosses repositories
+
+`experience_recorder` files a commit subject and body into the **global**
+experience store, and `experience_injector` reads that store back into sessions
+working on unrelated projects. `_untrusted` already flattened that text so it
+would read as data rather than as instructions; nothing made it stop being a
+secret. A token pasted into a commit body therefore travelled from the
+repository it was written in to every other repository on the machine.
+
+`core.experience_rules.redact` masks credentials before either writer persists
+them — the module that already exists so the two writers cannot disagree about
+what an entry is. It covers credentials named by a compound key (`api_key`,
+`client_secret`, `X-Api-Key`, `Authorization`, however punctuated), credentials
+that carry their own shape and need no key beside them (GitHub, Slack, AWS key
+ids, `sk-` keys, JWTs, PEM blocks), and URL userinfo — the shape a commit about
+a connection string arrives in, which no key-name rule sees.
+
+Two decisions are load-bearing and are pinned by tests:
+
+- **Compound key names only.** A bare `token:` or `secret:` also matches
+  ordinary prose — a parser error quoted in a commit body, an `area: subject`
+  convention — and a filter that mangles commit subjects is one somebody
+  switches off, which leaks everything.
+- **Redaction runs before the length cap, not after.** Truncating first leaves
+  a fragment of a token too short for any shape to match, and stores it in
+  clear.
+
+It is a filter, not a guarantee: it knows the shapes it lists and no others.
+Entries already on disk are not rewritten.
+
+### Added — a compaction carries what already went wrong
+
+`precompact_state` preserved the active workflow and goal and nothing else. It
+now also reports this project's still-open failures, read straight off the
+project experience store: a `run_blocked` with no matching `run_succeeded`, a
+node-gate failure inside a two-week window, worst and newest first.
+
+The two halves are addressed differently on purpose. Workflow and goal state
+*is* in the conversation being summarized, so the instruction stays "preserve
+this verbatim". An open blocker comes off vise's own record and may never have
+been mentioned, so it is offered as context the summary may need — telling a
+summarizer to preserve a line that was never there is how a summary acquires
+things that did not happen.
+
+Read off the JSON rather than through `ExperienceMemoryStore.query`, which
+bumps FSRS recall and saves: a hook on that path would raise the stability of
+whatever happened to be recent every time a session compacted, and the store
+would learn from being read rather than from the work.
+
+**Known limitation, pinned by a test.** `smell_fixed`, `gate_resolved` and
+`tension_resolved` are all in `VALID_TYPES` and no writer in vise emits any of
+them. So a node-gate failure has no counterpart that could close it and is
+filtered by recency alone. The two pairings that do work stay wired.
+
 ## [0.1.0a25] — 2026-09-09
 
 ### Added — the delegation guardrails move to where the builder loads them
