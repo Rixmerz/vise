@@ -173,16 +173,22 @@ def _untrusted(text: str, limit: int = _MAX_UNTRUSTED) -> str:
     appears in your next session's context", so what crosses it is data and has
     to look like data.
 
-    Collapses to a single line, drops control characters, and caps the length.
-    Not an attempt at sanitising prose — there is no such thing — but it removes
-    the shapes that stop it reading as a quoted value: line breaks, ANSI escapes,
-    and unbounded length.
+    Collapses to a single line, drops control characters, masks credentials, and
+    caps the length. Not an attempt at sanitising prose — there is no such thing
+    — but it removes the shapes that stop it reading as a quoted value: line
+    breaks, ANSI escapes, and unbounded length.
+
+    Redaction runs *before* the cap, not after: a token at character 900 of a
+    commit body is still a token, and truncating to 200 would have stored it in
+    full whenever it sat near the front. `core.experience_rules.redact` owns
+    which shapes count, because the store's writer has the same problem.
     """
     if not text:
         return ""
+    from vise.core import experience_rules as _r
     flat = " ".join(str(text).split())
     flat = "".join(ch for ch in flat if ch.isprintable())
-    return flat[:limit]
+    return _r.redact(flat)[:limit]
 
 
 # Identity, the confidence curve, the merge and the cap all come from

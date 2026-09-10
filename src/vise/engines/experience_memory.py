@@ -417,6 +417,12 @@ class ExperienceMemoryStore:
 
     def record(self, entry: ExperienceEntry) -> ExperienceEntry:
         """Add or merge an experience entry. Deduplicates by type+file_pattern+domain."""
+        # Both prose fields are masked on the way in, on the same rule the commit
+        # hook uses. This writer files runtime lessons, which quote error strings
+        # verbatim, and whatever `experience_record` was handed — and a global
+        # entry is read back into sessions on unrelated projects.
+        entry.description = _rules.redact(entry.description)
+        entry.resolution = _rules.redact(entry.resolution)
         if not entry.id:
             entry.id = str(uuid.uuid4())[:8]
 
