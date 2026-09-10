@@ -351,8 +351,11 @@ Environment variables (all optional):
 > agents, skills, commands and hooks; it cannot ship the part that is about
 > *your* repo — which command runs its tests, what `sast` means in a Go
 > project. `bootstrap` detects that and writes `.vise/quality.yaml`, binding
-> only checks whose tool it actually found. Or `/bootstrap` from a session,
-> which does the same and walks the rest of the setup.
+> only checks whose tool it actually found — and sets `VISE_TEST_CMD` /
+> `VISE_LINT_CMD` in `.claude/settings.json`, which is a separate mechanism the
+> profile does not reach. It never replaces a value you set; `--no-settings`
+> prints them instead. Or `/bootstrap` from a session, which does the same and
+> walks the rest of the setup.
 
 | `VISE_CODELAYER` | Read-by-symbol gate: `off` (default, inert), `warn` (records what it would deny, blocks nothing), `enforce` (denies source reads by path). The kill switch is the point — a gate that can lock you out of fixing the gate gets uninstalled the first time it misfires |
 | `VISE_CODELAYER_SCOPE` | Comma-separated path prefixes the gate covers (default `src/`). Configs, tests, docs, migrations and manifests are never gated regardless |

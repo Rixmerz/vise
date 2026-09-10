@@ -236,20 +236,47 @@ def test_dry_run_writes_nothing(tmp_path: Path):
     assert not (tmp_path / ".vise" / "quality.yaml").exists()
 
 
-def test_it_prints_the_env_vars_the_gates_need(tmp_path: Path, monkeypatch, capsys):
-    """Sin VISE_TEST_CMD/VISE_LINT_CMD la puerta existe pero no muerde."""
+def _run_bootstrap(tmp_path: Path, **over):
     import argparse
 
     from vise.cli.bootstrap_cmd import _cmd_bootstrap
 
+    ns = argparse.Namespace(
+        project_dir=str(tmp_path), dry_run=False, force=True, no_settings=False
+    )
+    for k, v in over.items():
+        setattr(ns, k, v)
+    return _cmd_bootstrap(ns)
+
+
+def test_it_sets_the_env_vars_the_gates_need(tmp_path: Path, monkeypatch, capsys):
+    """Sin VISE_TEST_CMD/VISE_LINT_CMD la puerta existe pero no muerde.
+
+    Bootstrap las imprimía y pedía pegarlas a mano. Detección ya calculó el
+    comando; imprimirlo y esperar significaba, casi siempre, que nadie lo
+    pegaba — y la consecuencia de no pegarlo es un `tests_pass` que corre
+    `pytest` en un repo Go, reporta `unverified`, y se lee como verde.
+    """
     _write(tmp_path, {"go.mod": "module x\n"})
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _cmd_bootstrap(argparse.Namespace(
-        project_dir=str(tmp_path), dry_run=False, force=True
-    ))
+    _run_bootstrap(tmp_path)
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert settings["env"]["VISE_TEST_CMD"] == "go test ./..."
+    assert "VISE_LINT_CMD" in settings["env"]
+    out = capsys.readouterr().out
+    assert "VISE_TEST_CMD" in out and str(tmp_path) in out
+
+
+def test_no_settings_prints_them_instead(tmp_path: Path, monkeypatch, capsys):
+    """El escape para quien gestiona ese archivo en otro lado."""
+    _write(tmp_path, {"go.mod": "module x\n"})
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path, no_settings=True)
+
+    assert not (tmp_path / ".claude" / "settings.json").exists()
     out = capsys.readouterr().out
     assert "VISE_TEST_CMD" in out
-    assert "VISE_LINT_CMD" in out
     assert "unverified" in out
 
 
@@ -303,3 +330,149 @@ def test_secrets_binds_to_a_venv_detect_secrets(tmp_path: Path, monkeypatch) -> 
     assert found["bound"]["secrets"] == [
         ".venv/bin/python", "-m", "detect_secrets", "scan",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Node: los candidatos se leen de package.json, no se asumen
+# ---------------------------------------------------------------------------
+
+def _node_repo(tmp_path: Path, **pkg) -> Path:
+    _write(tmp_path, {"package.json": json.dumps(pkg)})
+    return tmp_path
+
+
+@pytest.mark.parametrize("declared,expected", [
+    ("pnpm@9.12.0", "pnpm"),
+    ("yarn@4.5.0", "yarn"),
+    ("bun@1.1.0", "bun"),
+    ("npm@10.8.0", "npm"),
+])
+def test_the_repo_declaration_names_the_package_manager(tmp_path, declared, expected):
+    from vise.cli.bootstrap_cmd import _package_manager
+
+    _node_repo(tmp_path, packageManager=declared)
+    assert _package_manager(tmp_path) == expected
+
+
+@pytest.mark.parametrize("lockfile,expected", [
+    ("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"),
+    ("bun.lockb", "bun"), ("package-lock.json", "npm"),
+])
+def test_the_lockfile_names_it_when_the_declaration_does_not(tmp_path, lockfile, expected):
+    from vise.cli.bootstrap_cmd import _package_manager
+
+    _node_repo(tmp_path)
+    _write(tmp_path, {lockfile: ""})
+    assert _package_manager(tmp_path) == expected
+
+
+def test_an_undeclared_unlocked_repo_falls_back_to_npm(tmp_path: Path):
+    from vise.cli.bootstrap_cmd import _package_manager
+
+    _node_repo(tmp_path)
+    assert _package_manager(tmp_path) == "npm"
+
+
+def test_a_pnpm_repo_is_never_bound_to_npm(tmp_path: Path, monkeypatch):
+    """La regresión que motivó esto.
+
+    `unit` estaba fijo en `npm test --silent` y se bindeaba con
+    `shutil.which("npm")` a secas — cierto en cualquier máquina con Node. En un
+    workspace pnpm eso resuelve contra otro store y otro protocolo de
+    workspace: el comando bindeado o falla o corre otra cosa.
+    """
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _node_repo(tmp_path, packageManager="pnpm@9.12.0",
+               scripts={"test": "vitest run", "lint": "eslint .",
+                        "typecheck": "tsc --noEmit"})
+    bound = detect(tmp_path)["bound"]
+    assert bound["unit"] == ["pnpm", "run", "test"]
+    assert bound["lint"] == ["pnpm", "run", "lint"]
+    assert bound["types"] == ["pnpm", "run", "typecheck"]
+    assert bound["sca"] == ["pnpm", "audit", "--audit-level=high"]
+
+
+def test_a_declared_script_binds_without_a_linter_config(tmp_path: Path, monkeypatch):
+    """`scripts.lint` es el repo diciendo cómo se lintea; gana al archivo de config."""
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _node_repo(tmp_path, scripts={"lint": "biome check ."})
+    assert detect(tmp_path)["bound"]["lint"] == ["npm", "run", "lint"]
+
+
+def test_no_test_script_is_reported_not_silently_dropped(tmp_path: Path, monkeypatch):
+    """Un hueco que nadie ve es un hueco que nadie acepta a sabiendas.
+
+    `unit` no tiene binario de reserva —un runner sin script detrás es una
+    conjetura sobre argumentos— así que su lista de candidatos queda vacía. Eso
+    no puede desaparecer del reporte.
+    """
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _node_repo(tmp_path, scripts={"build": "tsc"})
+    found = detect(tmp_path)
+    assert "unit" not in found["bound"]
+    assert "package.json" in found["skipped"]["unit"]
+
+
+@pytest.mark.parametrize("pm", ["yarn", "bun"])
+def test_sca_is_skipped_where_the_flag_does_not_exist(tmp_path: Path, monkeypatch, pm):
+    """Una invocación mal formada se lee como «este repo no tiene SCA»."""
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _node_repo(tmp_path, packageManager=f"{pm}@1.0.0", scripts={"test": "vitest"})
+    found = detect(tmp_path)
+    assert "sca" not in found["bound"]
+    assert "sca" in found["skipped"]
+
+
+def test_a_malformed_package_json_does_not_raise(tmp_path: Path):
+    _write(tmp_path, {"package.json": "{ not json"})
+    assert detect(tmp_path)["ecosystems"] == ["node"]
+
+
+# ---------------------------------------------------------------------------
+# .claude/settings.json — dos claves, y nada más
+# ---------------------------------------------------------------------------
+
+def test_an_existing_value_is_never_replaced(tmp_path: Path, monkeypatch):
+    _write(tmp_path, {
+        "go.mod": "module x\n",
+        ".claude/settings.json": json.dumps({
+            "permissions": {"allow": ["Bash(go:*)"]},
+            "env": {"VISE_TEST_CMD": "go test -race ./..."},
+        }),
+    })
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path)
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert settings["env"]["VISE_TEST_CMD"] == "go test -race ./..."
+    assert settings["env"]["VISE_LINT_CMD"]
+    assert settings["permissions"] == {"allow": ["Bash(go:*)"]}
+
+
+def test_unreadable_json_is_left_exactly_as_it_was(tmp_path: Path, monkeypatch, capsys):
+    """Ese archivo es del usuario. Un parseo fallido no autoriza a reescribirlo."""
+    _write(tmp_path, {"go.mod": "module x\n", ".claude/settings.json": "{ oops"})
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path)
+
+    assert (tmp_path / ".claude" / "settings.json").read_text() == "{ oops"
+    out = capsys.readouterr().out
+    assert "not readable JSON" in out
+    assert "VISE_TEST_CMD" in out  # y aun así dice qué agregar
+
+
+def test_a_non_object_env_is_left_alone(tmp_path: Path, monkeypatch):
+    _write(tmp_path, {
+        "go.mod": "module x\n",
+        ".claude/settings.json": json.dumps({"env": "nope"}),
+    })
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path)
+    assert json.loads((tmp_path / ".claude" / "settings.json").read_text()) == {"env": "nope"}
+
+
+def test_dry_run_writes_no_settings(tmp_path: Path, monkeypatch):
+    _write(tmp_path, {"go.mod": "module x\n"})
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path, dry_run=True, force=False)
+    assert not (tmp_path / ".claude").exists()

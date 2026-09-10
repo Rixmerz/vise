@@ -28,15 +28,20 @@ closed without one — correctly — so a repo with UI work will hit a block at
 the first `ui_layout` node. If the report says NO BROWSER, relay the install
 command it prints; do not run it unasked.
 
-**2. Report the two environment variables** it printed and tell the user to put
-them in `.claude/settings.json` under `env`. Do not edit that file yourself
-unless asked — it is theirs, and it often holds things vise has no business
-touching.
+**2. Report what it did with the two environment variables.** Bootstrap now
+sets `VISE_TEST_CMD` and `VISE_LINT_CMD` in `.claude/settings.json` under `env`
+itself, because detection has already computed the command and printing it and
+hoping mostly meant it never got pasted. It never replaces a value that is
+already there, never overwrites a file it cannot parse, and touches no other
+key — say which of "set" and "kept" each line was.
 
-Be direct about the consequence of skipping this: without `VISE_TEST_CMD` and
-`VISE_LINT_CMD`, the `tests_pass` and `lint_pass` node-gate validators fall
-back to `pytest` and `ruff`. On a repo that uses neither they report
-`unverified` — the gate exists and does not bite, which reads as green.
+That file is still theirs. If they manage it elsewhere, `vise bootstrap
+--no-settings` prints the two lines instead and changes nothing.
+
+Be direct about the consequence when it could not write them: without
+`VISE_TEST_CMD` and `VISE_LINT_CMD`, the `tests_pass` and `lint_pass` node-gate
+validators fall back to `pytest` and `ruff`. On a repo that uses neither they
+report `unverified` — the gate exists and does not bite, which reads as green.
 
 **3. Check the Python environment.** Call any vise MCP tool (`vise_version` is
 cheapest). If it fails, the plugin's files loaded but its server did not: the
