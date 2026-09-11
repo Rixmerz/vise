@@ -6,6 +6,140 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Fixed — the largest weight in experience ranking was scoring the wrong thing
+
+The semantic term carried `W_SEMANTIC = 0.30`, the biggest of the five, and was
+exact-set Jaccard over keywords. Two defects, both measured against the live
+function:
+
+- **No stemming.** An entry holding `caches` and `tokens` scored **0.000**
+  against `token_cache.py`. That is the shape a cross-project lesson almost
+  always arrives in — the recorder names the file it happened on, and the next
+  repository spells it differently.
+- **Jaccard punished an entry for having learned more.** The denominator is the
+  union, so against the same target an entry holding `token` and `cache` scored
+  0.667 and one holding those two plus eighteen others scored **0.095** — seven
+  times worse for covering exactly the same ground. Vocabulary grows with
+  occurrences and so does confidence, so the term meant to surface the
+  most-learned lesson was ranking it last.
+
+`relevance.keyword_score` replaces it: coverage of the *target's* keywords, on
+stemmed forms, with an abbreviation counting as its expansion from four
+characters up (`auth` covers `authentication`). Both the engine and the hook now
+call it — the hook used to hold its own inline copy of the Jaccard, which is how
+the two drifted in the first place.
+
+### Fixed — `general` was being counted as a domain match
+
+`_guess_domain` answers `general` when nothing matched. The comparison was `==`,
+so two files it could not classify scored a domain match worth 0.20. "I could
+not tell" was counting as "these belong together" — the absent-versus-unreadable
+collapse this repository refuses everywhere else. On a migration file it put a
+billing lesson above a migration lesson.
+
+### Behaviour change — relevance multiplies the match by the priors instead of adding
+
+The five-term weighted sum let confidence carry an entry on its own: with no
+path, keyword or domain signal at all, a lesson at confidence 0.93 still scored
+0.139 and beat lessons that actually matched the file. `relevance` now computes
+a match score in [0, 1] from the three match signals and multiplies it by
+`confidence * decay_factor`. Confidence is a probability the lesson is right and
+retrievability a probability it is still worth recalling; a probability scales
+evidence, it does not substitute for it. An entry that matches nothing scores
+nothing.
+
+On a 26-query labelled fixture (18 entries, 10 of the queries against a
+repository layout the entries were not recorded in):
+
+| | P@1 | R@3 | MRR |
+|---|---|---|---|
+| cross-repo, before | 0.300 | 0.300 | 0.392 |
+| cross-repo, after | **0.600** | **0.800** | **0.723** |
+| same-repo, before | 0.938 | 1.000 | 0.969 |
+| same-repo, after | 0.750 | 0.938 | 0.859 |
+| overall, before | 0.692 | 0.731 | 0.747 |
+| overall, after | 0.692 | **0.885** | **0.807** |
+
+Same-repo precision falls. Two of its three misses are a high-confidence lesson
+beating a better-matching one, which is the product behaving as designed — among
+plausible candidates the match scores cluster more tightly than confidence does,
+so confidence still decides ties. Whether that spread should be compressed is a
+separate question and is not settled here.
+
+`recency` no longer appears in the composite. `decay_factor` reads the same
+timestamps and is the recency model; summing a second linear one beside it was
+two models of one thing. The function stays exported.
+
+`path_score` gains a fourth tier: a pattern that *names* the file now outranks a
+glob that merely covers it (1.0 against 0.85). Both answered 1.0, so on a file
+with two candidate lessons the tie fell to whichever had been seen more often.
+
+The four thresholds that filtered on the old composite — 0.10 in the hook, 0.05
+in the store's query, 0.5 in `experience_query` and in `vise experience query` —
+are one threshold now, `relevance.MIN_MATCH`, applied to the match component,
+whose units are stable. **The `min_score` default on the tool and the CLI drops
+from 0.5 to 0.0**; left where it was, it would have hidden most results.
+
+### Fixed — the experience injector repeated itself until it was ignored
+
+`experience_injector` runs on every `Write` and `Edit`. It re-scored the store
+and re-printed the same top three every time, so editing one file ten times
+delivered the same three lessons ten times. Over a simulated session of 40 edits
+across 6 files, measured by running the hook as its own interpreter:
+
+| | blocks | bytes | ~tokens |
+|---|---|---|---|
+| before | 40 | 7450 | 2069 |
+| after | 6 | 952 | 264 |
+
+87% fewer bytes. The tokens are the smaller half of it: a block that repeats
+verbatim is one a reader learns to skip, and a memory an agent has learned to
+skip is not a memory. What is remembered is a digest of the line the agent
+actually saw, kept per session under `<data>/injected/`, swept after seven days.
+Entries already delivered are filtered *before* the top-three cut, so a later
+edit surfaces the best three not yet said rather than going silent.
+
+### Added — every MCP tool now declares what it does to the world
+
+All 57 tools registered without annotations. A host renders a tool's name, its
+title and its raw arguments when it asks a person to approve a call, and nothing
+else — so `graph_status`, which reads a JSON file, and `snapshot_restore`, which
+overwrites the working tree, arrived looking alike. `tools/_annotations.py` holds
+the table, deliberately in one file so the destructive set is readable in one
+screen: `snapshot_restore`, `graph_reset`, `goal_clear`, `graph_builder_delete`.
+
+`experience_query` is **not** read-only, despite a `# readOnlyHint: True`
+comment that sat above it for releases. Querying bumps FSRS stability and
+`last_reviewed` on every entry it returns and saves the store.
+
+An unlisted tool gets the most cautious hints at runtime and fails
+`test_tool_annotations.py` in CI — safe in production, loud in review.
+
+### Added — a hook that fails open leaves a mark
+
+Hooks swallow their exceptions by contract; a hook that raises takes the user's
+session down. The cost was that a broken hook looked exactly like a working one:
+the experience went unrecorded, the blocker went unsurfaced, and the user saw a
+session that worked. The outermost handler of five hooks now calls
+`hooks/_failsafe.note()` on the way past, and `session_restore` reads the ledger
+out at the next `SessionStart` and clears it. The notice is redacted before it
+reaches a model's context — an exception message is exactly where a connection
+string turns up — and it no longer depends on a workflow being active, which is
+where the first attempt at this put it.
+
+### Internal
+
+- `test_experience_injector.py` held `_orig_score`, a frozen copy of the
+  pre-parity hook formula (path 0.30, no same-parent tier, no decay, weights
+  summing to 0.90). The contract test that used it was comparing the old formula
+  against the new one rather than the full scan against the index. Deleted; both
+  sides now score with the same function.
+- Two injector tests asserted at `confidence=0.0`, where the product makes both
+  sides zero and the assertion holds regardless of what the term under test
+  does. Given live values.
+
 ## [0.1.0a27] — 2026-09-10
 
 ### Fixed — bootstrap bound the wrong package manager on every pnpm, yarn and bun repo

@@ -25,6 +25,7 @@ from vise.engines.graph_state import (
     load_active_graph, save_graph_state,
 )
 from vise.engines.node_gate import _run_node_validators
+from vise.tools import _annotations as _ann
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
 
 def register_graph_transition_tools(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     async def graph_traverse(
         edge_id: str,
         reason: str = "Manual traverse",

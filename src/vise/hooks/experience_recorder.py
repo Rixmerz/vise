@@ -410,6 +410,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as exc:
+        from vise.hooks import _failsafe
+        _failsafe.note("experience_recorder", exc)
         # Fail-safe: always approve
         print(_APPROVE)

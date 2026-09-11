@@ -15,6 +15,7 @@ from vise.core.atomic import write_atomic
 from vise.core.session import resolve_project_dir
 from vise.engines import goal_state as engine
 from vise.engines import validators as val_engine
+from vise.tools import _annotations as _ann
 
 
 def _read_settings(settings_path: Path) -> dict:
@@ -49,7 +50,7 @@ def _synthesize_and_activate_workflow(goal, resolved_dir: str) -> str:
 
 def register_goal(mcp) -> None:
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_set(
         goal: str,
         project_dir: str | None = None,
@@ -100,7 +101,7 @@ def register_goal(mcp) -> None:
             "preferred_model": g.preferred_model,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_get(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -115,7 +116,7 @@ def register_goal(mcp) -> None:
             return {"found": False, "project_dir": resolved_dir}
         return {"found": True, "goal": asdict(g)}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_clear(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -125,7 +126,7 @@ def register_goal(mcp) -> None:
         removed = engine.clear_goal(resolved_dir)
         return {"success": True, "removed": removed, "project_dir": resolved_dir}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_validate(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -190,7 +191,7 @@ def register_goal(mcp) -> None:
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_complete(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -236,7 +237,7 @@ def register_goal(mcp) -> None:
                                   detail="force-complete (no mechanical pass)")
         return {"success": True, "status": completed.status, "project_dir": resolved_dir}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_abandon(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -249,7 +250,7 @@ def register_goal(mcp) -> None:
         engine.append_history(resolved_dir, event="abandoned", detail="human-abandoned")
         return {"success": True, "status": g.status, "project_dir": resolved_dir}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def goal_bootstrap(
         goal: str,
         complexity: str = "unknown",

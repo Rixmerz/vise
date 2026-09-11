@@ -14,6 +14,7 @@ from vise.engines.graph_state import (
     deactivate_graph_state,
     get_graph_file,
 )
+from vise.tools import _annotations as _ann
 
 
 def _mark_untrusted(prompt: str | None, graph_name: str, shadowed: bool) -> str | None:
@@ -55,7 +56,7 @@ def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
 
 def register_graph_management_tools(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_list_available(project_dir: str | None = None, session_id: str | None = None) -> dict:
         # readOnlyHint: True
         """List all available graphs in the project's workflows library.
@@ -200,7 +201,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     async def graph_activate(
         graph_name: str,
         project_dir: str | None = None,
@@ -326,7 +327,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_deactivate(project_dir: str | None = None, session_id: str | None = None) -> dict:
         """End the active workflow. Nothing is gated afterwards.
 
@@ -360,7 +361,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_visualize(project_dir: str | None = None, session_id: str | None = None) -> dict:
         # readOnlyHint: True
         """Generate Mermaid diagram of the graph.
@@ -397,7 +398,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     async def graph_timeline(
         since: str | None = None,
         limit: int = 50,
@@ -502,7 +503,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_validate(project_dir: str | None = None, session_id: str | None = None) -> dict:
         # readOnlyHint: True
         """Validate the current graph structure.
@@ -548,7 +549,7 @@ def register_graph_management_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_override_max_visits(
         node_id: str,
         new_max: int,

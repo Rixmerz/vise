@@ -33,6 +33,7 @@ would cost the hook more than the divergence did. What is shared is what drifted
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
 
 #: Weights, summing to 1.0. A set that does not sum to one still ranks, which is
 #: why nobody noticed the hook's 0.90: the order it produces is simply a
@@ -92,18 +93,143 @@ def recency(last_seen: str) -> float:
     return max(0.0, 1.0 - elapsed / RECENCY_WINDOW_DAYS)
 
 
-def path_score(*, exact: bool, same_dir: bool, same_parent: bool) -> float:
-    """How well a pattern's location matches the target's, in three tiers.
+#: Suffixes folded to a common stem, longest first so ``ies`` wins over ``s``.
+#: Not Porter: the vocabulary here is identifiers and path segments, where the
+#: whole problem is plural-vs-singular and noun-vs-gerund. A trailing ``e`` goes
+#: last so ``cache``/``caches``/``caching`` land on one stem.
+_STEM_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", ""),
+)
+
+#: A stem never shrinks below this, so ``is`` does not become ``i``.
+_MIN_STEM = 3
+
+#: An abbreviation counts as its expansion only from this length up. ``auth``
+#: covers ``authentication``; three characters would let ``api`` cover ``apify``.
+#: It is the cheapest form of the substring match a trigram index gives you, and
+#: it does let ``auth`` cover ``author`` — partial credit, not a whole match.
+_MIN_PREFIX = 4
+
+#: ``_guess_domain`` answers this when nothing matched. It is "could not
+#: classify", not a domain, and two unclassifiable files are not neighbours.
+UNKNOWN_DOMAINS = frozenset({"", "general", "unknown"})
+
+
+@lru_cache(maxsize=4096)
+def stem(word: str) -> str:
+    """Fold one word to the stem its morphological variants share.
+
+    Cached because the hook stems the same vocabulary once per candidate and
+    scores about 150 of them per edit: the words repeat, the answer does not
+    change, and the alternative was pre-baking stems into the sidecar index,
+    which would have made the index format a second place to be wrong.
+    """
+    w = word.lower()
+    for suffix, replacement in _STEM_SUFFIXES:
+        if w.endswith(suffix) and len(w) - len(suffix) >= _MIN_STEM:
+            w = w[: -len(suffix)] + replacement
+            break
+    return w[:-1] if w.endswith("e") and len(w) > _MIN_STEM else w
+
+
+def _covers(target_stem: str, entry_stems: set[str]) -> bool:
+    """Does any of *entry_stems* account for *target_stem*?"""
+    if target_stem in entry_stems:
+        return True
+    for e in entry_stems:
+        short, long = (target_stem, e) if len(target_stem) <= len(e) else (e, target_stem)
+        if len(short) >= _MIN_PREFIX and long.startswith(short):
+            return True
+    return False
+
+
+def keyword_score(entry_keywords, target_keywords) -> float:
+    """How much of the TARGET's vocabulary this entry covers, on stemmed forms.
+
+    Coverage, not Jaccard. Jaccard divides by the union, so an entry punished
+    itself for having learned more: against ``token_cache.py`` an entry holding
+    ``token`` and ``cache`` scored 0.667, and one holding those same two plus
+    eighteen others scored 0.095 — seven times worse for covering exactly the
+    same ground. Vocabulary grows with occurrences and so does confidence, so
+    the term meant to find the most-learned lesson was ranking it last.
+
+    The question a caller actually asks is "how much of the file I am editing
+    does this lesson speak to", and the size of the lesson's own vocabulary is
+    no part of it. So the denominator is the target's keyword count.
+
+    Stemming is the other half. ``caches``/``tokens`` against ``token_cache.py``
+    scored a flat zero on exact sets, and that is the shape a cross-project
+    lesson almost always arrives in: the recorder names the file it happened on,
+    and the next repository spells it differently.
+    """
+    if not entry_keywords or not target_keywords:
+        return 0.0
+    target_stems = {stem(k) for k in target_keywords}
+    if not target_stems:
+        return 0.0
+    entry_stems = {stem(k) for k in entry_keywords}
+    return sum(1 for t in target_stems if _covers(t, entry_stems)) / len(target_stems)
+
+
+def domain_score(entry_domain: str, target_domain: str) -> float:
+    """1.0 only when both sides named the SAME KNOWN domain.
+
+    ``general`` is the guesser's fallback. Comparing it with ``==`` scored two
+    files it could not classify as a domain match worth 0.20 — "I could not
+    tell" counted as "these belong together", which is the absent-versus-
+    unreadable collapse this repository refuses everywhere else. It put a
+    billing lesson above a migration lesson on a migration file.
+    """
+    if entry_domain in UNKNOWN_DOMAINS or target_domain in UNKNOWN_DOMAINS:
+        return 0.0
+    return 1.0 if entry_domain == target_domain else 0.0
+
+
+def path_score(
+    *, exact: bool, same_dir: bool, same_parent: bool, same_file: bool = False,
+) -> float:
+    """How well a pattern's location matches the target's, in four tiers.
 
     The callers decide the booleans their own way; the tiers live here because
-    the hook was missing the third one entirely, so a lesson filed one directory
-    up scored zero for it and 0.4 for the tools.
+    the hook was missing the same-parent one entirely, so a lesson filed one
+    directory up scored zero for it and 0.4 for the tools.
+
+    ``same_file`` is the fourth, and it is newer. A pattern that NAMES the file
+    and a glob that merely covers it both answered 1.0, so on a file with two
+    candidate lessons the tie fell to whichever had been seen more often — a
+    directory-wide lesson at confidence 0.64 outranked the lesson recorded
+    against that exact file at 0.50. Naming the file is the stronger evidence
+    and now says so. It defaults false so a caller that has not been taught the
+    distinction keeps the behaviour it had.
     """
-    if exact:
+    if same_file:
         return 1.0
+    if exact:
+        return 0.85
     if same_dir:
         return 0.7
     return 0.4 if same_parent else 0.0
+
+
+#: The three match weights, renormalised from the five above now that the other
+#: two have left the sum. The ratio between them is unchanged.
+_MATCH_TOTAL = W_PATH + W_SEMANTIC + W_DOMAIN
+
+#: A candidate below this matched too little to be worth an agent's attention,
+#: and `relevance` scores it zero. There used to be four thresholds instead —
+#: 0.10 in the hook, 0.05 in the store's query, 0.5 in the tool and the CLI —
+#: all in composite-score units, which mean a different thing after this change
+#: and meant nothing comparable to each other before it. One threshold, on the
+#: one component whose units are stable.
+#: A floor on the MATCH, not on the final score: a correct lesson nobody has
+#: confirmed yet should still surface, and a threshold on the product would hide
+#: it for being new.
+MIN_MATCH = 0.10
+
+
+def match_score(*, path: float, semantic: float, domain: float) -> float:
+    """The three match signals as one number in [0, 1]."""
+    return (path * W_PATH + semantic * W_SEMANTIC + domain * W_DOMAIN) / _MATCH_TOTAL
 
 
 def relevance(
@@ -116,18 +242,38 @@ def relevance(
     last_reviewed: str = "",
     last_seen: str = "",
 ) -> float:
-    """Combine the component scores into one ranking number."""
-    return (
-        path * W_PATH
-        + semantic * W_SEMANTIC
-        + domain * W_DOMAIN
-        + confidence * decay_factor(stability, last_reviewed, last_seen) * W_CONFIDENCE
-        + recency(last_seen) * W_RECENCY
-    )
+    """How well this entry matches, scaled by how much it is worth believing.
+
+    Match and belief are not addends. The five-term weighted sum let confidence
+    alone carry an entry: with no path, keyword or domain signal at all, a
+    lesson at confidence 0.93 still scored 0.139 and beat lessons that actually
+    matched the file. On a target whose layout differs from the one the entry's
+    pattern was recorded against — the cross-project case this store exists for
+    — that put the right lesson sixteenth of eighteen.
+
+    So the three match signals combine into one number in [0, 1] and the
+    calibrated priors multiply it. Confidence is ``0.95 * (1 - 0.7^n)``, a
+    probability that the lesson is right; ``decay_factor`` is FSRS
+    retrievability, a probability that it is still worth recalling. A
+    probability scales evidence, it does not substitute for it. An entry that
+    matches nothing scores nothing, however sure of itself it is.
+
+    ``recency`` no longer appears. ``decay_factor`` reads the same timestamps
+    and is the recency model; summing a second linear one beside it was two
+    models of one thing, which is the shape every other drift in this file had.
+    The function stays exported — it answers a real question — but the composite
+    asks it once.
+    """
+    match = match_score(path=path, semantic=semantic, domain=domain)
+    if match < MIN_MATCH:
+        return 0.0
+    return match * confidence * decay_factor(stability, last_reviewed, last_seen)
 
 
 __all__ = [
     "DECAY_FLOOR",
+    "MIN_MATCH",
+    "UNKNOWN_DOMAINS",
     "DEFAULT_STABILITY_DAYS",
     "RECENCY_WINDOW_DAYS",
     "W_CONFIDENCE",
@@ -137,7 +283,11 @@ __all__ = [
     "W_SEMANTIC",
     "days_since",
     "decay_factor",
+    "domain_score",
+    "keyword_score",
+    "match_score",
     "path_score",
+    "stem",
     "recency",
     "relevance",
 ]

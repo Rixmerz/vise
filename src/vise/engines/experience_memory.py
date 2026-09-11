@@ -208,7 +208,7 @@ def update_confidence(current: float, occurrences: int) -> float:
 def _score_path_match(entry_pattern: str, target_path: str) -> float:
     """Score how well an entry's file_pattern matches a target file path.
 
-    Decides the three booleans; `relevance.path_score` owns what they are worth.
+    Decides the four booleans; `relevance.path_score` owns what they are worth.
     The hook decides the same booleans with string operations and used to own a
     second, shorter set of tier values.
     """
@@ -230,18 +230,18 @@ def _score_path_match(entry_pattern: str, target_path: str) -> float:
         exact=exact,
         same_dir=entry_dir == target_dir,
         same_parent=entry_parent == target_parent and entry_parent != ".",
+        same_file=entry_pattern == target_path,
     )
 
 
 def _score_keyword_overlap(entry_keywords: list[str], target_keywords: list[str]) -> float:
-    """Jaccard-like overlap between keyword sets."""
-    if not entry_keywords or not target_keywords:
-        return 0.0
-    s1 = set(entry_keywords)
-    s2 = set(target_keywords)
-    intersection = len(s1 & s2)
-    union = len(s1 | s2)
-    return intersection / union if union else 0.0
+    """Deprecated alias for `relevance.keyword_score`. Kept for one release.
+
+    It used to hold its own Jaccard, which is how the hook came to hold a second
+    copy of the same idea. The scoring lives in `engines.relevance` now, with
+    both callers on it, so there is one place to be wrong.
+    """
+    return _relevance.keyword_score(entry_keywords, target_keywords)
 
 
 def compute_relevance(entry: ExperienceEntry, target_path: str) -> float:
@@ -267,8 +267,8 @@ def compute_relevance(entry: ExperienceEntry, target_path: str) -> float:
 
     return _relevance.relevance(
         path=_score_path_match(entry.file_pattern, target_path),
-        semantic=_score_keyword_overlap(entry.keywords, target_keywords),
-        domain=1.0 if entry.domain == target_domain else 0.0,
+        semantic=_relevance.keyword_score(entry.keywords, target_keywords),
+        domain=_relevance.domain_score(entry.domain, target_domain),
         confidence=entry.confidence,
         stability=entry.stability,
         last_reviewed=entry.last_reviewed,
@@ -507,7 +507,7 @@ class ExperienceMemoryStore:
         scored = []
         for entry in self.entries:
             score = compute_relevance(entry, file_path)
-            if score > 0.05:  # Minimum threshold
+            if score > 0.0:  # `relevance` already floors on MIN_MATCH
                 scored.append((entry, score))
 
         scored.sort(key=lambda x: x[1], reverse=True)

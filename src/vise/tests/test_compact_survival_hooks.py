@@ -114,12 +114,38 @@ def test_hooks_fail_open_on_bad_stdin(isolated: Path) -> None:
 
 
 def test_hooks_fail_open_on_reader_exception(isolated: Path) -> None:
+    """Exit 0 and emit no state block. The failure is not silent, though —
+    it goes to the fail-open ledger, and the next `SessionStart` reads it out.
+    The ledger is drained here so each hook is judged on its own output rather
+    than on a note the one before it left."""
+    from vise.hooks import _failsafe
+
     with mock.patch("vise.hooks._common.read_active_state",
                     side_effect=RuntimeError("boom")):
         for module in (precompact_state, session_restore):
+            _failsafe.drain()
             out, code = _run(module, isolated)
             assert code == 0
-            assert out == ""
+            assert out == "", f"{module.__name__} emitted a state block it could not read"
+
+
+def test_a_reader_exception_is_reported_at_the_next_session_start(isolated: Path) -> None:
+    """The other half. A hook that swallowed an exception used to look exactly
+    like one that had nothing to say, so an unrecorded experience and an
+    uneventful session were the same observation."""
+    from vise.hooks import _failsafe
+    _failsafe.drain()
+
+    with mock.patch("vise.hooks._common.read_active_state",
+                    side_effect=RuntimeError("boom")):
+        _run(precompact_state, isolated)
+
+    out, code = _run(session_restore, isolated)
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "failed open" in context
+    assert "precompact_state" in context
+    assert _failsafe.drain() == [], "reported once, then forgotten"
 
 
 # ---------------------------------------------------------------------------

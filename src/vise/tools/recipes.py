@@ -21,6 +21,7 @@ from vise.recipes.autotag import suggest_capability
 from vise.recipes.capabilities import INTERNAL_BINDINGS
 from vise.recipes.loader import load_capabilities, load_recipes, load_user_pins
 from vise.recipes.resolver import resolve_capability
+from vise.tools import _annotations as _ann
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ def audit_capabilities(
 
 def register_recipes(mcp: FastMCP) -> None:
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def recipe_list(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -236,7 +237,7 @@ def register_recipes(mcp: FastMCP) -> None:
             "session_id": sid,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def recipe_describe(
         name: str,
         project_dir: str | None = None,
@@ -279,7 +280,7 @@ def register_recipes(mcp: FastMCP) -> None:
             "session_id": sid,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     async def recipe_run(
         name: str,
         inputs: dict[str, Any] | None = None,
@@ -365,7 +366,7 @@ def register_recipes(mcp: FastMCP) -> None:
         result["session_id"] = sid
         return result
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def capability_set(
         tool: str,
         capability: str | None,
@@ -431,7 +432,7 @@ def register_recipes(mcp: FastMCP) -> None:
             "session_id": sid,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def capability_audit(
         project_dir: str | None = None,
         session_id: str | None = None,

@@ -9,10 +9,11 @@ if TYPE_CHECKING:
 
 from vise.core import snapshots
 from vise.core.session import get_session_project_dir
+from vise.tools import _annotations as _ann
 
 
 def register_snapshot(mcp: "FastMCP") -> None:
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def snapshot_create(
         label: str = "",
         phase: str = "",
@@ -37,7 +38,7 @@ def register_snapshot(mcp: "FastMCP") -> None:
             "phase": snap.phase,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def snapshot_list(project_dir: str | None = None) -> dict[str, Any]:
         """List snapshots in reverse chronological order.
 
@@ -72,7 +73,7 @@ def register_snapshot(mcp: "FastMCP") -> None:
             )
         return result
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def snapshot_diff(a: str, b: str, project_dir: str | None = None) -> dict[str, Any]:
         """Show `git diff <a>..<b>` between two snapshot ids or refs."""
         project = _resolve(project_dir)
@@ -82,7 +83,7 @@ def register_snapshot(mcp: "FastMCP") -> None:
             return {"error": str(e)}
         return {"diff": text}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def snapshot_restore(
         snapshot_id: str,
         dry_run: bool = True,

@@ -6,6 +6,7 @@ from pathlib import Path
 from vise.core.session import resolve_project_dir
 from vise.engines.config import get_global_workflows_dir
 from vise.engines.graph_parser import parse_graph_yaml, GraphParseError
+from vise.tools import _annotations as _ann
 
 #: Validators a graph composed through these tools may declare.
 #:
@@ -272,7 +273,7 @@ def _generate_graph_yaml(builder: dict) -> str:
 
 def register_graph_builder_tools(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_create(
         name: str,
         description: str = "",
@@ -317,7 +318,7 @@ def register_graph_builder_tools(mcp):
             "hint": "Use graph_builder_add_node() and graph_builder_add_edge() to build the graph"
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_add_node(
         builder_id: str,
         node_id: str,
@@ -428,7 +429,7 @@ def register_graph_builder_tools(mcp):
             "message": f"Node '{name}' added"
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_add_edge(
         builder_id: str,
         edge_id: str,
@@ -567,7 +568,7 @@ def register_graph_builder_tools(mcp):
             "message": f"Edge '{from_node}' -> '{to_node}' added"
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_update_node(
         builder_id: str,
         node_id: str,
@@ -642,7 +643,7 @@ def register_graph_builder_tools(mcp):
             "message": f"Node '{node_id}' patched" if patched else "no-op (nothing to patch)",
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_update_edge(
         builder_id: str,
         edge_id: str,
@@ -705,7 +706,7 @@ def register_graph_builder_tools(mcp):
             "message": f"Edge '{edge_id}' patched",
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_preview(builder_id: str) -> dict:
         # readOnlyHint: True
         """Preview the YAML that will be generated.
@@ -735,7 +736,7 @@ def register_graph_builder_tools(mcp):
             }
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_save(
         builder_id: str,
         filename: str,
@@ -839,7 +840,7 @@ def register_graph_builder_tools(mcp):
             "hint": f"Use graph_activate('{safe_filename}') to activate this graph"
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_list() -> dict:
         # readOnlyHint: True
         """List all active graph builders.
@@ -863,7 +864,7 @@ def register_graph_builder_tools(mcp):
             "hint": "Use graph_builder_preview(builder_id) to see YAML or graph_builder_save() to save"
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_builder_delete(builder_id: str) -> dict:
         # destructiveHint: True (deletes builder without saving)
         """Delete a graph builder without saving.

@@ -20,6 +20,7 @@ Treat those files with the same care as the code.
 | `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
+| `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |
 
@@ -117,6 +118,17 @@ outermost handler is the contract, not sloppiness. This is why `bandit` is
 gated at Medium and above — the 89 Low findings are all `B110`/`B112` on exactly
 these handlers.
 
+**A hook that fails open says so.** The outermost handler still swallows the
+exception, but it calls `hooks/_failsafe.note()` on the way past, and
+`session_restore` reads the ledger out at the next `SessionStart` and clears it.
+Without that, an experience went unrecorded, a blocker went unsurfaced, a
+snapshot went untaken — and the user saw a session that worked. This is the same
+distinction the neighbours section draws: absent and unreadable are different,
+and "could not tell" has to report something. The ledger is standard library
+only and every function in it swallows its own errors, because it is what runs
+when something else has already broken; losing a note is acceptable, raising
+from there is not. A new hook wires its outermost handler to it.
+
 ## Assets are asserted, not trusted
 
 Facts restated in prose drift from their source. The suite pins them:
@@ -130,6 +142,7 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_asset_coverage.py` | every validator in the registry is documented in the README — a workflow author cannot use one they cannot find |
 | `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
 | `test_neighbour_contract.py` | every tool name an asset teaches belongs to vise or to a neighbour in `core/neighbours.py` — and every pinned name is still referenced somewhere |
+| `test_tool_annotations.py` | every MCP tool declares what it does to the world, the four hints are internally consistent, and the four destructive ones say so in the title a host shows |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.
@@ -191,3 +204,15 @@ here could have caught it. So:
   to any script or CI step.
 - Don't commit anything into `.claude/` expecting users to get it — that
   directory is vise's own dev setup and ships to nobody.
+- Don't register an MCP tool with a bare `@mcp.tool()`. Use
+  `@_ann.annotated(mcp)` and add the tool to the table in `tools/_annotations.py`.
+  The host renders a tool's name, its title and its raw arguments when it asks a
+  person to approve a call, and nothing else — unannotated, `graph_status`, which
+  reads a JSON file, and `snapshot_restore`, which overwrites the working tree,
+  arrive looking alike. An unlisted name gets the most cautious hints at runtime
+  and fails `test_tool_annotations.py` in CI.
+- Don't rank experience entries by adding a match score to a confidence score.
+  `engines/relevance.py` multiplies instead, and the docstring says why: a
+  probability scales evidence, it does not substitute for it. Under the old sum,
+  an entry that matched nothing at all still scored `confidence * 0.15` and
+  outranked entries that matched.

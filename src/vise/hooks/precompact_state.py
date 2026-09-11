@@ -83,7 +83,9 @@ def main() -> int:
                 lines.append(f"- [{severity}] {where}: {what}")
 
         print(json.dumps({"systemMessage": "\n".join(lines)}))
-    except Exception:
+    except Exception as exc:
+        from vise.hooks import _failsafe
+        _failsafe.note("precompact_state", exc)
         return 0  # fail-open
     return 0
 

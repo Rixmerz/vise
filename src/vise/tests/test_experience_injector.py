@@ -127,10 +127,23 @@ class TestScoreEntry:
     # engine's in the first place — `test_relevance_parity.py` pins the numbers.
 
     def test_perfect_glob_match_boosts_path_score(self):
+        """A glob that covers the file is the second tier, not the first — the
+        first is a pattern that names it. And `general` is the guesser's "could
+        not classify", so two of them are not a domain match."""
         e = _make_entry(file_pattern="src/foo/*.py", keywords=["bar", "foo"],
                         domain="general", confidence=0.5)
         assert self._score(e) == pytest.approx(
-            rel.relevance(path=1.0, semantic=1.0, domain=1.0, confidence=0.5))
+            rel.relevance(path=0.85, semantic=1.0, domain=0.0, confidence=0.5))
+
+    def test_a_pattern_that_names_the_file_outranks_a_glob_over_its_directory(self):
+        """Both answered 1.0, so the tie fell to whichever had been seen more
+        often and a directory-wide lesson outranked the one recorded against
+        this exact file."""
+        named = _make_entry(file_pattern="src/foo/bar.py", keywords=[],
+                            domain="api", confidence=0.5)
+        glob = _make_entry(file_pattern="src/foo/*.py", keywords=[],
+                           domain="api", confidence=0.5)
+        assert self._score(named, domain="api") > self._score(glob, domain="api")
 
     def test_parent_dir_fallback_scores_07(self):
         # .py pattern, .ts target — same parent dir, so the middle tier
@@ -139,7 +152,7 @@ class TestScoreEntry:
         e["_parent"] = "src/cli"
         score = inj._score_entry(e, "src/cli/run.ts", set(), "general", "src/cli")
         assert score == pytest.approx(
-            rel.relevance(path=0.7, semantic=0.0, domain=1.0, confidence=0.3))
+            rel.relevance(path=0.7, semantic=0.0, domain=0.0, confidence=0.3))
 
     def test_a_pattern_one_directory_up_reaches_the_third_tier(self):
         """The hook had two tiers where the engine had three, so a lesson filed
@@ -152,17 +165,25 @@ class TestScoreEntry:
         assert score == pytest.approx(
             rel.relevance(path=0.4, semantic=0.0, domain=0.0, confidence=0.0))
 
-    def test_no_match_no_pattern_score_is_conf_only(self):
-        e = _make_entry(file_pattern="", keywords=[], domain="other", confidence=0.4)
-        assert self._score(e, domain="general") == pytest.approx(
-            rel.relevance(path=0.0, semantic=0.0, domain=0.0, confidence=0.4))
+    def test_an_entry_that_matches_nothing_scores_nothing(self):
+        """It used to score `confidence * 0.15` — enough that a much-repeated
+        lesson about an unrelated file outranked lessons that actually matched.
+        Confidence is a probability the lesson is right, not evidence that it
+        applies here."""
+        e = _make_entry(file_pattern="", keywords=[], domain="other", confidence=0.95)
+        assert self._score(e, domain="general") == 0.0
 
-    def test_keyword_jaccard_overlap(self):
-        e = _make_entry(file_pattern="", keywords=["foo", "baz"], domain="general", confidence=0.0)
-        score = inj._score_entry(e, "x.py", {"foo", "bar"}, "general", ".")
-        # intersection={"foo"}, union={"foo","bar","baz"} → jaccard=1/3
+    def test_keyword_term_is_coverage_of_the_target(self):
+        """Was written against Jaccard and pinned 1/3 — and pinned it at
+        confidence 0.0, where the new formula makes both sides zero and the
+        assertion holds no matter what the keyword term does. Coverage asks how
+        much of the TARGET the entry accounts for: one of `foo`/`bar`, so 1/2.
+        """
+        e = _make_entry(file_pattern="", keywords=["foo", "baz"], domain="api", confidence=0.5)
+        score = inj._score_entry(e, "x.py", {"foo", "bar"}, "api", ".")
         assert score == pytest.approx(
-            rel.relevance(path=0.0, semantic=1 / 3, domain=1.0, confidence=0.0))
+            rel.relevance(path=0.0, semantic=1 / 2, domain=1.0, confidence=0.5))
+        assert score > 0.0, "a live assertion, not one both sides satisfy at zero"
 
     def test_threshold_filter(self):
         e = _make_entry(file_pattern="", keywords=[], domain="other", confidence=0.0)
@@ -174,9 +195,12 @@ class TestScoreEntry:
         e = _make_entry(file_pattern="wrong/path/*.py", keywords=[], domain="general",
                         confidence=0.0)
         e["_parent"] = "src/foo"  # override to correct parent
+        e["confidence"] = 0.5      # the product is zero at confidence 0.0, which
+                                   # would satisfy the assertion for the wrong reason
         score = inj._score_entry(e, "src/foo/bar.py", set(), "general", "src/foo")
-        # Should get parent fallback 0.7 even though pattern dir doesn't match
-        assert score > 0.10
+        # same-dir tier via the pre-baked parent, even though the pattern dir differs
+        assert score == pytest.approx(
+            rel.relevance(path=0.7, semantic=0.0, domain=0.0, confidence=0.5))
 
 
 # ---------------------------------------------------------------------------
@@ -455,25 +479,6 @@ class TestContractPreservation:
                     "root match", "run it", 1),
     ]
 
-    def _orig_score(self, entry, fp, kws, dom, par):
-        import re
-        pattern = entry.get("file_pattern", "")
-        path_score = 0.0
-        if pattern:
-            try:
-                rx = pattern.replace("*", ".*")
-                if re.fullmatch(rx, fp):
-                    path_score = 1.0
-                elif str(Path(pattern).parent) == par:
-                    path_score = 0.7
-            except re.error:
-                pass
-        ekws = set(entry.get("keywords", []))
-        kw = len(ekws & kws) / len(ekws | kws) if (ekws and kws) else 0.0
-        ds = 1.0 if entry.get("domain") == dom else 0.0
-        conf = entry.get("confidence", 0.3)
-        return path_score * 0.30 + kw * 0.25 + ds * 0.20 + conf * 0.15
-
     @pytest.mark.parametrize("target", [
         "src/cli/run_cmd.py",
         "src/cli/run_cmd.ts",   # cross-extension — relies on parent fallback
@@ -497,10 +502,16 @@ class TestContractPreservation:
         dom = inj._guess_domain(fp)
         par = str(Path(fp).parent)
 
-        # Full-scan top-3 (original logic)
+        # Full-scan top-3. Scored with the SAME function as the indexed path:
+        # what is under test is the candidate SET the index produces, not the
+        # formula. This used to call `_orig_score`, a copy of the pre-parity
+        # hook formula (path 0.30, no same-parent tier, no decay, weights
+        # summing to 0.90) frozen into the test file — a fourth place for the
+        # formula to live, and one that made the assertion compare old against
+        # new rather than scan against index.
         full_scored = sorted(
-            [(e, self._orig_score(e, fp, kws, dom, par)) for e in self.FIXTURE_ENTRIES
-             if self._orig_score(e, fp, kws, dom, par) > 0.10],
+            [(e, inj._score_entry(e, fp, kws, dom, par)) for e in self.FIXTURE_ENTRIES
+             if inj._score_entry(e, fp, kws, dom, par) > 0.0],
             key=lambda x: -x[1],
         )[:3]
         full_descs = [e.get("description") for e, _ in full_scored]
@@ -510,7 +521,7 @@ class TestContractPreservation:
         idx_scored = sorted(
             [(e, inj._score_entry(e, fp, kws, dom, par), i)
              for i, e in enumerate(score_entries)
-             if inj._score_entry(e, fp, kws, dom, par) > 0.10],
+             if inj._score_entry(e, fp, kws, dom, par) > 0.0],
             key=lambda x: -x[1],
         )[:3]
         idx_descs = [
