@@ -115,8 +115,17 @@ reports `asserted`/`unverified`. `src/vise/core/consent.py` has the reasoning.
 Every hook in `src/vise/hooks/` must never break the user's session. A hook that
 raises takes Claude Code down with it, so broad `try/except/pass` around the
 outermost handler is the contract, not sloppiness. This is why `bandit` is
-gated at Medium and above — the 89 Low findings are all `B110`/`B112` on exactly
-these handlers.
+gated at Medium and above. There are 137 Low findings: 34 `B110`/`B112` on
+exactly those handlers, 88 `B404`/`B603`/`B607` on the `subprocess` calls the
+CLI and the validators are made of, 14 `B101` on asserts, and one `B105` that
+reads `PASS = "pass"` in an enum as a hardcoded password. This file said "the 89
+Low findings are all `B110`/`B112`", which was true of neither the count nor the
+composition — restate a number here only after running the command.
+
+Medium and above is zero and gates. Keep it there: `bandit` is the one check in
+CI that reads vise's own code for a security defect, and a High finding it
+raised on this branch (a `sha1` that was not for security) was correct about the
+ambiguity even though it was wrong about the risk.
 
 **A hook that fails open says so.** The outermost handler still swallows the
 exception, but it calls `hooks/_failsafe.note()` on the way past, and

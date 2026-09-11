@@ -315,8 +315,16 @@ def _seen_path(session_id: str) -> Path:
 
 
 def _seen_key(detail: dict) -> str:
+    """A digest of the rendered line, not of the entry.
+
+    `blake2b` with an 8-byte digest, which is 16 hex characters without a
+    truncation step. It is not sha1: this is a dedup key for "have I already
+    said this", with no security property to hold, and `bandit` is right that a
+    reader cannot tell those apart from the call alone — a hash whose weakness
+    does not matter and one whose weakness does look identical on the page.
+    """
     shown = f"{detail.get('description', '')[:80]}|{detail.get('resolution', '')[:100]}"
-    return hashlib.sha1(shown.encode("utf-8", "replace")).hexdigest()[:16]
+    return hashlib.blake2b(shown.encode("utf-8", "replace"), digest_size=8).hexdigest()
 
 
 def _load_seen(session_id: str) -> set[str]:
