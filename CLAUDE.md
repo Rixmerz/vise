@@ -68,6 +68,20 @@ Never pass `--fail-under` on a command line.
 - Tests go in `src/vise/tests/`, named `test_<subject>.py`. The autouse fixture
   in `conftest.py` redirects `$XDG_DATA_HOME`; never bypass it, or a test will
   clobber a real project's live workflow state.
+- **Everything committed here is in English** — code, comments, docstrings,
+  assets, the changelog, commit messages, PR titles and bodies. Not a style
+  preference: `orchestration` requires the agent channel to be English because
+  everything a subagent preloads is, and a repo that ships those assets while
+  writing its own tests in another language is not holding itself to the rule it
+  gates other repos on. Thirteen test files predate this and are still Spanish;
+  translate one when you are already editing it, not as a sweep. The Spanish in
+  `hooks/workflow_suggester.py` is different and stays — it is a regex matching
+  what a user types.
+- **No client or engagement names, ever.** Field reports are the best source of
+  rules this repo has, and they arrive from real client work. Describe the
+  *shape* of the system the failure happened in — "an Electron desktop app with
+  its own API" — and never who paid for it. This is a public repository, and the
+  one place the name cannot be taken back out of is a commit message.
 
 ### Gates fail closed — the other half of the rule
 
