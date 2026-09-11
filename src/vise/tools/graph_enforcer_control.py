@@ -25,6 +25,7 @@ from pathlib import Path
 
 from vise.core.session import resolve_project_dir
 from vise.engines.graph_state import _get_centralized_state_dir
+from vise.tools import _annotations as _ann
 
 
 def _config_path(project_dir: str) -> Path:
@@ -50,7 +51,7 @@ def _write_config(project_dir: str, cfg: dict) -> Path:
 
 def register_graph_enforcer_control_tools(mcp) -> None:
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_enforcer_toggle(
         enabled: bool,
         project_dir: str | None = None,
@@ -104,7 +105,7 @@ def register_graph_enforcer_control_tools(mcp) -> None:
             ),
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_enforcer_status(
         project_dir: str | None = None,
         session_id: str | None = None,

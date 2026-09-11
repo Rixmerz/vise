@@ -95,26 +95,96 @@ def test_a_stale_entry_scores_below_a_fresh_one_in_the_hook_too():
 # --- the formula itself ---------------------------------------------------
 
 
-def test_the_weights_sum_to_one():
-    """A set that does not still ranks, which is why the hook's 0.90 went
-    unnoticed: it produces a different order and no threshold in these units
-    means what it says."""
-    total = rel.W_PATH + rel.W_SEMANTIC + rel.W_DOMAIN + rel.W_CONFIDENCE + rel.W_RECENCY
-    assert total == pytest.approx(1.0)
+def test_the_match_weights_sum_to_one_and_a_perfect_entry_scores_one():
+    """A weight set that does not sum to one still ranks, which is why the
+    hook's 0.90 went unnoticed: it produces a different order and no threshold
+    in those units means what it says. The composite is a product now, so the
+    invariant moved to the match half — the three signals it combines."""
+    assert rel.match_score(path=1, semantic=1, domain=1) == pytest.approx(1.0)
+    assert rel.match_score(path=0, semantic=0, domain=0) == 0.0
     assert rel.relevance(path=1, semantic=1, domain=1, confidence=1,
                          last_seen=_iso(0), last_reviewed=_iso(0),
                          stability=10.0) == pytest.approx(1.0, abs=1e-3)
 
 
-@pytest.mark.parametrize("exact,same_dir,same_parent,expected", [
-    (True, False, False, 1.0),
-    (False, True, False, 0.7),
-    (False, False, True, 0.4),
-    (False, False, False, 0.0),
-    (True, True, True, 1.0),
+def test_confidence_cannot_carry_an_entry_that_matches_nothing():
+    """The defect the product exists to close. Under the sum, an entry with no
+    path, keyword or domain signal still scored `confidence * 0.15 + recency *
+    0.10`, so a much-repeated lesson about an unrelated file outranked lessons
+    that matched. On a target whose layout differs from the one the entry was
+    recorded against — the cross-project case — the right lesson came sixteenth
+    of eighteen."""
+    assert rel.relevance(path=0, semantic=0, domain=0, confidence=0.95,
+                         stability=10.0, last_reviewed=_iso(0),
+                         last_seen=_iso(0)) == 0.0
+
+
+def test_a_weak_match_is_dropped_and_the_floor_is_on_the_match_not_the_product():
+    """A correct lesson nobody has confirmed yet must still surface; a floor on
+    the product would hide it for being new."""
+    weak = dict(path=0.0, semantic=0.05, domain=0.0)
+    assert rel.match_score(**weak) < rel.MIN_MATCH
+    assert rel.relevance(**weak, confidence=0.95) == 0.0
+
+    fresh = dict(path=1.0, semantic=0.0, domain=0.0)
+    assert rel.match_score(**fresh) >= rel.MIN_MATCH
+    assert rel.relevance(**fresh, confidence=0.30) > 0.0
+
+
+@pytest.mark.parametrize("entry_kw,target_kw", [
+    (["caches", "tokens"], ["token", "cache"]),     # plural on the entry side
+    (["cache"], ["caches"]),                        # plural on the target side
+    (["caching"], ["cache"]),                       # gerund
+    (["retries"], ["retry"]),                       # y/ies
+    (["index"], ["indexes"]),                       # es
+    (["auth"], ["authentication"]),                 # abbreviation covers expansion
+    (["cancellation"], ["cancel"]),                 # and the other way round
 ])
-def test_the_path_tiers(exact, same_dir, same_parent, expected):
-    assert rel.path_score(exact=exact, same_dir=same_dir, same_parent=same_parent) == expected
+def test_morphological_variants_are_one_keyword(entry_kw, target_kw):
+    """Exact set intersection scored `caches`/`tokens` against `token_cache.py`
+    a flat zero, and that is the shape a cross-project lesson arrives in: the
+    recorder names the file it happened on and the next repository spells it
+    differently."""
+    assert rel.keyword_score(entry_kw, target_kw) == pytest.approx(1.0)
+
+
+def test_an_entry_is_not_punished_for_having_learned_more():
+    """Jaccard divided by the union, so vocabulary counted against the entry:
+    two keywords covering two of the target's three scored 0.667, and those
+    same two plus eighteen others scored 0.095. Vocabulary grows with
+    occurrences and so does confidence, so the term meant to find the
+    most-learned lesson ranked it last."""
+    target = ["token", "cache", "auth"]
+    sparse = ["token", "cache"]
+    rich = sparse + [f"unrelated{i}" for i in range(18)]
+    assert rel.keyword_score(rich, target) == rel.keyword_score(sparse, target)
+
+
+def test_unknown_is_not_a_domain():
+    """`general` is the guesser's fallback. Comparing it with `==` scored two
+    files it could not classify as a 0.20 domain match, which put a billing
+    lesson above a migration lesson on a migration file."""
+    assert rel.domain_score("general", "general") == 0.0
+    assert rel.domain_score("", "") == 0.0
+    assert rel.domain_score("auth", "auth") == 1.0
+    assert rel.domain_score("auth", "api") == 0.0
+
+
+@pytest.mark.parametrize("same_file,exact,same_dir,same_parent,expected", [
+    (True, True, True, True, 1.0),    # the pattern names the file
+    (False, True, False, False, 0.85),  # a glob covers it
+    (False, False, True, False, 0.7),
+    (False, False, False, True, 0.4),
+    (False, False, False, False, 0.0),
+    (False, True, True, True, 0.85),
+])
+def test_the_path_tiers(same_file, exact, same_dir, same_parent, expected):
+    assert rel.path_score(exact=exact, same_dir=same_dir,
+                          same_parent=same_parent, same_file=same_file) == expected
+
+
+def test_same_file_defaults_off_so_an_untaught_caller_keeps_its_behaviour():
+    assert rel.path_score(exact=True, same_dir=False, same_parent=False) == 0.85
 
 
 def test_confidence_is_weighted_by_decay_not_taken_at_face_value():
@@ -126,11 +196,14 @@ def test_confidence_is_weighted_by_decay_not_taken_at_face_value():
     the two scores.
     """
     seen = _iso(10)
-    recalled = rel.relevance(path=0, semantic=0, domain=0, confidence=1.0,
+    match = dict(path=1.0, semantic=1.0, domain=1.0)   # held equal and non-zero:
+    # the product scores an unmatched entry zero, which would satisfy every
+    # assertion below for a reason that has nothing to do with decay.
+    recalled = rel.relevance(**match, confidence=1.0,
                              stability=10.0, last_reviewed=_iso(0), last_seen=seen)
-    forgotten = rel.relevance(path=0, semantic=0, domain=0, confidence=1.0,
+    forgotten = rel.relevance(**match, confidence=1.0,
                               stability=10.0, last_reviewed=_iso(3000), last_seen=seen)
-    undecayed = rel.W_CONFIDENCE + rel.recency(seen) * rel.W_RECENCY
+    undecayed = rel.match_score(**match) * 1.0
 
     assert forgotten < recalled
     assert forgotten < undecayed * 0.9, "confidence reached the score undecayed"

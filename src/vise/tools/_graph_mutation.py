@@ -20,6 +20,7 @@ from vise.engines.graph_parser import GraphParseError
 from vise.engines.graph_state import (
     load_active_graph, save_graph_state, reset_graph_state,
 )
+from vise.tools import _annotations as _ann
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
 
 def register_graph_mutation_tools(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_task_complete(
         task_id: str,
         outputs: dict[str, str] | None = None,
@@ -143,7 +144,7 @@ def register_graph_mutation_tools(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_reset(project_dir: str | None = None, session_id: str | None = None) -> dict:
         # destructiveHint: True (clears graph state)
         """Reset graph to start node.
@@ -182,7 +183,7 @@ def register_graph_mutation_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_set_node(
         node_id: str,
         project_dir: str | None = None,
@@ -246,7 +247,7 @@ def register_graph_mutation_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_record_output(
         key: str,
         value: str,

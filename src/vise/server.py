@@ -7,6 +7,7 @@ import sys
 from fastmcp import FastMCP
 
 from vise import __version__
+from vise.tools import _annotations as _ann
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ mcp: FastMCP = FastMCP(
 )
 
 
-@mcp.tool()
+@_ann.annotated(mcp)
 def vise_version() -> dict[str, str]:
     """Return the installed vise version."""
     return {"version": __version__}

@@ -89,6 +89,9 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except SystemExit:
         raise
-    except Exception:
-        # Advisory hook: never break a tool call. Cause deliberately dropped.
+    except Exception as exc:
+        from vise.hooks import _failsafe
+        _failsafe.note("edit_feedback", exc)
+        # Advisory hook: never break a tool call. The cause no longer vanishes
+        # with the exit — it goes to the fail-open ledger above.
         raise SystemExit(0) from None

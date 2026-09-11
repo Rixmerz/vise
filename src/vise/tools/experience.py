@@ -19,15 +19,16 @@ from vise.engines.experience_memory import (
     guess_domain,
     merge_stores,
 )
+from vise.tools import _annotations as _ann
 
 
 def register_experience(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def experience_query(
         file_path: str,
         top_n: int = 5,
-        min_score: float = 0.5,
+        min_score: float = 0.0,
         scope: str = "project",
         project_dir: str | None = None,
         session_id: str | None = None
@@ -41,7 +42,10 @@ def register_experience(mcp):
         Args:
             file_path: Path to the file to query about (relative or absolute)
             top_n: Maximum number of results to return (default 5)
-            min_score: Minimum relevance score to include (default 0.5).
+            min_score: Extra floor on the composite score (default 0.0).
+                `relevance` already drops anything under MIN_MATCH; this
+                narrows further. It was 0.5 when the score was a weighted
+                sum — in the product those units mean something else.
                 At 0.3 a greenfield project's queries still surface
                 unrelated global entries with fuzzy path matches;
                 0.5 filters those out while still catching real hits.
@@ -136,7 +140,7 @@ def register_experience(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def experience_record(
         type: str,
         file_path: str,
@@ -235,7 +239,7 @@ def register_experience(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def experience_list(
         type_filter: str | None = None,
         scope_filter: str | None = None,
@@ -302,7 +306,7 @@ def register_experience(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def experience_stats(
         project_dir: str | None = None,
         session_id: str | None = None
@@ -336,7 +340,7 @@ def register_experience(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def experience_derive_checklist(
         project_dir: str | None = None,
         task_type: str = "bounded_context",

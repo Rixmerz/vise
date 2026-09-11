@@ -22,6 +22,7 @@ from vise.engines.graph_parser import GraphParseError
 from vise.engines.graph_state import (
     load_active_graph, get_node_visit_warning, NoActiveWorkflowError,
 )
+from vise.tools import _annotations as _ann
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ def _load_active_graph(project_dir: str) -> tuple[Graph, GraphState]:
 
 def register_graph_query_tools(mcp):
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_status(project_dir: str | None = None, session_id: str | None = None) -> dict:
         # readOnlyHint: True
         """Get current graph workflow status: current node, available edges, visits.
@@ -178,7 +179,7 @@ def register_graph_query_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_get_ready_tasks(
         project_dir: str | None = None,
         session_id: str | None = None,
@@ -238,7 +239,7 @@ def register_graph_query_tools(mcp):
             "project_dir": resolved_dir,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_check_tool(
         mcp_name: str,
         tool_name: str,
@@ -303,7 +304,7 @@ def register_graph_query_tools(mcp):
             "project_dir": resolved_dir
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def graph_check_phrase(
         text: str,
         project_dir: str | None = None,

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
+from vise.tools import _annotations as _ann
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def _missing(run_id: str, state_dir: str | None) -> dict[str, Any]:
 def register_runtime(mcp: FastMCP) -> None:
     """Register the agent-runtime tool family on *mcp*."""
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def agent_list() -> dict[str, Any]:
         """List the agents the runtime can route work to.
 
@@ -75,7 +76,7 @@ def register_runtime(mcp: FastMCP) -> None:
             "ambiguous_roles": ambiguous,
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_plan(
         graph_path: str,
         node_id: str | None = None,
@@ -130,7 +131,7 @@ def register_runtime(mcp: FastMCP) -> None:
         payload["rendered"] = result.render()
         return payload
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_list(limit: int = 20, state_dir: str | None = None) -> dict[str, Any]:
         """List recorded runs, newest first."""
         runs_dir = _root(state_dir) / "runs"
@@ -156,7 +157,7 @@ def register_runtime(mcp: FastMCP) -> None:
             })
         return {"runs": out, "count": len(out)}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_status(run_id: str, state_dir: str | None = None) -> dict[str, Any]:
         """Where one run stands: every task, its state, and what it cost."""
         state = _load(state_dir, run_id)
@@ -175,7 +176,7 @@ def register_runtime(mcp: FastMCP) -> None:
             "budget": state.ledger.report(),
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def task_list(run_id: str, state_dir: str | None = None) -> dict[str, Any]:
         """One run's tasks, their states, and which agent and model ran each."""
         state = _load(state_dir, run_id)
@@ -197,7 +198,7 @@ def register_runtime(mcp: FastMCP) -> None:
             ],
         }
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_explain(run_id: str, limit: int = 200, state_dir: str | None = None) -> dict[str, Any]:
         """Every scheduler decision for one run, in order.
 
@@ -212,7 +213,7 @@ def register_runtime(mcp: FastMCP) -> None:
         return {"run_id": run_id, "goal": state.spec.goal, "events": events,
                 "truncated": len(state.events) > len(events)}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_budget(run_id: str, state_dir: str | None = None) -> dict[str, Any]:
         """What one run cost, per task, and which ceilings were never set."""
         state = _load(state_dir, run_id)
@@ -220,7 +221,7 @@ def register_runtime(mcp: FastMCP) -> None:
             return _missing(run_id, state_dir)
         return {"run_id": run_id, **state.ledger.report()}
 
-    @mcp.tool()
+    @_ann.annotated(mcp)
     def run_cancel(run_id: str, state_dir: str | None = None) -> dict[str, Any]:
         """Ask a running scheduler to stop before its next dispatch.
 

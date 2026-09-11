@@ -299,5 +299,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
+        from vise.hooks import _failsafe
+        _failsafe.note("codelayer_gate", exc)
         print(json.dumps({"decision": "approve"}))

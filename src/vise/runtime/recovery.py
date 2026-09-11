@@ -15,13 +15,19 @@ classification rather than from whoever is writing the log line.
 Everything here is a pure function of a result and its history. No model call,
 no I/O, no clock — the decision has to be reproducible from the record, or
 ``vise runtime explain`` is reconstructing a guess.
+
+``retry_delay_s`` is the one function that needs a random draw, and it takes it
+as a parameter rather than reaching for one. ``decide`` stays clock-free and
+draw-free: *what* to do next is reproducible from the record, and only *when*
+is not.
 """
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from enum import StrEnum
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from vise.runtime.contracts import (
     REPLAN_KINDS,
@@ -53,6 +59,54 @@ DEFAULT_MAX_ENV_RETRIES = 1
 #: same judgement — when do two prose blobs describe one thing. A second, freshly
 #: invented number for it would mean one of the two is unexamined.
 SAME_ANSWER_RATIO: float = 0.85
+
+#: How long to wait before the first retry, in seconds. A retry answers a
+#: failure *outside* the work — a rate limit, a saturated API, a machine still
+#: finishing an install. None of those clear in the milliseconds it takes to
+#: decide, so a retry dispatched immediately spends the attempt on a question
+#: whose answer cannot have changed. Measured before this existed: the second
+#: attempt landed 2.5 ms after the first.
+RETRY_BASE_S: float = 5.0
+
+#: No single wait exceeds this, however many retries a task has taken. Four
+#: attempts against a 900 s worker timeout make the arithmetic easy: the ladder
+#: adds tens of seconds to a run that was going to spend minutes.
+RETRY_CAP_S: float = 60.0
+
+
+def retry_delay_s(
+    retries_taken: int,
+    *,
+    base_s: float = RETRY_BASE_S,
+    rand: Callable[[], float] = random.random,
+) -> float:
+    """How long to wait before attempting this task again at the same rung.
+
+    Exponential in the retries already taken and capped. The jitter is the half
+    that is not optional: backoff alone leaves N workers that were rate-limited
+    together retrying together, which is the herd that produced the rate limit.
+    Measured before this existed: five parallel retries inside a 1.1 ms window.
+
+    **Equal jitter, not full jitter.** ``U(0, d)`` is the usual recommendation
+    and decorrelates better, and it is wrong here: an environment failure gets
+    one retry, and a draw near zero spends it inside the very window the delay
+    exists to outlast. Half the delay is guaranteed and the other half drawn, so
+    the floor holds and the workers still spread.
+
+    ``rand`` is a parameter so a caller can reproduce any delay the runtime
+    chose. Values outside ``[0, 1]`` are clamped rather than trusted — a stub
+    that returns 3.0 should not produce a delay above the cap.
+
+    ``base_s`` of zero or less returns zero: no wait, and no jitter on top of
+    no wait. That is what a test drives to keep the suite fast, so it has to
+    mean *nothing happens* rather than *something small happens*.
+    """
+    if base_s <= 0:
+        return 0.0
+    ceiling = min(RETRY_CAP_S, base_s * 2 ** max(0, retries_taken))
+    half = ceiling / 2
+    return half + half * max(0.0, min(1.0, rand()))
+
 
 
 class Recovery(StrEnum):

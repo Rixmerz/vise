@@ -20,6 +20,7 @@ Treat those files with the same care as the code.
 | `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
+| `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |
 
@@ -114,8 +115,28 @@ reports `asserted`/`unverified`. `src/vise/core/consent.py` has the reasoning.
 Every hook in `src/vise/hooks/` must never break the user's session. A hook that
 raises takes Claude Code down with it, so broad `try/except/pass` around the
 outermost handler is the contract, not sloppiness. This is why `bandit` is
-gated at Medium and above — the 89 Low findings are all `B110`/`B112` on exactly
-these handlers.
+gated at Medium and above. There are 137 Low findings: 34 `B110`/`B112` on
+exactly those handlers, 88 `B404`/`B603`/`B607` on the `subprocess` calls the
+CLI and the validators are made of, 14 `B101` on asserts, and one `B105` that
+reads `PASS = "pass"` in an enum as a hardcoded password. This file said "the 89
+Low findings are all `B110`/`B112`", which was true of neither the count nor the
+composition — restate a number here only after running the command.
+
+Medium and above is zero and gates. Keep it there: `bandit` is the one check in
+CI that reads vise's own code for a security defect, and a High finding it
+raised on this branch (a `sha1` that was not for security) was correct about the
+ambiguity even though it was wrong about the risk.
+
+**A hook that fails open says so.** The outermost handler still swallows the
+exception, but it calls `hooks/_failsafe.note()` on the way past, and
+`session_restore` reads the ledger out at the next `SessionStart` and clears it.
+Without that, an experience went unrecorded, a blocker went unsurfaced, a
+snapshot went untaken — and the user saw a session that worked. This is the same
+distinction the neighbours section draws: absent and unreadable are different,
+and "could not tell" has to report something. The ledger is standard library
+only and every function in it swallows its own errors, because it is what runs
+when something else has already broken; losing a note is acceptable, raising
+from there is not. A new hook wires its outermost handler to it.
 
 ## Assets are asserted, not trusted
 
@@ -130,6 +151,7 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_asset_coverage.py` | every validator in the registry is documented in the README — a workflow author cannot use one they cannot find |
 | `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
 | `test_neighbour_contract.py` | every tool name an asset teaches belongs to vise or to a neighbour in `core/neighbours.py` — and every pinned name is still referenced somewhere |
+| `test_tool_annotations.py` | every MCP tool declares what it does to the world, the four hints are internally consistent, and the four destructive ones say so in the title a host shows |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.
@@ -191,3 +213,26 @@ here could have caught it. So:
   to any script or CI step.
 - Don't commit anything into `.claude/` expecting users to get it — that
   directory is vise's own dev setup and ships to nobody.
+- Don't register an MCP tool with a bare `@mcp.tool()`. Use
+  `@_ann.annotated(mcp)` and add the tool to the table in `tools/_annotations.py`.
+  The host renders a tool's name, its title and its raw arguments when it asks a
+  person to approve a call, and nothing else — unannotated, `graph_status`, which
+  reads a JSON file, and `snapshot_restore`, which overwrites the working tree,
+  arrive looking alike. An unlisted name gets the most cautious hints at runtime
+  and fails `test_tool_annotations.py` in CI.
+- Don't rank experience entries by adding a match score to a confidence score.
+  `engines/relevance.py` multiplies instead, and the docstring says why: a
+  probability scales evidence, it does not substitute for it. Under the old sum,
+  an entry that matched nothing at all still scored `confidence * 0.15` and
+  outranked entries that matched.
+- Don't make the scheduler wait by sleeping. A retry's backoff lives on the task
+  as `not_before` and the dispatch loop skips it; a `time.sleep` in the collect
+  or dispatch path holds the whole loop, so one task waiting out a rate limit
+  freezes every healthy task in the run. The same edit has a second trap: the
+  loop breaks when nothing dispatched and nothing is in flight, so a task that is
+  only waiting must be distinguished from one that is blocked, or the retry never
+  happens *and* the recorded reason is wrong.
+- Don't give an escalation a backoff. `retry` answers a failure outside the work
+  and waits for it to clear; `escalate` runs a bigger model against the same
+  task and is waiting for nothing. Conflating them is the same mistake
+  `recovery.py` exists to prevent, priced in wall clock instead of dollars.

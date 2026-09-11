@@ -62,10 +62,12 @@ Key optimisations vs original O(N) scan:
   5. Inlined _common helpers: eliminates sys.path.insert + module read (~7 ms)
 """
 
+import hashlib
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path, PurePosixPath
 
 from vise.engines import relevance as _relevance
@@ -285,6 +287,72 @@ def _up(path: str) -> str:
     return head or "."
 
 
+# ---------------------------------------------------------------------------
+# Say it once per session
+# ---------------------------------------------------------------------------
+#
+# This hook runs on every Write and Edit. It re-scored the store and re-printed
+# the same top three every time, so editing one file ten times delivered the
+# same three lessons ten times. The tokens are the smaller half of the cost:
+# a block that repeats verbatim is one a reader learns to skip, and a memory an
+# agent has learned to skip is not a memory.
+#
+# What is remembered is a digest of the line the agent actually saw, not the
+# entry — two entries that render identically are one message to the reader —
+# and a digest rather than the prose so lesson text does not get a second copy
+# on disk.
+
+#: Ledgers older than this are swept on write. A session is over long before.
+_SEEN_TTL_DAYS = 7.0
+
+#: A session cannot deliver more than this many distinct lessons. Far above any
+#: real session; it bounds the file rather than shaping behaviour.
+_SEEN_CAP = 500
+
+
+def _seen_path(session_id: str) -> Path:
+    return _xdg.data_dir() / "injected" / f"{session_id}.json"
+
+
+def _seen_key(detail: dict) -> str:
+    """A digest of the rendered line, not of the entry.
+
+    `blake2b` with an 8-byte digest, which is 16 hex characters without a
+    truncation step. It is not sha1: this is a dedup key for "have I already
+    said this", with no security property to hold, and `bandit` is right that a
+    reader cannot tell those apart from the call alone — a hash whose weakness
+    does not matter and one whose weakness does look identical on the page.
+    """
+    shown = f"{detail.get('description', '')[:80]}|{detail.get('resolution', '')[:100]}"
+    return hashlib.blake2b(shown.encode("utf-8", "replace"), digest_size=8).hexdigest()
+
+
+def _load_seen(session_id: str) -> set[str]:
+    try:
+        return set(json.loads(_seen_path(session_id).read_bytes()))
+    except Exception:
+        return set()
+
+
+def _save_seen(session_id: str, keys: set[str]) -> None:
+    """Best effort. A ledger that cannot be written costs a repeat, not a crash."""
+    try:
+        path = _seen_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cutoff = time.time() - _SEEN_TTL_DAYS * 86400.0
+        for stale in path.parent.glob("*.json"):
+            try:
+                if stale.stat().st_mtime < cutoff:
+                    stale.unlink()
+            except OSError:
+                pass
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(sorted(keys)[:_SEEN_CAP]), encoding="utf-8")
+        tmp.replace(path)
+    except Exception:
+        pass
+
+
 def _score_entry(
     entry: dict,
     target_path: str,
@@ -301,23 +369,21 @@ def _score_entry(
     but what they are worth is not decided here any more.
     """
     pattern = entry.get("file_pattern", "")
-    exact = same_dir = same_parent = False
+    exact = same_dir = same_parent = same_file = False
     if pattern:
         entry_parent = entry.get("_parent") or str(Path(pattern).parent)
         exact = _fast_glob_match(pattern, target_path)
+        same_file = pattern == target_path
         same_dir = entry_parent == target_parent
         grand = _up(entry_parent)
         same_parent = grand == _up(target_parent) and grand != "."
 
-    entry_kws = set(entry.get("keywords", []))
-    kw_score = 0.0
-    if entry_kws and target_kws:
-        kw_score = len(entry_kws & target_kws) / len(entry_kws | target_kws)
-
     return _relevance.relevance(
-        path=_relevance.path_score(exact=exact, same_dir=same_dir, same_parent=same_parent),
-        semantic=kw_score,
-        domain=1.0 if entry.get("domain") == target_domain else 0.0,
+        path=_relevance.path_score(
+            exact=exact, same_dir=same_dir, same_parent=same_parent, same_file=same_file,
+        ),
+        semantic=_relevance.keyword_score(entry.get("keywords", ()), target_kws),
+        domain=_relevance.domain_score(entry.get("domain", ""), target_domain),
         confidence=entry.get("confidence", 0.3),
         stability=float(entry.get("stability") or 0.0),
         last_reviewed=str(entry.get("last_reviewed") or ""),
@@ -363,6 +429,11 @@ def main() -> None:
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     project_name = Path(project_dir).name if project_dir else ""
 
+    # No session id means no ledger to keep, so nothing is suppressed. Repeating
+    # is the safe failure here: the alternative is silence the agent cannot ask
+    # about.
+    session_id = str(hook_input.get("session_id") or "")
+
     target_kws = set(_extract_keywords(file_path))
     target_domain = _guess_domain(file_path)
     target_parent = str(Path(file_path).parent)
@@ -406,21 +477,41 @@ def main() -> None:
     for i, entry in enumerate(score_entries):
         s = _score_entry(entry, file_path, target_kws, target_domain, target_parent)
         s *= _project_multiplier(entry.get("project_origin", ""), project_name)
-        if s > 0.10:
+        if s > 0.0:
             scored.append((entry, s, i if using_index else -1))
 
     for entry in proj_extra:
         s = _score_entry(entry, file_path, target_kws, target_domain, target_parent)
         s *= _project_multiplier(entry.get("project_origin", ""), project_name)
-        if s > 0.10:
+        if s > 0.0:
             scored.append((entry, s, -1))
 
     scored.sort(key=lambda x: x[1], reverse=True)
-    top3 = scored[:3]
+
+    def _detail_for(entry: dict, detail_idx: int) -> dict:
+        if 0 <= detail_idx < len(detail_entries):
+            return detail_entries[detail_idx]
+        return entry  # cold path or project entry — all fields present
+
+    # Filter BEFORE the cut, not after: when the best three were already
+    # delivered this session, the next edit surfaces the best three that were
+    # not, instead of going silent while a fourth relevant lesson waits. What
+    # bounds the tail is MIN_MATCH, which already scored the irrelevant zero.
+    seen = _load_seen(session_id) if session_id else set()
+    fresh = []
+    for entry, score, detail_idx in scored:
+        key = _seen_key(_detail_for(entry, detail_idx))
+        if key not in seen:
+            fresh.append((entry, score, detail_idx, key))
+
+    top3 = fresh[:3]
 
     if not top3:
         print(approve)
         return
+
+    if session_id:
+        _save_seen(session_id, seen | {k for *_, k in top3})
 
     # ---- output -------------------------------------------------------------
     filename = Path(file_path).name
@@ -428,11 +519,8 @@ def main() -> None:
         f"⚡ Experience Memory "
         f"({len(top3)} match{'es' if len(top3) > 1 else ''} for {filename}):"
     ]
-    for entry, score, detail_idx in top3:
-        if detail_idx >= 0 and detail_idx < len(detail_entries):
-            detail = detail_entries[detail_idx]
-        else:
-            detail = entry  # cold path or project entry — all fields present
+    for entry, score, detail_idx, _key in top3:
+        detail = _detail_for(entry, detail_idx)
 
         occurrences = detail.get("occurrences", 1)
         desc = detail.get("description", "")[:80]
@@ -450,5 +538,7 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as exc:
+        from vise.hooks import _failsafe
+        _failsafe.note("experience_injector", exc)
         print(json.dumps({"decision": "approve"}))

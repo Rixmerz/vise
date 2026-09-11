@@ -237,8 +237,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     q.add_argument("--json", action="store_true", help="Emit JSON")
     q.add_argument("--top-n", type=int, default=5, dest="top_n", metavar="N",
                    help="maximum results to return (default: 5)")
-    q.add_argument("--min-score", type=float, default=0.5, dest="min_score", metavar="F",
-                   help="minimum relevance score (default: 0.5)")
+    q.add_argument("--min-score", type=float, default=0.0, dest="min_score", metavar="F",
+                   help="extra floor on the composite score (default: 0.0)")
     q.add_argument(
         "--scope",
         default="project",
