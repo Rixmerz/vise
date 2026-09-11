@@ -82,6 +82,17 @@ Never pass `--fail-under` on a command line.
   *shape* of the system the failure happened in — "an Electron desktop app with
   its own API" — and never who paid for it. This is a public repository, and the
   one place the name cannot be taken back out of is a commit message.
+- **A field report is generalized, never transcribed.** An incident arrives as a
+  specific failure in a specific system, and the specifics are what make it
+  credible to the person who lived it. What belongs in an asset is the *shape*:
+  the behaviour that went wrong, and the check that would have caught it. The
+  test of a rule is whether it fires on a repository that shares none of the
+  reporting system's vocabulary — and an example written in that vocabulary
+  narrows the rule to readers who already know it. Generic technology stays:
+  a test runner's include globs, a root `tsconfig.json`, an exhaustive `switch`
+  over a union. The reporting system's business language and its own symbol
+  names do not — quoting them ships someone else's context inside guidance that
+  runs in every repo that installs vise.
 
 ### Gates fail closed — the other half of the rule
 

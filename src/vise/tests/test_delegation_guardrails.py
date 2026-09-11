@@ -209,11 +209,12 @@ def test_the_orchestrator_owns_the_shared_config_files(orchestration: str):
 # --- case 1.1: the direction of the money, inverted in the brief -----------
 
 def test_a_directional_claim_must_cite_the_line_that_establishes_it(orchestration: str):
-    """The worst incident in the report. The design document said adding one
-    a filter's direction backwards. The agent derived the interface
-    copy from it faithfully and the result was inverted in both directions, on
-    the screen shown just before the button that moves real money. No test
-    could catch it: the code was right and the prose was what lied."""
+    """The worst incident in the report. The design document stated a filter's
+    direction backwards — adding an entry to a list was described as including
+    it where the code excludes it. The agent derived the interface copy from
+    that faithfully and the result was inverted in both directions, on the
+    screen a person reads immediately before acting. No test could catch it:
+    the code was right and the prose was what lied."""
     assert "Verify every directional claim against the code" in orchestration
     assert "the code is correct and the prose is what lies" in orchestration
     assert "does not produce a wrong agent, it produces a wrong product" in orchestration
@@ -223,10 +224,9 @@ def test_a_directional_claim_must_cite_the_line_that_establishes_it(orchestratio
 
 def test_a_contract_is_quoted_not_paraphrased(orchestration: str):
     """The same mistake three times: the brief described from memory what
-    another agent was building. A field named for what the brief remembered
-    rather than what the code returns, an unmentioned required parameter
-    answering 400, and a type shape that turned out to be a different state
-    machine."""
+    another agent was building. A field remembered under a shorter name than
+    the code returns, an unmentioned required parameter answering 400, and a
+    type shape that turned out to be a different state machine."""
     assert "A contract between two agents is quoted, never paraphrased" in orchestration
     assert "path:line" in orchestration
     assert "two agents building faithfully against two different texts" in orchestration
@@ -248,8 +248,8 @@ def test_the_type_set_is_resolved_as_well_as_the_caller_set(orchestration: str):
 
 def test_a_comment_may_not_describe_a_file_you_do_not_own(baseline: str):
     """True when written and false when it landed: the other agent added the
-    very join the comment said was absent. In parallel work that expires with nothing
-    to announce it."""
+    very join the comment said was absent. In parallel work that expires with
+    nothing to announce it."""
     assert "Never describe the current state of a file you do not own" in baseline
     assert "lands in someone else's diff" in baseline
 
