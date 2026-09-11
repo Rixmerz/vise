@@ -6,6 +6,101 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a27] — 2026-09-10
+
+### Fixed — bootstrap bound the wrong package manager on every pnpm, yarn and bun repo
+
+`unit` was tabulated as `npm test --silent` and bound on the strength of
+`shutil.which("npm")` alone, which is true on any machine with Node. So it bound
+*always*: in the wrong package manager on a pnpm or yarn workspace, where it
+resolves against a different store and a different workspace protocol, and on
+repos with no test script at all, where `npm test` fails for having nothing to
+run. `npm audit` had the same problem. Detection never opened `package.json`,
+which is where the answer had been the whole time.
+
+Node's candidates are now read off the manifest: `packageManager` first (what
+corepack reads), then the lockfile, then npm; and `scripts.test` / `scripts.lint`
+/ `scripts.typecheck` name the command. A declared script outranks a linter
+config file on disk — it is the project saying "this is how you lint me". On a
+repo declaring `packageManager: pnpm@9` with those three scripts, detection went
+from one wrong bind to four right ones.
+
+`unit` gets no binary fallback: a test runner with no script behind it is a
+guess about arguments. A check with no candidate at all still appears under
+"Not bound", naming what to add — a gap nobody can see is one nobody accepts
+knowingly.
+
+### Changed — bootstrap sets the two gate variables instead of asking you to
+
+`tests_pass` and `lint_pass` do not read `.vise/quality.yaml`. They read
+`VISE_TEST_CMD` and `VISE_LINT_CMD` from the environment. So the same fact —
+which command runs the tests here — has to reach two places, and bootstrap wrote
+one and printed the other with instructions to paste it.
+
+It now writes both. The reasoning for not touching `.claude/settings.json` was
+that the file is the user's and holds things vise has no business touching, and
+that half is kept exactly: an existing value is never replaced, a file that will
+not parse is never overwritten, no other key is read or written, and the write is
+atomic. The other half was the mistake — detection had already computed the
+command, and the consequence of nobody pasting it is a `tests_pass` gate running
+`pytest` on a Node repo, reporting `unverified`, and reading as green. A step
+that must be done by hand for the tool to be honest is a step the tool should do.
+
+`vise bootstrap --no-settings` prints them and changes nothing.
+
+### Added — eight rules from a second field report
+
+A second field report — an Electron desktop app with its own API, migrated
+and restyled — recorded 26 incidents across 11 subagents in five waves.
+Four of the thirteen causes already had mitigations from `0.1.0a25` and behaved
+as intended: an agent quoted "the same value discriminates nothing" while fixing
+an empty test, another discarded an invalid mutation on its own, a third reported
+a `pending splice` rather than editing a file it did not own, and findings
+written to disk survived an agent that died with its session. What follows is
+what that round did not cover.
+
+**`engineering-baseline`** — the file all 22 charters preload:
+
+- **New code is not covered until the runner counts it.** Seventeen tests
+  outside a `vitest.config.ts` include glob never ran and the suite stayed
+  green; a package missing from the root `tsconfig.json` passed `--noEmit`
+  without being read. An absent test is not a failing test, and the difference
+  is in the count, not the colour.
+- **A suite that did not run is neither passing nor failing.** A mutation
+  leaving a syntax error and reporting "no tests" has proved nothing.
+- **Never describe the current state of a file you do not own.** True when
+  written, false when it landed: the other agent added the very join the
+  comment said was absent.
+- **Diff the manifest after a generator runs.** A component CLI emitted an
+  import of a bare `cn` module across sixteen files and installed the unrelated
+  npm package of that name to satisfy it, plus two more nobody asked for
+  (CWE-1357).
+- **A command that can ask you a question** — a prompt has no answer without a
+  TTY, and piping into it does not help, because it reads the terminal rather
+  than stdin. A prompt asking for a credential is a stop, not a puzzle to
+  automate.
+
+**`orchestration`** — the coordinator's half:
+
+- **Verify every directional claim against the code before it goes in the
+  brief.** The worst incident of the session: a design document stated the
+  direction of a filter backwards — adding an entry to a list was described as
+  *including* it where the code *excludes* it. The agent derived the interface
+  copy from that faithfully, and the result was inverted in both directions, on
+  the screen a person reads immediately before acting. No test could catch it —
+  the code was right and the prose was what lied.
+- **Resolve the type set, not just the caller set.** Adding a member to a union
+  changes no signature, so the existing caller-set pass never fires — and it
+  broke an exhaustive `Record` in another agent's file and a validation schema
+  that then 400'd every row carrying the new value.
+- **A contract between two agents is quoted, never paraphrased**, with its
+  `path:line`. Three incidents were the same omission: a field named for what
+  the brief remembered rather than what the code returns, an unmentioned
+  required parameter answering 400, and a type described from memory that
+  turned out to be a different state machine.
+- **Shared config files need a named owner in the wave.** Unowned, they are the
+  one thing no agent touches and no gate misses.
+
 ## [0.1.0a26] — 2026-09-10
 
 ### Added — a credential in a commit message no longer crosses repositories

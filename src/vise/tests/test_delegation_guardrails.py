@@ -172,3 +172,118 @@ def test_a_cloned_profile_is_not_an_approved_one(orchestration: str):
     """Presence is not approval — the same absent/unreadable distinction the
     rest of vise runs on."""
     assert "was never approved on this machine" in orchestration
+
+
+# ===========================================================================
+# Segundo informe de campo — una app de escritorio Electron con su propia
+# API, migrada y restilada: 26 incidentes en 11 subagentes.
+#
+# Cuatro de las trece causas ya tenían mitigación de la tanda anterior y se
+# comportaron como se esperaba: un agente citó "el mismo valor no discrimina
+# nada" al arreglar un test vacío, otro descartó una mutación inválida solo,
+# un tercero reportó un `pending splice` en vez de exportar un archivo ajeno,
+# y los hallazgos escritos a disco sobrevivieron a un agente que murió con la
+# sesión. Lo que sigue pinea lo que ESA tanda no cubría.
+# ===========================================================================
+
+# --- caso 5.1: un criterio de aceptación verde por no haber mirado ---------
+
+def test_the_baseline_makes_the_runner_prove_it_saw_the_new_code(baseline: str):
+    """17 tests fuera de los globs de `include` no corrieron y la suite quedó
+    verde; el `tsconfig.json` raíz no incluía el paquete nuevo y `tsc --noEmit`
+    pasó sin leerlo. Un test ausente no es un test rojo, y la diferencia no se
+    ve en el color — se ve en el conteo."""
+    assert "New code is not covered until you have seen the runner count it" in baseline
+    assert "Note the test count before and after" in baseline
+    assert "root `tsconfig.json` passes `--noEmit` without being read" in baseline
+
+
+def test_the_orchestrator_owns_the_shared_config_files(orchestration: str):
+    """La otra mitad: esos dos archivos no eran de nadie. El agente los
+    arregló por iniciativa propia y lo marcó — no se puede contar con eso."""
+    assert "Config files that describe the whole repo need an owner" in orchestration
+    assert "no agent touches and no gate misses" in orchestration
+
+
+# --- caso 1.1: la dirección del dinero, invertida en el brief --------------
+
+def test_a_directional_claim_must_cite_the_line_that_establishes_it(orchestration: str):
+    """El caso más grave del informe. El documento de diseño decía "agregar uno
+    devuelve de más" y el código hace lo contrario; el agente derivó el texto
+    de la interfaz fielmente y quedó invertido en ambas direcciones, justo
+    antes del botón que mueve plata real. Ningún test podía atraparlo: el
+    código estaba bien y lo que mentía era la prosa."""
+    assert "Verify every directional claim against the code" in orchestration
+    assert "the code is correct and the prose is what lies" in orchestration
+    assert "does not produce a wrong agent, it produces a wrong product" in orchestration
+
+
+# --- casos 2.1/2.2/2.3: el contrato adivinado ------------------------------
+
+def test_a_contract_is_quoted_not_paraphrased(orchestration: str):
+    """Tres veces el mismo error: el brief describía de memoria lo que otro
+    agente estaba construyendo. un campo recordado con un nombre más corto
+    obligatorio que devuelve 400 y no estaba mencionado, y la forma de un tipo
+    que resultó ser otra máquina de estados."""
+    assert "A contract between two agents is quoted, never paraphrased" in orchestration
+    assert "path:line" in orchestration
+    assert "two agents building faithfully against two different texts" in orchestration
+
+
+# --- casos 4.1/4.2: partición por archivo contra acoplamiento de tipos -----
+
+def test_the_type_set_is_resolved_as_well_as_the_caller_set(orchestration: str):
+    """Agregar dos valores a una unión no cambia ninguna firma, así que el
+    pase de llamadores no dispara — y rompió un `Record` exhaustivo en un
+    archivo ajeno, y un esquema de validación que devolvía 400 a cada fila con
+    un valor que nadie le había contado."""
+    assert "the type set" in orchestration
+    assert "changes no signature, so the pass above never fires" in orchestration
+    assert "400s every row carrying a value nobody told it about" in orchestration
+
+
+# --- caso 6.2: un comentario sobre un archivo ajeno ------------------------
+
+def test_a_comment_may_not_describe_a_file_you_do_not_own(baseline: str):
+    """Era verdad al escribirlo y mentira al aterrizar: el otro agente agregó
+    el join que el comentario negaba. En trabajo paralelo eso caduca sin
+    que nada avise."""
+    assert "Never describe the current state of a file you do not own" in baseline
+    assert "lands in someone else's diff" in baseline
+
+
+# --- caso 10.1: el CLI que instaló paquetes que nadie pidió ----------------
+
+def test_the_baseline_makes_you_diff_the_manifest_after_a_generator(baseline: str):
+    """`shadcn` escribió `import { cn } from "cn"` en 16 archivos y agregó el
+    paquete `cn` de npm —sin relación con el alias del proyecto— a
+    `dependencies`, más `next-themes` y `sonner` en una app que no es Next."""
+    assert "diff the manifest and account for every dependency it added" in baseline
+    assert "typosquat of the alias you meant" in baseline
+    assert "CWE-1357" in baseline
+
+
+# --- caso 11.1: un CLI interactivo sin TTY --------------------------------
+
+def test_the_baseline_names_the_prompt_that_hangs(baseline: str):
+    """`drizzle-kit generate` pregunta si una columna es nueva o un renombre.
+    Sin TTY espera para siempre, y `printf '\\n\\n' |` no sirve porque el prompt
+    lee del terminal, no de stdin."""
+    assert "Running a command that can ask you a question" in baseline
+    assert "a prompt reads the terminal, not stdin" in baseline
+    assert "drive it with `expect`" in baseline
+
+
+def test_a_credential_prompt_is_a_stop_not_an_automation_target(baseline: str):
+    """El corolario que evita que la regla anterior enseñe lo contrario."""
+    assert "is a stop, not a puzzle to automate" in baseline
+
+
+# --- caso 12.2: una mutación inválida no prueba nada -----------------------
+
+def test_a_suite_that_did_not_run_is_neither_passing_nor_failing(baseline: str):
+    """La mutación dejó un error de sintaxis y vitest reportó `no tests`. El
+    agente lo descartó solo —"eso no es evidencia de nada"— pero la regla no
+    estaba escrita; confundirlas convierte la mutación en teatro."""
+    assert "A suite that did not run is neither passing nor failing" in baseline
+    assert "Read the count, not the colour." in baseline

@@ -194,7 +194,7 @@ buys that work twice at that rate.
 - Within a wave, everything runs concurrently. Do not serialize work that
   shares no files and no data dependency.
 
-## Resolve the caller set before you dispatch the wave
+## Resolve the caller set — and the type set — before you dispatch the wave
 
 If a wave will change the parameters or return type of a symbol used outside
 its own file, resolve that symbol's references **before** dispatching: the
@@ -219,6 +219,34 @@ A missing server never blocks the dispatch — it downgrades the evidence.
 
 A wave that only adds new code, touching no existing signature, needs none of
 this. Skip it and dispatch.
+
+**The same applies to a type, and this is the one people miss.** Adding a member
+to a union or a field to a record changes no signature, so the pass above never
+fires — and yet every exhaustive `switch`, every `Record<TheUnion, …>` and every
+validation schema keyed on that type now fails to compile or silently rejects
+the new value, in files the agent that changed the type does not own. Resolve
+what the type reaches and put those files in one agent's hands, or make the
+splice an explicit task of your own. Skipping it costs both ways: a red
+`tsc` between waves, which is merely visible, and a validation enum that 400s
+every row carrying a value nobody told it about, which is not.
+
+**Config files that describe the whole repo need an owner, named in the wave.**
+A wave that creates a package has to say who adds it to the test runner's
+`include` globs and to the root `tsconfig.json`. Unowned, they are the one thing
+no agent touches and no gate misses: a suite that reports green over tests that
+never ran, and a type checker that passes without reading the new code. "The
+gate was green" and "the gate looked" are different claims, and only one of them
+was made.
+
+**A contract between two agents is quoted, never paraphrased.** Where one agent
+produces what another consumes — a JSON body, a type, a status code — open the
+file and paste the shape with its `path:line`. Written from memory it is wrong
+in small ways that cost a whole wave: a field remembered under a shorter name
+than the one the code returns, a required parameter you did not know about
+answering 400. The consumer discovering it mid-task and adapting is the *good*
+outcome. The bad one
+is two agents building faithfully against two different texts, and neither
+noticing.
 
 ## The brief — English, and everything the agent already has left out
 
@@ -271,6 +299,16 @@ at all:
 - **When the deliverable is the report rather than the file, say to write it to
   disk as it goes.** An agent that dies mid-task takes an unwritten finding
   with it, and you will not know which of them you lost.
+- **Verify every directional claim against the code before it goes in, not
+  after.** "Adding one to this list includes it", "this flag widens the
+  filter", "the higher number wins" — cite the line that establishes the
+  direction
+  (`path/to/file.ts:88`), or leave the claim out. The agent has no way to doubt
+  you: it derives the user-facing sentence from your text, and the result is
+  fluent, internally consistent, reviewed-looking, and backwards. No test
+  catches it, because the code is correct and the prose is what lies. A design
+  document with the direction inverted does not produce a wrong agent, it
+  produces a wrong product.
 
 Where a run's money actually goes is measured above: the orchestrator, at
 60-65%. Trimming prose in the brief is not that lever. Not pre-reading the

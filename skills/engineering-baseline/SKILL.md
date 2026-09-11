@@ -84,6 +84,12 @@ language's own footguns live in that language's `*-rules` skill.
 - A new dependency is a new trust relationship: confirm it is the package you
   meant, not a typosquat, and never fetch build inputs without an integrity
   check (CWE-494).
+- **After a generator or scaffolding CLI runs, diff the manifest and account
+  for every dependency it added, by name.** They arrive unasked, and one that
+  nothing imports is either dead weight or a typosquat of the alias you meant:
+  a widely used component CLI emitted `import { cn } from "cn"` across sixteen
+  files and installed the unrelated `cn` package to satisfy it. Its output is
+  not reviewed code — inherit it deliberately or not at all (CWE-1357).
 - Never dismiss an SCA advisory from memory. Quote the tool's output, establish
   whether the vulnerable path is reachable, and prefer the version bump —
   `security-baseline` has the protocol.
@@ -104,6 +110,10 @@ language's own footguns live in that language's `*-rules` skill.
 - Do not narrate the change in a comment (`// added null check`) — that belongs
   in the commit message.
 - Keep comments true. A stale comment is worse than no comment.
+- Never describe the current state of a file you do not own. It was true when
+  you wrote it, and the change that makes it false lands in someone else's
+  diff — on work running beside yours, which nothing tells you about. Say what
+  you depend on, not what they currently do.
 
 ### Tests
 - A test that has never been observed failing has not been shown to test
@@ -114,11 +124,21 @@ language's own footguns live in that language's `*-rules` skill.
   you think you covered never ran. Find out why before you report anything;
   "the mutation didn't go red" is the sentence that precedes discovering the
   test was never exercising the code.
+- A suite that did not run is neither passing nor failing. A mutation that
+  leaves a syntax error and reports "no tests" has proved nothing; make the
+  edit valid and mutate again. Read the count, not the colour.
 - When the broken path and the correct path produce the same value in the test
   environment — an empty result either way, a default that matches the real
   loader's output — comparing results discriminates nothing. Assert on the
   **call** instead, or get an environment where the two values differ.
 - Test the entrypoint the system actually calls, not a helper it may bypass.
+- **New code is not covered until you have seen the runner count it.** A test
+  file outside the runner's include globs is not a failing test, it is an
+  absent one: the suite stays green while reporting on nothing. Note the test
+  count before and after; if it did not move, the runner never saw your files.
+  Ask the same of the type checker and the linter — a package missing from the
+  root `tsconfig.json` passes `--noEmit` without being read, which makes
+  "typecheck passes" a statement about nothing.
 - Never add a flag to make the suite pass or exit. A suite that will not close
   on its own is a finding about the code — a leaked handle, an unclosed
   connection — and the flag that hides it also hides the next one.
@@ -230,6 +250,16 @@ all. If you copied anyway, say you copied.
   in the same change.
 - No language server for that language? Fall back to text search and say in
   your report that the caller list is unverified.
+
+### Running a command that can ask you a question
+- A CLI that prompts has no answer in a non-interactive session: it waits, and
+  the task ends when the turn does. `printf '\n' |` does not rescue it — a
+  prompt reads the terminal, not stdin.
+- Look for the non-interactive flag first (`--yes`, `--non-interactive`, an env
+  var). If there is none, drive it with `expect`, and say in your report which
+  prompt you answered and how. The next person meets the same one.
+- A prompt asking for a password, a token, or permission to destroy something
+  is a stop, not a puzzle to automate. Report it and let a person run it.
 
 ### Reporting done
 - "Done" is a claim, and a claim needs the command and its result.
