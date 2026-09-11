@@ -8,6 +8,8 @@ budget stops instead of finishing cheaply.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import threading
 from pathlib import Path
 
@@ -63,6 +65,11 @@ def _spec(**kw) -> RunSpec:
 def _run(tasks, worker=None, **kw) -> RunState:
     kw.setdefault("registry", _registry())
     spec = kw.pop("spec", _spec())
+    # These tests assert what a retry *does* — which rung, whose money, what
+    # state it lands in — never how long it waits first. The production backoff
+    # would add real seconds per retrying test and assert nothing about them.
+    # The delay itself is pinned in test_runtime_backoff.py.
+    kw["config"] = replace(kw.pop("config", SchedulerConfig()), backoff_base_s=0.0)
     return Scheduler(worker=worker or MockWorker(), **kw).run(spec, tasks)
 
 

@@ -76,6 +76,10 @@ _VALID_RUN_EVENTS = frozenset({
     "verifying",
     "verified",
     "deferred",
+    # A retry held back for its backoff. Cross-run because "how often does
+    # this environment fail transiently" is a question about the
+    # environment, and no single run can answer it.
+    "backoff",
     "not_admitted",
     "unroutable",
     "stalled",

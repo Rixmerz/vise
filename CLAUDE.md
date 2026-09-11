@@ -225,3 +225,14 @@ here could have caught it. So:
   probability scales evidence, it does not substitute for it. Under the old sum,
   an entry that matched nothing at all still scored `confidence * 0.15` and
   outranked entries that matched.
+- Don't make the scheduler wait by sleeping. A retry's backoff lives on the task
+  as `not_before` and the dispatch loop skips it; a `time.sleep` in the collect
+  or dispatch path holds the whole loop, so one task waiting out a rate limit
+  freezes every healthy task in the run. The same edit has a second trap: the
+  loop breaks when nothing dispatched and nothing is in flight, so a task that is
+  only waiting must be distinguished from one that is blocked, or the retry never
+  happens *and* the recorded reason is wrong.
+- Don't give an escalation a backoff. `retry` answers a failure outside the work
+  and waits for it to clear; `escalate` runs a bigger model against the same
+  task and is waiting for nothing. Conflating them is the same mistake
+  `recovery.py` exists to prevent, priced in wall clock instead of dollars.

@@ -49,9 +49,11 @@ from vise.runtime.replan import default_replanner
 from vise.runtime.recovery import (
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_REPLANS,
+    RETRY_BASE_S,
     Recovery,
     classify_from_text,
     decide,
+    retry_delay_s,
 )
 from vise.runtime.registry import AgentRegistry, capability_hint
 from vise.runtime.routing import TOP, ModelRouter, tier_of
@@ -150,6 +152,12 @@ class SchedulerConfig:
     #: Pin the change this run implements. Empty accepts any well-formed active
     #: change, which is the common single-change-in-flight case.
     spec_change: str = ""
+    #: The first retry's backoff, in seconds, before jitter — the base of the
+    #: curve in `recovery.retry_delay_s`. A knob rather than a constant so a
+    #: test can drive it to zero: the behaviour worth asserting is the ordering
+    #: a delay produces, and asserting it should not cost the suite the delay.
+    #: Zero disables the wait without disabling the bookkeeping.
+    backoff_base_s: float = RETRY_BASE_S
 
 
 class Scheduler:
@@ -361,6 +369,14 @@ class Scheduler:
 
                 if not pending:
                     if not dispatched:
+                        waiting = self._soonest_backoff(state, by_id)
+                        if waiting is not None:
+                            # Nothing running, and the only remaining work is a
+                            # retry waiting out its backoff. Without this the run
+                            # would call that task blocked and finish — the retry
+                            # never happening, and the recorded reason wrong too.
+                            time.sleep(min(waiting, WAIT_SLICE_S))
+                            continue
                         # Nothing running and nothing startable. Either the
                         # remaining tasks depend on something that failed, or a
                         # cycle survived planning. Either way, waiting cannot help.
@@ -499,6 +515,10 @@ class Scheduler:
                 state.emit("human_gate", task=task_id, reason=reason)
                 state.stop_for_human(reason)
                 return started_any
+            if self._backoff_remaining(state, task_id) > 0:
+                # Silently: the wait was announced once when it was armed, and
+                # this branch is reached on every pass of a 0.5 s loop.
+                continue
             claim_conflict = self._ownership_conflict(state, by_id, task)
             if claim_conflict:
                 state.emit("deferred", task=task_id, reason=f"ownership held by {claim_conflict}")
@@ -939,6 +959,8 @@ class Scheduler:
         )
         if move.action in (Recovery.RETRY, Recovery.ESCALATE):
             self._rollback(state, task_id, baselines)
+        if move.action is Recovery.RETRY:
+            self._arm_backoff(state, task_id)
         self._persist(state)
 
         if move.action is Recovery.HUMAN:
@@ -1182,9 +1204,55 @@ class Scheduler:
         self._persist(state)
         if move.action in (Recovery.RETRY, Recovery.ESCALATE):
             self._rollback(state, task_id, baselines)
+        if move.action is Recovery.RETRY:
+            self._arm_backoff(state, task_id)
         if move.action is Recovery.HUMAN:
             state.stop_for_human(f"{task_id}: {move.reason}")
         return move.action is Recovery.REPLAN
+
+    def _arm_backoff(self, state: RunState, task_id: str) -> None:
+        """Hold this task's next attempt until its backoff has passed.
+
+        Recorded on the task rather than slept on here. Sleeping in the collect
+        path holds the dispatch loop, so one task waiting out a rate limit would
+        freeze every healthy task in the run — trading a bounded failure for an
+        unbounded one.
+
+        Announced once, here, rather than on each pass of the loop that skips
+        the task: the delay is the fact worth recording, and the skipping is
+        bookkeeping.
+        """
+        record = state.record(task_id)
+        # Retries already taken, not attempts: the first retry follows one
+        # attempt and should wait the base, not twice it.
+        delay = retry_delay_s(
+            max(0, record.attempt_count - 1), base_s=self.config.backoff_base_s
+        )
+        if delay <= 0:
+            record.not_before = 0.0
+            return
+        record.not_before = time.time() + delay
+        state.emit("backoff", task=task_id, delay_s=round(delay, 2))
+
+    def _backoff_remaining(self, state: RunState, task_id: str) -> float:
+        """Seconds until this task may be dispatched again. 0 when it may now."""
+        return max(0.0, state.record(task_id).not_before - time.time())
+
+    def _soonest_backoff(self, state: RunState, by_id: dict[str, Any]) -> float | None:
+        """How long until the earliest waiting retry may start, or None.
+
+        Only tasks that are otherwise ready count. Work that is genuinely
+        blocked must still be reported stalled — a deadline left on a task that
+        can never run again would keep the loop alive forever, which is the
+        failure this method exists to avoid rather than to cause.
+        """
+        completed = state.completed_ids()
+        waits = []
+        for task_id in self._ready(state, by_id, completed):
+            remaining = self._backoff_remaining(state, task_id)
+            if remaining > 0:
+                waits.append(remaining)
+        return min(waits) if waits else None
 
     def _rollback(
         self, state: RunState, task_id: str, baselines: dict[str, str | None]

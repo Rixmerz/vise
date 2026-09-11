@@ -8,6 +8,52 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — a retry was dispatched into the condition it was retrying
+
+A task classified `ENVIRONMENT_BUG`, or returning `inconclusive`, gets one retry
+at the same rung. That retry went out immediately. Measured against the live
+scheduler with a worker that fails every dispatch the way a rate limit does —
+six tasks, `max_parallel=6`:
+
+| | before | after |
+|---|---|---|
+| gap, attempt 1 to attempt 2 | 1.8 ms | 3832 ms |
+| spread of the parallel retries | 0.9 ms | 1762 ms |
+| tasks finished, outage clearing after 2 s | **0 of 6** | **6 of 6** |
+| tasks finished, outage never clearing | 0 of 6 | 0 of 6 |
+| dispatches spent, outage never clearing | 10 | 7 |
+
+Nothing clears in a millisecond — not a rate limit, not a saturated API, not a
+machine still finishing an install. The one retry the task had was spent on a
+question whose answer could not have changed, and spending it is what sends the
+task to `waiting_human`, which stops the run. Against an outage that cleared
+after two seconds, every run lost every task.
+
+Backoff alone would not have been enough. Every parallel worker retried inside
+the same millisecond — the herd that produces the rate limit being retried —
+so the delay is jittered as well.
+
+`recovery.retry_delay_s` is the policy: exponential in the retries already
+taken, capped at 60 s, and **equal**-jittered rather than full-jittered. Full
+jitter decorrelates better and is wrong here: an environment failure gets one
+retry, and a draw near zero spends it inside the very window the delay exists
+to outlast. Half the delay is guaranteed and the other half is drawn.
+
+The wait is recorded on the task, not slept on in the collect path. Sleeping
+there would hold the dispatch loop, so one task waiting out a rate limit would
+freeze every healthy task in the run — a bounded failure traded for an unbounded
+one. Escalation arms no delay: a bigger model is not waiting for anything to
+clear.
+
+**Cost.** A run that hits a transient failure takes seconds longer. Against an
+outage that never clears it now spends *fewer* dispatches, because the run stops
+during the first wait instead of letting every task burn its retry first.
+
+**Behaviour change.** `SchedulerConfig.backoff_base_s` defaults to 5 s. Set it
+to `0.0` for the previous immediate-retry behaviour; the scheduler's own tests
+do exactly that, since what a retry does is a different question from how long
+it waits first.
+
 ### Fixed — the largest weight in experience ranking was scoring the wrong thing
 
 The semantic term carried `W_SEMANTIC = 0.30`, the biggest of the five, and was

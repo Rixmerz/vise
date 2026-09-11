@@ -92,6 +92,12 @@ class TaskRecord:
     seen: list[str] = field(default_factory=list)
     rounds: int = 0
     stable: int = 0
+    #: Epoch seconds before which a retry of this task may not be dispatched —
+    #: see `recovery.retry_delay_s`. Wall clock and not `time.monotonic`,
+    #: because this outlives the process: the state file is persisted and
+    #: resumed, and a monotonic deadline read back after a restart is a number
+    #: about a clock that no longer exists. Zero means no wait is owed.
+    not_before: float = 0.0
 
     @property
     def attempt_count(self) -> int:
@@ -113,6 +119,7 @@ class TaskRecord:
             "seen": list(self.seen),
             "rounds": self.rounds,
             "stable": self.stable,
+            "not_before": self.not_before,
         }
 
     @classmethod
@@ -129,6 +136,7 @@ class TaskRecord:
             seen=[str(s) for s in data.get("seen") or []],
             rounds=int(data.get("rounds") or 0),
             stable=int(data.get("stable") or 0),
+            not_before=float(data.get("not_before") or 0.0),
         )
 
 
