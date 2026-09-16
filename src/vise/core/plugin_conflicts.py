@@ -1,22 +1,31 @@
-"""Which installed plugins claim the same file extension for an LSP server.
+"""What language servers the installed plugins declare, and who collides.
 
-vise declares twelve language servers in `.claude-plugin/plugin.json` as a map
-of extension to binary. Claude Code's LSP manifest schema — read out of its own
-Zod definition — has **no priority field, no workspace-root marker and no
-project-level override**: `lspServers` is plugin-scoped and nothing arbitrates
-between plugins. So when two installed plugins both claim `.ts`, which one wins
-is undetermined, and the symptom is a language server that silently answers for
-the wrong toolchain.
+Claude Code's LSP manifest schema — read out of its own Zod definition — has
+**no priority field, no workspace-root marker and no project-level override**:
+`lspServers` is plugin-scoped and nothing arbitrates between plugins. So when
+two installed plugins both claim `.ts`, which one wins is undetermined, and the
+symptom is a language server that silently answers for the wrong toolchain.
 
-vise already refuses to ship that collision with itself — the README's Deno
-section explains why `deno` is opt-in rather than bundled, and says the
-`typescript` entry must give up the same five extensions when someone enables
-it. This module is the other half of that rule: the same collision can arrive
-from a plugin vise has never heard of, and nothing anywhere reports it.
+vise itself declares none, and that is the same rule applied to itself: the
+official marketplace ships one plugin per language covering exactly the set
+vise used to duplicate, so shipping them here could only make resolution
+undefined for anyone who installed both. This module is what replaced them —
+it reads everyone else's declarations so `vise doctor` can report which servers
+this session actually has, which binaries back them, and which extension is
+claimed twice.
 
-What it does NOT do is decide. There is no correct answer to pick — the schema
-provides no way to express one — so this reports the overlap and names both
-claimants, which is what a person needs to go and remove one.
+What it does NOT do is decide a collision. There is no correct answer to pick —
+the schema provides no way to express one — so this reports the overlap and
+names both claimants, which is what a person needs to go and remove one.
+
+Two sources, because a plugin can declare its servers in either. Most put
+`lspServers` in their own `.claude-plugin/plugin.json`. The official
+per-language LSP plugins ship **no manifest at all** — their install directory
+holds a LICENSE and a README, and the whole declaration lives in the
+marketplace entry that installed them. Reading only the first source made this
+module blind to every one of them: on a machine with vise's old twelve servers
+and four official LSP plugins enabled, it reported "0 conflicts" while twelve
+extensions were claimed twice.
 
 Same contract as `neighbour_state`: reads someone else's files, never raises,
 and distinguishes "nothing claims this twice" from "could not tell".
@@ -35,6 +44,15 @@ _DEFAULT_CONFIG_DIR = "~/.claude"
 
 _INSTALLED = "plugins/installed_plugins.json"
 _MANIFEST = ".claude-plugin/plugin.json"
+_MARKETPLACES = "plugins/marketplaces"
+_MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
+
+#: Accepted by the schema and then rejected at load with "not yet implemented",
+#: which happens *before* the server is registered. A server declaring one can
+#: never start, however well its binary is installed. `test_plugin_lsp_manifest`
+#: pins the list; `vise doctor` reports such a server as BROKEN rather than
+#: MISSING, because installing the binary would not help.
+UNIMPLEMENTED_FIELDS = ("startupTimeout", "shutdownTimeout", "restartOnCrash")
 
 
 @dataclass(frozen=True)
@@ -46,6 +64,27 @@ class Claim:
 
     def __str__(self) -> str:
         return f"{self.plugin} → {self.server}"
+
+
+@dataclass(frozen=True)
+class Server:
+    """One declared language server, whoever declared it.
+
+    Carries what `vise doctor` needs to report on it without re-reading any
+    manifest: the binary to look for, how to invoke it, what it claims, and
+    whether Claude Code will refuse it at load.
+    """
+
+    plugin: str
+    name: str
+    command: str
+    args: tuple[str, ...] = ()
+    extensions: tuple[str, ...] = ()
+    unimplemented: tuple[str, ...] = ()
+
+    @property
+    def invocation(self) -> str:
+        return " ".join([self.command, *self.args])
 
 
 @dataclass(frozen=True)
@@ -71,10 +110,22 @@ class Survey:
     """What was found, and whether the question could be answered at all."""
 
     conflicts: tuple[Conflict, ...] = ()
-    #: Plugins whose manifest was read successfully.
+    #: Every server any installed plugin declares, sorted by name.
+    servers: tuple[Server, ...] = ()
+    #: Plugins whose declaration was resolved, from either source.
     surveyed: tuple[str, ...] = ()
+    #: Plugins whose declaration could not be read from either source. These
+    #: are the ones a conflict could be hiding behind, so they are reported
+    #: rather than dropped — that silence is what made this module claim a
+    #: clean machine while four official LSP plugins went unread.
+    unresolved: tuple[str, ...] = ()
     known: bool = False
     detail: str = "not checked"
+
+    @property
+    def declaring(self) -> tuple[str, ...]:
+        """Plugins that declare at least one server."""
+        return tuple(sorted({server.plugin for server in self.servers}))
 
 
 def config_dir() -> Path:
@@ -96,8 +147,8 @@ def _servers_from(raw: Any, install_path: Path) -> dict[str, Any]:
     """Resolve the three shapes `lspServers` accepts into one mapping.
 
     The schema takes a record, a path to a `.lsp.json` file, or an array of
-    either. Handling only the record — the shape vise happens to use — would
-    make this blind to exactly the third-party manifest it exists to inspect.
+    either. Handling only the record — the shape most plugins use — would make
+    this blind to exactly the third-party manifest it exists to inspect.
     """
     if isinstance(raw, dict):
         return raw
@@ -133,8 +184,81 @@ def _install_paths(root: Path) -> dict[str, Path]:
     return out
 
 
+def _from_manifest(install_path: Path) -> dict[str, Any] | None:
+    """`lspServers` out of the plugin's own manifest, or None if unreadable."""
+    try:
+        manifest = json.loads(
+            (install_path / _MANIFEST).read_text(encoding="utf-8")
+        )
+    except Exception:  # noqa: BLE001 - an uninstalled, moved or manifest-less plugin
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    return _servers_from(manifest.get("lspServers"), install_path)
+
+
+def _from_marketplace(plugin: str, base: Path, install_path: Path) -> dict[str, Any] | None:
+    """`lspServers` out of the marketplace entry that installed the plugin.
+
+    Where the official per-language LSP plugins keep theirs: their install
+    directory has no manifest to read, so this is the only source there is.
+    """
+    name, _, marketplace = str(plugin).partition("@")
+    if not marketplace:
+        return None
+    catalogue = base / _MARKETPLACES / marketplace / _MARKETPLACE_MANIFEST
+    try:
+        loaded = json.loads(catalogue.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - a marketplace can be removed after install
+        return None
+    for entry in (loaded or {}).get("plugins") or []:
+        if isinstance(entry, dict) and str(entry.get("name")) == name:
+            return _servers_from(entry.get("lspServers"), install_path)
+    return None
+
+
+def _declared(plugin: str, install_path: Path, base: Path) -> dict[str, Any] | None:
+    """Every server one plugin declares, from whichever source has them.
+
+    The plugin's own manifest wins when it declares any — it is the more
+    specific file. An empty or absent one falls through to the marketplace
+    entry rather than being read as "this plugin declares nothing", which is
+    the case the official LSP plugins are in.
+    """
+    own = _from_manifest(install_path)
+    if own:
+        return own
+    catalogued = _from_marketplace(plugin, base, install_path)
+    if catalogued is not None:
+        return catalogued
+    return own  # {} when the manifest parsed and declared none; None if unreadable
+
+
+def _to_server(plugin: str, name: str, config: Any) -> Server | None:
+    if not isinstance(config, dict):
+        return None
+    command = config.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    raw_args = config.get("args") or []
+    args = tuple(str(a) for a in raw_args) if isinstance(raw_args, list) else ()
+    extensions = tuple(sorted({
+        ext for ext in (
+            _normalise(e) for e in (config.get("extensionToLanguage") or {})
+        ) if ext is not None
+    }))
+    return Server(
+        plugin=plugin,
+        name=str(name),
+        command=command.strip(),
+        args=args,
+        extensions=extensions,
+        unimplemented=tuple(f for f in UNIMPLEMENTED_FIELDS if f in config),
+    )
+
+
 def survey(root: Path | None = None) -> Survey:
-    """Every extension claimed by more than one installed LSP server."""
+    """Every server the installed plugins declare, and every contested extension."""
     try:
         base = Path(root) if root is not None else config_dir()
         index_file = base / _INSTALLED
@@ -148,40 +272,58 @@ def survey(root: Path | None = None) -> Survey:
         return Survey(detail=f"could not read the plugin index: {type(exc).__name__}: {exc}")
 
     claimed: dict[str, list[Claim]] = {}
+    servers: list[Server] = []
     surveyed: list[str] = []
+    unresolved: list[str] = []
     for plugin, install_path in sorted(paths.items()):
-        try:
-            manifest = json.loads(
-                (install_path / _MANIFEST).read_text(encoding="utf-8")
-            )
-        except Exception:  # noqa: BLE001 - an uninstalled or moved plugin
+        declared = _declared(plugin, install_path, base)
+        if declared is None:
+            unresolved.append(plugin)
             continue
         surveyed.append(plugin)
-        for server, config in _servers_from(
-            manifest.get("lspServers"), install_path
-        ).items():
-            if not isinstance(config, dict):
+        for name, config in declared.items():
+            server = _to_server(plugin, name, config)
+            if server is None:
                 continue
-            for extension in (config.get("extensionToLanguage") or {}):
-                key = _normalise(extension)
-                if key is None:
-                    continue
-                claimed.setdefault(key, []).append(Claim(plugin, str(server)))
+            servers.append(server)
+            for extension in server.extensions:
+                claim = Claim(plugin, server.name)
+                if claim not in claimed.setdefault(extension, []):
+                    claimed[extension].append(claim)
 
     conflicts = tuple(
         Conflict(extension, tuple(claims))
         for extension, claims in sorted(claimed.items())
         if len(claims) > 1
     )
+    declaring = len({server.plugin for server in servers})
+    detail = (
+        f"{declaring} of {len(surveyed)} installed plugin(s) declare language "
+        f"servers; {len(conflicts)} extension(s) claimed more than once"
+    )
+    if unresolved:
+        # Never report a clean machine off a partial read: a conflict can be
+        # hiding in exactly the manifest that would not open.
+        detail += (
+            f"; {len(unresolved)} plugin(s) could not be read "
+            f"({', '.join(sorted(unresolved))})"
+        )
     return Survey(
         conflicts=conflicts,
+        servers=tuple(sorted(servers, key=lambda s: (s.name, s.plugin))),
         surveyed=tuple(surveyed),
+        unresolved=tuple(sorted(unresolved)),
         known=True,
-        detail=(
-            f"{len(surveyed)} installed plugin(s) declare language servers; "
-            f"{len(conflicts)} extension(s) claimed more than once"
-        ),
+        detail=detail,
     )
 
 
-__all__ = ["Claim", "Conflict", "Survey", "config_dir", "survey"]
+__all__ = [
+    "UNIMPLEMENTED_FIELDS",
+    "Claim",
+    "Conflict",
+    "Server",
+    "Survey",
+    "config_dir",
+    "survey",
+]

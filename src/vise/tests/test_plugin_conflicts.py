@@ -50,6 +50,23 @@ def _index(root: Path, plugins: dict[str, Path]) -> None:
     )
 
 
+def _bare_plugin(root: Path, name: str) -> Path:
+    """An install directory with no manifest at all — the official LSP shape."""
+    install = root / name
+    install.mkdir(parents=True, exist_ok=True)
+    (install / "README.md").write_text(f"# {name}\n", encoding="utf-8")
+    return install
+
+
+def _marketplace(root: Path, marketplace: str, entries: list[dict]) -> None:
+    """The catalogue that installed a plugin, where it may declare servers."""
+    path = root / "plugins" / "marketplaces" / marketplace / ".claude-plugin"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "marketplace.json").write_text(
+        json.dumps({"name": marketplace, "plugins": entries}), encoding="utf-8"
+    )
+
+
 def _server(command: str, *extensions: str) -> dict:
     return {
         "command": command,
@@ -187,14 +204,20 @@ def test_an_unreadable_index_is_unknown_rather_than_clean(tmp_path: Path):
     assert "could not read" in found.detail
 
 
-def test_a_plugin_whose_files_are_gone_is_skipped(tmp_path: Path):
+def test_a_plugin_whose_files_are_gone_is_named_not_dropped(tmp_path: Path):
     """An index entry outlives an uninstall. Raising there would make the whole
-    survey useless because of one stale row."""
+    survey useless because of one stale row — but dropping it in silence is how
+    this module once reported a clean machine off a partial read."""
     a = _plugin(tmp_path, "alpha", {"one": _server("a", ".ts")})
     _index(tmp_path, {"alpha@one": a, "ghost@two": tmp_path / "does-not-exist"})
 
     found = survey(tmp_path)
     assert found.known and found.surveyed == ("alpha@one",)
+    assert found.unresolved == ("ghost@two",)
+    assert "ghost@two" in found.detail, (
+        "a report that could not read a manifest must say so — the conflict "
+        "it was asked about can be hiding in exactly that file"
+    )
 
 
 def test_the_config_dir_honours_the_env_var(monkeypatch, tmp_path: Path):
@@ -218,3 +241,130 @@ def test_vise_does_not_collide_with_itself(tmp_path: Path):
     assert found.conflicts == (), [
         (c.extension, [str(x) for x in c.claims]) for c in found.conflicts
     ]
+
+
+# ---------------------------------------------------------------------------
+# The second source: plugins that declare in the marketplace, not a manifest
+# ---------------------------------------------------------------------------
+
+def test_a_plugin_declaring_only_in_its_marketplace_entry_is_read(tmp_path: Path):
+    """The official per-language LSP plugins ship no manifest at all.
+
+    Their install directory holds a LICENSE and a README; the whole
+    `lspServers` block lives in the marketplace entry that installed them.
+    Reading only `installPath/.claude-plugin/plugin.json` made this module
+    blind to every one of them, and it answered "0 conflicts" on a machine
+    where twelve extensions were claimed twice.
+    """
+    mine = _plugin(tmp_path, "mine", {"typescript": _server("tsserver", ".ts")})
+    theirs = _bare_plugin(tmp_path, "typescript-lsp")
+    _index(tmp_path, {"mine@local": mine, "typescript-lsp@official": theirs})
+    _marketplace(tmp_path, "official", [{
+        "name": "typescript-lsp",
+        "lspServers": {"typescript": _server("typescript-language-server", ".ts")},
+    }])
+
+    found = survey(tmp_path)
+
+    assert "typescript-lsp@official" in found.surveyed
+    assert found.unresolved == ()
+    assert [c.extension for c in found.conflicts] == [".ts"]
+
+
+def test_a_marketplace_entry_for_another_plugin_is_not_borrowed(tmp_path: Path):
+    """Entries are matched by name. Taking the first one would attribute a
+    server to whichever plugin happened to sort first."""
+    theirs = _bare_plugin(tmp_path, "pyright-lsp")
+    _index(tmp_path, {"pyright-lsp@official": theirs})
+    _marketplace(tmp_path, "official", [
+        {"name": "gopls-lsp", "lspServers": {"gopls": _server("gopls", ".go")}},
+        {"name": "pyright-lsp", "lspServers": {"pyright": _server("pyright", ".py")}},
+    ])
+
+    found = survey(tmp_path)
+
+    assert [s.name for s in found.servers] == ["pyright"]
+    assert found.servers[0].extensions == (".py",)
+
+
+def test_the_plugins_own_manifest_wins_over_its_marketplace_entry(tmp_path: Path):
+    """The more specific file. A plugin updated in place must not be judged by
+    what the catalogue said when it was installed — and counting both would
+    invent a conflict between a plugin and itself."""
+    install = _plugin(tmp_path, "alpha", {"current": _server("current", ".ts")})
+    _index(tmp_path, {"alpha@one": install})
+    _marketplace(tmp_path, "one", [{
+        "name": "alpha",
+        "lspServers": {"stale": _server("stale", ".ts")},
+    }])
+
+    found = survey(tmp_path)
+
+    assert [s.name for s in found.servers] == ["current"]
+    assert found.conflicts == ()
+
+
+def test_a_missing_marketplace_leaves_the_plugin_unresolved(tmp_path: Path):
+    """Neither source readable. Reporting it clean is the bug this replaced."""
+    _index(tmp_path, {"ghost@gone": _bare_plugin(tmp_path, "ghost")})
+
+    found = survey(tmp_path)
+
+    assert found.known
+    assert found.unresolved == ("ghost@gone",)
+    assert found.servers == ()
+
+
+# ---------------------------------------------------------------------------
+# What `vise doctor` reads off the survey
+# ---------------------------------------------------------------------------
+
+def test_a_server_carries_what_doctor_needs_to_report_it(tmp_path: Path):
+    """doctor stopped reading vise's own manifest when vise stopped declaring
+    servers. Everything its report needs now comes off this dataclass."""
+    install = _plugin(tmp_path, "alpha", {"pyright": {
+        "command": "pyright-langserver",
+        "args": ["--stdio"],
+        "extensionToLanguage": {".PY": "python", ".pyi": "python"},
+    }})
+    _index(tmp_path, {"alpha@one": install})
+
+    server = survey(tmp_path).servers[0]
+
+    assert server.plugin == "alpha@one"
+    assert server.name == "pyright"
+    assert server.command == "pyright-langserver"
+    assert server.args == ("--stdio",)
+    assert server.extensions == (".py", ".pyi"), "keys are lowercased before use"
+    assert server.invocation == "pyright-langserver --stdio"
+    assert server.unimplemented == ()
+
+
+def test_a_server_claude_code_refuses_is_flagged_rather_than_counted(tmp_path: Path):
+    """`startupTimeout` is accepted by the schema and then rejected at load,
+    before the server is registered — so installing its binary cannot help.
+    The official jdtls-lsp and kotlin-lsp both ship in that state."""
+    install = _plugin(tmp_path, "alpha", {"jdtls": {
+        "command": "jdtls",
+        "extensionToLanguage": {".java": "java"},
+        "startupTimeout": 120000,
+    }})
+    _index(tmp_path, {"alpha@one": install})
+
+    server = survey(tmp_path).servers[0]
+
+    assert server.unimplemented == ("startupTimeout",)
+
+
+def test_the_detail_counts_declarants_not_manifests_read(tmp_path: Path):
+    """It said "11 installed plugin(s) declare language servers" on a machine
+    where exactly one did. `surveyed` counts manifests read, which is a
+    different question from who declared anything."""
+    quiet = _plugin(tmp_path, "quiet", {})
+    loud = _plugin(tmp_path, "loud", {"one": _server("a", ".ts")})
+    _index(tmp_path, {"quiet@x": quiet, "loud@y": loud})
+
+    found = survey(tmp_path)
+
+    assert found.declaring == ("loud@y",)
+    assert found.detail.startswith("1 of 2 installed plugin(s)")
