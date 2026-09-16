@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from vise.engines.render_harness import BrowserUnavailable, browser_status, screenshot
+from vise.engines.render_harness import (
+    _INSTALL_PIP,
+    BrowserUnavailable,
+    _unavailable_message,
+    browser_status,
+    screenshot,
+)
 
 _available, _reason = browser_status()
 requires_browser = pytest.mark.skipif(not _available, reason=_reason)
@@ -75,10 +81,7 @@ def test_a_non_url_target_raises_value_error_and_launches_no_browser(
 def test_missing_browser_raises_and_leaves_no_partial_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reason = (
-        "playwright is not installed; run: pip install 'vise[design]'. "
-        "Full setup: pip install 'vise[design]' && playwright install chromium"
-    )
+    reason = _unavailable_message("playwright is not installed")
     monkeypatch.setattr(
         "vise.engines.render_harness.browser_status", lambda: (False, reason)
     )
@@ -87,7 +90,7 @@ def test_missing_browser_raises_and_leaves_no_partial_file(
     with pytest.raises(BrowserUnavailable) as exc_info:
         screenshot("https://example.com", out)
 
-    assert "pip install 'vise[design]'" in str(exc_info.value)
+    assert _INSTALL_PIP in str(exc_info.value)
     assert "playwright install chromium" in str(exc_info.value)
     assert not out.exists()
 
@@ -110,7 +113,7 @@ def test_cli_exits_nonzero_when_browser_unavailable(
 
     monkeypatch.setattr(
         "vise.engines.render_harness.browser_status",
-        lambda: (False, "playwright is not installed; run: pip install 'vise[design]'"),
+        lambda: (False, _unavailable_message("playwright is not installed")),
     )
 
     rc = main(["shot", "https://example.com", "--out", str(tmp_path / "out.png")])
@@ -137,10 +140,7 @@ def test_cli_main_writes_a_real_png_on_success(tmp_path: Path) -> None:
 def test_failed_capture_removes_a_stale_file_at_out_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reason = (
-        "playwright is not installed; run: pip install 'vise[design]'. "
-        "Full setup: pip install 'vise[design]' && playwright install chromium"
-    )
+    reason = _unavailable_message("playwright is not installed")
     monkeypatch.setattr(
         "vise.engines.render_harness.browser_status", lambda: (False, reason)
     )
@@ -194,12 +194,50 @@ def test_the_real_unavailable_message_names_both_install_steps() -> None:
     half and the whole suite would stay green while users hit a dead end one
     install short of a working browser.
     """
-    from vise.engines.render_harness import _unavailable_message
-
     message = _unavailable_message("playwright is not installed")
 
-    assert "pip install 'vise[design]'" in message
+    assert _INSTALL_PIP in message
     assert "playwright install chromium" in message
+
+
+def test_the_install_remedy_never_names_a_package_that_is_not_ours() -> None:
+    """It named `vise[design]`, and `vise` on PyPI belongs to someone else.
+
+    The remedy printed by `vise bootstrap`, by `vise shot`, and in the evidence
+    of every failed render gate read `pip install 'vise[design]'`. This
+    distribution is `vise-mcp`; `vise` on PyPI is an unrelated VASP I/O
+    package. Anyone who pasted the line installed a stranger's code into the
+    interpreter that runs their gates and still had no browser. `vise-mcp` is
+    not on PyPI either — vise installs from a clone or the plugin cache — so
+    correcting the name would only have traded a wrong install for a failed
+    one. The remedy names the dependency instead.
+    """
+    from vise.engines import render_harness
+
+    assert "vise[design]" not in render_harness._INSTALL_PIP
+    assert "vise-mcp" not in render_harness._INSTALL_PIP
+    assert render_harness._DESIGN_REQUIREMENT in render_harness._INSTALL_PIP
+
+
+def test_the_install_remedy_asks_for_what_the_design_extra_declares() -> None:
+    """The remedy restates a pin that lives in pyproject.toml. Pin the tie.
+
+    A message naming a requirement the extra does not declare is the same
+    defect as the one above in a slower form: it resolves, it installs, and
+    what arrives is not what the gates import.
+    """
+    import tomllib
+
+    from vise.engines.render_harness import _DESIGN_REQUIREMENT
+
+    root = Path(__file__).resolve().parents[3]
+    with (root / "pyproject.toml").open("rb") as fh:
+        declared = tomllib.load(fh)["project"]["optional-dependencies"]["design"]
+
+    assert declared == [_DESIGN_REQUIREMENT], (
+        "the `design` extra and the remedy that installs it have drifted: "
+        f"pyproject says {declared}, the message says {_DESIGN_REQUIREMENT!r}"
+    )
 
 
 def test_a_symlink_destination_is_refused_and_its_target_survives(

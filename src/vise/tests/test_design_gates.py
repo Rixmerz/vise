@@ -66,7 +66,7 @@ def test_ui_layout_without_playwright_fails_closed_and_names_both_install_steps(
     not hand-written, so this test cannot pass while drifting from what the
     product actually emits.
     """
-    from vise.engines.render_harness import _unavailable_message
+    from vise.engines.render_harness import _INSTALL_PIP, _unavailable_message
 
     fake_reason = _unavailable_message("playwright is not installed")
     monkeypatch.setattr(
@@ -77,7 +77,7 @@ def test_ui_layout_without_playwright_fails_closed_and_names_both_install_steps(
     record = validator.run(_goal(tmp_path))
 
     _assert_fails_closed(record)
-    assert "pip install 'vise[design]'" in record.evidence
+    assert _INSTALL_PIP in record.evidence
     assert "playwright install chromium" in record.evidence
 
 
@@ -90,7 +90,7 @@ def test_ui_contrast_without_playwright_fails_closed_and_names_both_install_step
     not hand-written, so this test cannot pass while drifting from what the
     product actually emits.
     """
-    from vise.engines.render_harness import _unavailable_message
+    from vise.engines.render_harness import _INSTALL_PIP, _unavailable_message
 
     fake_reason = _unavailable_message("playwright is not installed")
     monkeypatch.setattr(
@@ -101,7 +101,7 @@ def test_ui_contrast_without_playwright_fails_closed_and_names_both_install_step
     record = validator.run(_goal(tmp_path))
 
     _assert_fails_closed(record)
-    assert "pip install 'vise[design]'" in record.evidence
+    assert _INSTALL_PIP in record.evidence
     assert "playwright install chromium" in record.evidence
 
 

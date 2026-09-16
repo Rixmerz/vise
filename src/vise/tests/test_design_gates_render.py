@@ -15,7 +15,8 @@ distinction with no browser at all.
 
 Set up with::
 
-    pip install 'vise[design]' && playwright install chromium
+    ./install.sh --design     # or, into an existing env:
+    pip install 'playwright>=1.40' && playwright install chromium
 """
 from __future__ import annotations
 

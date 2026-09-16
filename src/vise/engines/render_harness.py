@@ -7,10 +7,10 @@ viewport, document scroll size, and any selector that failed to resolve. The
 output is a plain-dict geometry snapshot; downstream check modules consume it
 without ever importing Playwright themselves.
 
-Playwright is imported lazily, inside the functions that use it, so this
-module (and therefore ``pip install vise``) never requires it — it is an
-optional extra (``vise[design]``). ``browser_status()`` lets callers decide
-whether a real render is even possible before attempting one.
+Playwright is imported lazily, inside the functions that use it, so a core
+install never requires it — it is the optional ``design`` extra declared in
+``pyproject.toml``. ``browser_status()`` lets callers decide whether a real
+render is even possible before attempting one.
 
 Vendored and extended from ``layoutlint``'s ``browser.py`` (same author,
 MIT-compatible): batches multiple breakpoints under one browser launch,
@@ -258,11 +258,30 @@ DEFAULT_STYLE_PROPS: tuple[str, ...] = (
     "background-color",
 )
 
+# Names the requirement, not the extra, and deliberately.
+#
+# This said `pip install 'vise[design]'`, which was wrong twice over. This
+# distribution is `vise-mcp`, and `vise` on PyPI is an unrelated project (VASP
+# I/O for the Kumagai group) — so the message a person reads when a gate fails
+# closed told them to pull a stranger's package into the interpreter that runs
+# their gates, and the browser still would not be there afterwards. Nor would
+# the real name have worked: `vise-mcp` is not published either. vise installs
+# from a clone (`./install.sh`) or from the plugin cache, and neither has a
+# PyPI name to hand to `pip install`.
+#
+# The `design` extra is exactly one requirement, so the remedy asks for that
+# requirement directly. It resolves the same in every install path, and it
+# cannot name someone else's package by accident.
+#
+# _DESIGN_REQUIREMENT mirrors pyproject's [project.optional-dependencies]
+# `design` entry; test_screenshot.py fails if the two ever drift.
+#
 # Named after the interpreter actually running this process (sys.executable),
 # not a bare "pip"/"playwright" the reader would run in whatever venv their
 # shell happens to have active — which, for a plugin install, is never the
 # interpreter that will execute the capture (see render_harness's callers).
-_INSTALL_PIP = f"{sys.executable} -m pip install 'vise[design]'"
+_DESIGN_REQUIREMENT = "playwright>=1.40"
+_INSTALL_PIP = f"{sys.executable} -m pip install '{_DESIGN_REQUIREMENT}'"
 _INSTALL_CHROMIUM = f"{sys.executable} -m playwright install chromium"
 _BOTH_COMMANDS = f"{_INSTALL_PIP} && {_INSTALL_CHROMIUM}"
 

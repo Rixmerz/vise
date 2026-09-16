@@ -6,6 +6,37 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Fixed — the remedy for a missing browser installed a stranger's package
+
+The three render gates fail closed without Playwright, and every message that
+says so named the command that fixes it: `pip install 'vise[design]'`. It was
+printed by `vise bootstrap` under **NO BROWSER**, by `vise shot`, and in the
+evidence of every `ui_layout` / `ui_contrast` failure.
+
+That command does not install vise. This distribution is `vise-mcp`, and `vise`
+on PyPI is an unrelated project — VASP I/O for the Kumagai group at Tohoku.
+Anyone who pasted the line pulled a stranger's package into the interpreter
+that runs their gates, watched the `design` extra resolve to nothing, and still
+had no browser. A gate whose whole purpose is to refuse with an actionable
+remedy was handing out an install of someone else's code.
+
+Correcting the name would not have helped: `vise-mcp` is not published either.
+vise installs from a clone (`./install.sh`) or from the plugin cache, and
+neither has a PyPI name to hand to `pip install`. So the message names the
+dependency rather than the extra — `pip install 'playwright>=1.40'`, still
+prefixed with the interpreter that will actually run the capture. It resolves
+identically in every install path and cannot name a third party by accident.
+
+`render_harness._DESIGN_REQUIREMENT` is the one place it is written, and a test
+ties it to the `design` extra in `pyproject.toml` so the two cannot drift. A
+second test refuses any remedy naming `vise[design]` or an unpublished
+distribution. The same wrong command was in the README, `install.sh`'s comment,
+the bundled `quality-gate` graph, the `orchestration` skill and the
+`design-gates` spec; all of them now point at `./install.sh --design`, which
+has always been the path that works from a clone.
+
 ## [0.1.0a28] — 2026-09-11
 
 ### Fixed — a retry was dispatched into the condition it was retrying

@@ -67,10 +67,10 @@ Two opt-in extras, because both cost something most repos never need:
 ./install.sh --design   # playwright AND its Chromium, for the render gates
 ```
 
-`--design` runs both steps deliberately. `pip install 'vise[design]'` on its
-own leaves playwright installed with no browser, and `ui_layout` / `ui_contrast`
-then fail closed on a message about a missing Chromium — one install later you
-are stuck again. If you also run `layout-inspector`, it resolves its **own**
+`--design` runs both steps deliberately. Installing the extra on its own leaves
+playwright installed with no browser, and `ui_layout` / `ui_contrast` then fail
+closed on a message about a missing Chromium — one install later you are stuck
+again. If you also run `layout-inspector`, it resolves its **own**
 Chromium: each Playwright demands its own build and refuses one installed by a
 different environment.
 
@@ -398,8 +398,9 @@ The three design gates take the other side of that trade deliberately. Where a
 named `quality_check` skips when its binary is missing, these fail closed with
 evidence naming the remedy, because a gate that could not run must not report
 success. `design_tokens` needs nothing installed. The two render gates need
-`pip install 'vise[design]' && playwright install chromium` plus at least one
-`design.targets` entry in `.vise/quality.yaml`, and they are **not** wired into
+`./install.sh --design` — or, into an environment that already has vise,
+`pip install 'playwright>=1.40' && playwright install chromium` — plus at least
+one `design.targets` entry in `.vise/quality.yaml`, and they are **not** wired into
 the bundled `quality-gate` graph for that reason — wiring them by default would
 turn `integration` red on every repo that never opted in. The graph file carries
 the snippet that turns them on. Allowances under `design.allowances` are a

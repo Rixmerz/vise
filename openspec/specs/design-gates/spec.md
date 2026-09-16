@@ -123,10 +123,12 @@ No validator added by this capability SHALL return `passed=True` with
 
 #### Scenario: Playwright is not installed
 
-- **GIVEN** a project where the `vise[design]` extra has not been installed
+- **GIVEN** a project where the `design` extra has not been installed
 - **WHEN** the `ui_contrast` or `ui_layout` validator runs
 - **THEN** it returns `passed=False`
 - **AND** the evidence names the exact command that installs the extra
+- **AND** that command names a distribution this project owns or depends on —
+  never a third-party PyPI name that happens to match this project's own
 
 #### Scenario: Playwright is installed but the browser binary is missing
 

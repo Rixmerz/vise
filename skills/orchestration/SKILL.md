@@ -479,7 +479,7 @@ and each Playwright demands its own Chromium revision, so this is two installs,
 not one:
 
 ```
-<vise venv>/python -m pip install 'vise[design]'
+<vise venv>/python -m pip install 'playwright>=1.40'
 <vise venv>/python -m playwright install chromium     # for the gates
 uv run --project <layout-inspector plugin root> playwright install chromium
 ```

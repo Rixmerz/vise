@@ -80,7 +80,7 @@ fi
 
 # 2c. Design extras (--design): playwright plus the browser it drives.
 #
-#     Both steps, and in this order. `pip install 'vise[design]'` alone leaves
+#     Both steps, and in this order. Installing the extra alone leaves
 #     playwright installed with no browser, and the gates then fail closed on a
 #     message about a missing Chromium — one install later the person is stuck
 #     again with no idea why. That two-step trap is exactly what

@@ -45,7 +45,9 @@ metadata:
 # not opted in. Add them to the `integration` node yourself once you have
 # installed the extra and named what to render:
 #
-#     pip install 'vise[design]' && playwright install chromium
+#     ./install.sh --design
+#     # or, into an environment that already has vise:
+#     pip install 'playwright>=1.40' && playwright install chromium
 #
 #     # .vise/quality.yaml
 #     design:

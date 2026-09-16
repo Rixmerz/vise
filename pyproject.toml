@@ -35,8 +35,13 @@ dependencies = [
 # The render gates (ui_layout, ui_contrast) drive a real browser: contrast
 # against an effective background and per-breakpoint geometry are properties
 # of the rendered document, and no stdlib module renders a page. Kept out of
-# the core install so `pip install vise` never pulls a browser — every module
-# that needs playwright imports it lazily, inside the function that uses it.
+# the core install so installing vise never pulls a browser — every module that
+# needs playwright imports it lazily, inside the function that uses it.
+#
+# Nothing may print `pip install 'vise[design]'` as the remedy for a missing
+# browser: `vise` on PyPI is an unrelated project, and this one (`vise-mcp`) is
+# not published there at all. render_harness._INSTALL_PIP names the requirement
+# below directly, and a test ties the two together.
 design = ["playwright>=1.40"]
 dev = [
     "bandit>=1.7.0",

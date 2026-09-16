@@ -60,9 +60,9 @@ def test_every_flag_the_help_advertises_is_a_flag_it_parses(script: str):
 
 
 def test_the_design_flag_installs_the_browser_too(script: str):
-    """`pip install 'vise[design]'` alone leaves playwright with no Chromium,
-    and the gates then fail closed on a message about a missing browser — one
-    install later the person is stuck again. Both steps or neither."""
+    """Installing the extra alone leaves playwright with no Chromium, and the
+    gates then fail closed on a message about a missing browser — one install
+    later the person is stuck again. Both steps or neither."""
     block = script.split('if [ "$DESIGN" = "1" ]', 1)[1].split("\nfi\n", 1)[0]
     assert "[design]" in block
     assert "playwright install chromium" in block
