@@ -1,5 +1,11 @@
 """Every rules skill whose language has a server says when to reach for it.
 
+vise declares no language servers itself — the official marketplace ships one
+plugin per language, and a second claimant on the same extension makes
+resolution undefined. What a `*-rules` skill teaches is when to prefer the
+`LSP` tool over grep, which holds for whoever installed the plugin for that
+language.
+
 Declaring a language server, and even handing every agent the `LSP` tool, does
 not make anything use it. An agent about to change code reaches for `Grep`,
 because grep is the habit and it always returns something. The guidance has to
@@ -17,7 +23,6 @@ returns nothing, on advice vise gave.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -34,7 +39,7 @@ LSP_OPERATIONS = frozenset({
 
 NAVIGATION_HEADING = "## Navigation — the language server, not grep"
 
-#: Rules skills whose extensions no declared server covers.
+#: Rules skills whose extensions no language server covers.
 WITHOUT_A_SERVER = frozenset({"bash-rules", "sql-rules", "web-ui-rules"})
 
 
@@ -50,33 +55,44 @@ def root() -> Path:
     return _root()
 
 
-@pytest.fixture(scope="module")
-def served_extensions(root: Path) -> frozenset[str]:
-    manifest = json.loads(
-        (root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
-    )
-    exts: set[str] = set()
-    for cfg in manifest.get("lspServers", {}).values():
-        exts.update(e.lower() for e in cfg.get("extensionToLanguage", {}))
-    return frozenset(exts)
+#: Extensions some language server covers. It used to be derived from vise's
+#: own `lspServers`; vise declares none now — the official marketplace ships one
+#: plugin per language and bundling a second claimant made resolution undefined
+#: — so the split is keyed to what that catalogue covers instead. The guidance
+#: in a `*-rules` skill is about the `LSP` tool, which works for whoever
+#: installed the plugin for that language; it was never about vise owning the
+#: declaration.
+SERVED_EXTENSIONS = frozenset({
+    ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx",   # clangd-lsp
+    ".cs",                                                # csharp-lsp
+    ".go",                                                # gopls-lsp
+    ".php",                                               # php-lsp
+    ".java",                                              # jdtls-lsp
+    ".kt", ".kts",                                        # kotlin-lsp
+    ".lua",                                               # lua-lsp
+    ".py", ".pyi",                                        # pyright-lsp
+    ".rb", ".rake", ".gemspec", ".ru", ".erb",            # ruby-lsp
+    ".rs",                                                # rust-analyzer-lsp
+    ".swift",                                             # swift-lsp
+    ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs",  # typescript-lsp
+})
 
 
 def _rules_skills(root: Path) -> list[Path]:
     return sorted((root / "skills").glob("*-rules/SKILL.md"))
 
 
-def test_the_split_is_what_the_manifest_says_it_is(root: Path, served_extensions):
-    """The exemption list is a claim about plugin.json; check it against it.
+def test_the_split_is_a_claim_about_which_languages_have_a_server(root: Path):
+    """The exemption list is a claim; check it against the served set.
 
-    If a server is ever added for shell or SQL, this fails and the skill gets
-    its section — rather than the list quietly staying right for the wrong
-    reason.
+    If a server ever covers shell or SQL, this fails and the skill gets its
+    section — rather than the list quietly staying right for the wrong reason.
     """
     names = {p.parent.name for p in _rules_skills(root)}
     assert WITHOUT_A_SERVER <= names
     for ext in (".sh", ".bash", ".zsh", ".sql", ".html", ".css", ".scss"):
-        assert ext not in served_extensions, (
-            f"{ext} now has a declared server — the rules skill covering it "
+        assert ext not in SERVED_EXTENSIONS, (
+            f"{ext} now has a language server — the rules skill covering it "
             f"should gain a navigation section and leave WITHOUT_A_SERVER"
         )
 
@@ -88,7 +104,7 @@ def test_every_served_language_says_when_to_use_the_server(root: Path):
         and NAVIGATION_HEADING not in p.read_text(encoding="utf-8")
     ]
     assert not missing, (
-        f"these languages have a declared server and no guidance on when to "
+        f"these languages have a language server and no guidance on when to "
         f"prefer it over grep: {missing}"
     )
 
@@ -101,7 +117,7 @@ def test_a_language_with_no_server_is_not_told_to_use_one(root: Path):
         if p.parent.name in WITHOUT_A_SERVER
         and NAVIGATION_HEADING in p.read_text(encoding="utf-8")
     ]
-    assert not offenders, f"no declared server covers these extensions: {offenders}"
+    assert not offenders, f"no language server covers these extensions: {offenders}"
 
 
 def test_the_guidance_names_the_alternative_it_beats(root: Path):

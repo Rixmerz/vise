@@ -1,18 +1,18 @@
 """vise CLI entry point — minimal for now; subcommands land in later waves."""
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 from vise import __version__
 
 # ponytail: install hints are static text, not a second copy of server
-# behavior — the server list itself always comes from plugin.json, never
-# hardcoded here.
+# behavior — the server list itself is read off the installed plugins, never
+# hardcoded here. vise declares no servers of its own, so every name below
+# belongs to someone else's manifest; an unknown one falls back to a generic
+# "put it on PATH" rather than going unreported.
 _INSTALL_HINTS: dict[str, str] = {
     "clangd": "apt install clangd / brew install llvm",
     "csharp-ls": "dotnet tool install -g csharp-ls",
@@ -29,30 +29,6 @@ _INSTALL_HINTS: dict[str, str] = {
     "typescript": "npm install -g typescript-language-server typescript",
 }
 
-
-def _plugin_root() -> Path | None:
-    """Walk up from this file looking for .claude-plugin/plugin.json."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / ".claude-plugin" / "plugin.json").exists():
-            return parent
-    return None
-
-
-def _load_manifest() -> dict[str, Any] | None:
-    root = _plugin_root()
-    if root is None:
-        return None
-    try:
-        return json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-#: Fields Claude Code's plugin schema accepts for an LSP server. Anything else
-#: is refused, and three of these are refused at runtime with "not yet
-#: implemented" even though the schema takes them — see
-#: ``test_plugin_lsp_manifest.py``, which pins the list.
-_LSP_UNIMPLEMENTED_FIELDS = ("startupTimeout", "shutdownTimeout", "restartOnCrash")
 
 #: How long a healthy server has to prove it is one by staying alive.
 _PROBE_SETTLE_S = 1.5
@@ -120,79 +96,103 @@ def _close(proc: subprocess.Popen) -> None:
 
 
 def _cmd_doctor() -> int:
-    manifest = _load_manifest()
     lines: list[str] = []
 
-    lines.append("=== LSP servers (declared in .claude-plugin/plugin.json) ===")
-    if manifest is None:
-        lines.append("  could not locate/parse plugin.json")
-        declared = 0
-        installed = 0
+    # One survey, two sections. It walks every installed plugin's declaration
+    # — vise declares none of its own, deliberately: the official marketplace
+    # ships one plugin per language covering exactly the set vise used to
+    # duplicate, and `lspServers` has no priority field, so bundling them here
+    # could only make resolution undefined for anyone who installed both.
+    _survey_error = ""
+    try:
+        from vise.core.plugin_conflicts import survey as _lsp_survey
+
+        lsp = _lsp_survey()
+    except Exception as exc:  # pragma: no cover - defensive, doctor must not crash
+        lsp = None
+        _survey_error = f"could not check ({exc})"
+
+    lines.append("=== LSP servers (declared by installed plugins) ===")
+    if lsp is None:
+        lines.append(f"  {_survey_error}")
+    elif not lsp.known:
+        lines.append(f"  {lsp.detail}")
+    elif not lsp.servers:
+        lines.append("  none — no installed plugin declares a language server.")
+        lines.append(
+            "  The `LSP` tool every code-touching agent carries has nothing to "
+            "call until one does."
+        )
+        lines.append(
+            "  Install the one for your language: `/plugin install "
+            "pyright-lsp@claude-plugins-official` (also typescript-lsp,"
+        )
+        lines.append(
+            "  gopls-lsp, clangd-lsp, rust-analyzer-lsp, ruby-lsp, php-lsp, "
+            "swift-lsp, lua-lsp, csharp-lsp)."
+        )
     else:
-        servers: dict[str, Any] = manifest.get("lspServers", {})
-        declared = len(servers)
-        installed = 0
+        verified = 0
         unusable: list[str] = []
-        for name, cfg in sorted(servers.items()):
-            binary = cfg.get("command", name)
-            found = shutil.which(binary)
-            exts = " ".join(sorted(cfg.get("extensionToLanguage", {}).keys()))
-            rejected = [f for f in _LSP_UNIMPLEMENTED_FIELDS if f in cfg]
-            if rejected:
+        for server in lsp.servers:
+            label = f"{server.name} ({server.plugin.split('@')[0]})"
+            exts = " ".join(server.extensions)
+            if server.unimplemented:
                 # Claude Code throws on these before the server is registered,
                 # so it can never start however well the binary is installed.
-                unusable.append(name)
+                unusable.append(server.name)
                 lines.append(
-                    f"  {name:<15} [BROKEN]  {exts}  — plugin.json sets "
-                    f"{', '.join(rejected)}, which Claude Code refuses "
-                    f"(\"not yet implemented\"); remove the field"
+                    f"  {label:<28} [BROKEN]  {exts}  — declares "
+                    f"{', '.join(server.unimplemented)}, which Claude Code "
+                    f"refuses (\"not yet implemented\"); the server is never "
+                    f"registered"
                 )
                 continue
-            if not found:
-                hint = _INSTALL_HINTS.get(name, f"install `{binary}` and put it on PATH")
-                lines.append(f"  {name:<15} [MISSING] {exts}  — install: {hint}")
+            if not shutil.which(server.command):
+                hint = _INSTALL_HINTS.get(
+                    server.name, f"install `{server.command}` and put it on PATH"
+                )
+                lines.append(f"  {label:<28} [MISSING] {exts}  — install: {hint}")
                 continue
-            args = list(cfg.get("args") or [])
-            ok, evidence = _probe(binary, args)
-            invocation = " ".join([binary, *args])
+            ok, evidence = _probe(server.command, list(server.args))
             if ok:
-                installed += 1
-                lines.append(f"  {name:<15} [OK]      {exts}")
+                verified += 1
+                lines.append(f"  {label:<28} [OK]      {exts}")
             else:
-                unusable.append(name)
+                unusable.append(server.name)
                 lines.append(
-                    f"  {name:<15} [ON PATH, UNVERIFIED]  {exts}\n"
-                    f"{'':<19}`{invocation}` did not start: {evidence[:160]}"
+                    f"  {label:<28} [ON PATH, UNVERIFIED]  {exts}\n"
+                    f"{'':<32}`{server.invocation}` did not start: {evidence[:160]}"
                 )
-        lines.append(f"declared: {declared} / verified: {installed}")
+        lines.append(
+            f"declared: {len(lsp.servers)} by {len(lsp.declaring)} plugin(s) "
+            f"/ verified: {verified}"
+        )
         if unusable:
             lines.append(
                 f"  {len(unusable)} declared but not usable as configured: "
-                f"{', '.join(unusable)}"
+                f"{', '.join(sorted(set(unusable)))}"
             )
 
         # A Deno workspace under typescript-language-server fails EVERY LSP
         # call — that server hard-requires a `typescript` package in
-        # node_modules, which a Deno project never has. `deno` is deliberately
-        # not declared by default: it would claim five extensions `typescript`
-        # already claims, and the manifest schema has no priority field, so
-        # shipping both makes .ts resolution undefined for every user.
-        # Deterministic opt-in beats a nondeterministic default.
+        # node_modules, which a Deno project never has.
         cwd = Path.cwd()
         is_deno = any((cwd / n).exists() for n in ("deno.json", "deno.jsonc"))
-        ts_owns_ts = ".ts" in servers.get("typescript", {}).get(
-            "extensionToLanguage", {}
-        )
-        if is_deno and "deno" not in servers and ts_owns_ts:
+        node_ts = [
+            s for s in lsp.servers
+            if ".ts" in s.extensions and "typescript-language-server" in s.command
+        ]
+        has_deno = any(s.command == "deno" for s in lsp.servers)
+        if is_deno and node_ts and not has_deno:
+            owner = node_ts[0].plugin
             lines.extend([
                 "",
                 "  NOTE: this is a Deno workspace, but `.ts` maps to",
-                "  typescript-language-server, which cannot start without",
-                "  node_modules/typescript — every LSP call here will fail.",
-                "  Fix: add the block below to lspServers in",
-                "  .claude-plugin/plugin.json AND remove .ts/.tsx/.js/.jsx/.mts",
-                "  from the `typescript` entry so exactly one server owns them,",
-                "  then restart Claude Code (the map is read at session start).",
+                f"  typescript-language-server (from {owner}), which cannot",
+                "  start without node_modules/typescript — every LSP call here",
+                "  will fail. Disable that plugin for this machine and declare",
+                "  `deno` instead, so exactly one server owns .ts/.tsx/.js/.jsx/.mts:",
                 '    "deno": {',
                 '      "command": "deno", "args": ["lsp"],',
                 '      "extensionToLanguage": {',
@@ -201,6 +201,7 @@ def _cmd_doctor() -> int:
                 '        ".mts": "typescript"',
                 "      }",
                 "    }",
+                "  Then restart Claude Code — the map is read at session start.",
             ])
 
     lines.append("")
@@ -215,8 +216,8 @@ def _cmd_doctor() -> int:
     except Exception:
         _find_checker = None  # type: ignore[assignment]
     for tool in ("ruff", "mypy"):
-        found = _find_checker(tool) if _find_checker else shutil.which(tool)
-        lines.append(f"  {tool:<15} [{'OK' if found else 'MISSING'}]" + (f"  {found}" if found else ""))
+        checker = _find_checker(tool) if _find_checker else shutil.which(tool)
+        lines.append(f"  {tool:<15} [{'OK' if checker else 'MISSING'}]" + (f"  {checker}" if checker else ""))
 
     lines.append("")
     lines.append("=== LSP extension conflicts (across installed plugins) ===")
@@ -228,15 +229,14 @@ def _cmd_doctor() -> int:
     # section is the whole argument — and this is the same rule applied to
     # plugins vise has never heard of.
     try:
-        from vise.core.plugin_conflicts import survey as _lsp_survey
-
-        found = _lsp_survey()
-        if not found.known:
-            lines.append(f"  {found.detail}")
-        elif not found.conflicts:
-            lines.append(f"  none — {found.detail}")
+        if lsp is None:
+            raise RuntimeError(_survey_error)
+        if not lsp.known:
+            lines.append(f"  {lsp.detail}")
+        elif not lsp.conflicts:
+            lines.append(f"  none — {lsp.detail}")
         else:
-            for conflict in found.conflicts:
+            for conflict in lsp.conflicts:
                 who = " vs ".join(str(claim) for claim in conflict.claims)
                 lines.append(f"  {conflict.extension:<8} {who}")
                 if conflict.within_one_plugin:

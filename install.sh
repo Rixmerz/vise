@@ -132,7 +132,7 @@ if claude plugin list 2>/dev/null | grep -q "vise@${MARKETPLACE}"; then
   # update then did no work either, for the same reason one layer down, and the
   # installed copy under ~/.claude/plugins/cache silently stayed at whatever
   # commit it was first installed from. Anything that reads the plugin — every
-  # skill, every agent, the lspServers map — was reading that stale copy while
+  # skill, every agent, every hook — was reading that stale copy while
   # `vise doctor`, which runs from the venv's editable install, reported the
   # working tree. The two disagreeing is exactly how a fixed bug looks unfixed.
   #
@@ -146,17 +146,20 @@ else
   claude plugin install "vise@${MARKETPLACE}" --yes
 fi
 
-# 4. LSP binaries: vise declares language servers for 12 ecosystems in
-#    plugin.json but does NOT ship the binaries. Each starts lazily, only when
-#    a file of its type is opened.
+# 4. LSP binaries: vise declares NO language servers — the official
+#    marketplace ships one plugin per language, and `lspServers` has no
+#    priority field, so bundling a second claimant for an extension made
+#    resolution undefined for anyone who had both. What `doctor` reports here
+#    is what the plugins on THIS machine declare, and whether their binaries
+#    actually start. Each starts lazily, only when a file of its type is
+#    opened.
 #
 #    Report through `vise doctor` rather than re-deriving the list here. The
-#    hint table used to be duplicated in this script, which meant two places
-#    to keep in step with plugin.json — and this copy only ran `command -v`,
-#    so it printed a green tick for `rust-analyzer` when rustup had installed
-#    a shim that exits with "Unknown binary" the moment anything runs it.
-#    `vise doctor` starts each server the way Claude Code does and reports
-#    what actually happened.
+#    hint table used to be duplicated in this script, which meant two places to
+#    keep in step — and this copy only ran `command -v`, so it printed a green
+#    tick for `rust-analyzer` when rustup had installed a shim that exits with
+#    "Unknown binary" the moment anything runs it. `vise doctor` starts each
+#    server the way Claude Code does and reports what actually happened.
 #    Four sections, not one. LSP servers are the dormant kind — absent means
 #    nothing until you open that language. The render gates are the opposite:
 #    they fail CLOSED, so a missing browser refuses every run in a repo that
@@ -187,6 +190,8 @@ else
 fi
 echo "  (a missing LSP server stays dormant until you open that language;"
 echo "   a missing render-gate browser does not — those gates fail closed.)"
+echo "  (vise declares no language servers of its own: install the official"
+echo "   plugin for your language, e.g. pyright-lsp@claude-plugins-official.)"
 
 echo
 echo "vise installed. Restart Claude Code (or start a new session) to load it."

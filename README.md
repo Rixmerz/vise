@@ -534,11 +534,41 @@ there.
 
 ## LSP servers
 
-`.claude-plugin/plugin.json` declares `lspServers` — Claude Code's own LSP
-client reads this map (extension → server) to give agents `hover` /
-`documentSymbol` / `findReferences` / `incomingCalls` on your source. vise
-does **not** install these toolchains; it only declares which binary to
-launch per file extension. Install what you need:
+**vise declares none, deliberately.** Claude Code's LSP client reads an
+`lspServers` map (extension → server) out of each plugin's manifest, and that
+is what gives agents `hover` / `documentSymbol` / `findReferences` /
+`incomingCalls` on your source. vise used to declare twelve servers — and the
+official marketplace ships one plugin per language covering exactly those
+twelve, under the same server names. `lspServers` is plugin-scoped with **no
+priority field, no workspace-root marker and no project-level override**, so
+anyone who had vise and any official LSP plugin got undetermined resolution on
+every extension both claimed. That is the same argument this README already
+made for keeping `deno` opt-in, and it applies twelve times over.
+
+Install the plugin for the language you work in, then its binary:
+
+| Plugin | Extensions | Install the binary |
+|---|---|---|
+| `clangd-lsp` | `.c .h .cpp .cc .cxx .hpp .hxx` | `apt install clangd` / `brew install llvm` |
+| `csharp-lsp` | `.cs` | `dotnet tool install -g csharp-ls` |
+| `gopls-lsp` | `.go` | `go install golang.org/x/tools/gopls@latest` |
+| `php-lsp` | `.php` | `npm install -g intelephense` |
+| `jdtls-lsp` | `.java` | https://github.com/eclipse-jdtls/eclipse.jdt.ls |
+| `kotlin-lsp` | `.kt .kts` | https://github.com/Kotlin/kotlin-lsp |
+| `lua-lsp` | `.lua` | https://github.com/LuaLS/lua-language-server |
+| `pyright-lsp` | `.py .pyi` | `npm install -g pyright` (or `pip install pyright`) |
+| `ruby-lsp` | `.rb .rake .gemspec .ru .erb` | `gem install ruby-lsp` |
+| `rust-analyzer-lsp` | `.rs` | `rustup component add rust-analyzer` |
+| `swift-lsp` | `.swift` | bundled with the Swift toolchain |
+| `typescript-lsp` | `.ts .tsx .js .jsx .mts .cts .mjs .cjs` | `npm install -g typescript-language-server typescript` |
+
+All twelve are on the official marketplace: `/plugin install
+pyright-lsp@claude-plugins-official`, and so on. Two of them ship
+`startupTimeout`, which Claude Code accepts in the schema and then refuses at
+load — *"startupTimeout is not yet implemented. Remove this field from the
+configuration."* — before the server is registered. `vise doctor` reports such
+a server as **BROKEN** rather than MISSING, because installing its binary
+cannot help.
 
 Declaring a server is not the same as using one, and vise has been wrong about
 this twice. First no agent listed the `LSP` tool, so nothing could call it.
@@ -553,7 +583,7 @@ loads, because those are keyed to the extension under edit.
 four questions against the search you would otherwise run — plus its two limits:
 dynamic dispatch is invisible to every language server, and no server means no
 answer rather than an empty caller list. The twelve rules skills whose languages
-have a declared server each add what grep gets wrong *in that language*: barrel
+have a server each add what grep gets wrong *in that language*: barrel
 files and aliased imports in TypeScript, implicit interface satisfaction in Go,
 blanket impls and macro expansion in Rust, `__init__.py` re-exports in Python,
 partial classes in C#, traits in PHP, protocol conformance declared in another
@@ -561,10 +591,10 @@ file in Swift. Ruby and Lua say the opposite where it is true — metaprogrammin
 makes a `findReferences` result a floor on the caller set, not the caller set.
 
 `bash-rules`, `sql-rules` and `web-ui-rules` deliberately say nothing: no
-declared server covers `.sh`, `.sql` or `.css`, and advice that cannot work is
-worse than none. `test_lsp_guidance_sync.py` pins both halves against
-`plugin.json`, so adding a server for one of those languages fails the suite
-until its skill gains the section. Note what the tool does **not** do: its nine operations are all
+language server covers `.sh`, `.sql` or `.css`, and advice that cannot work is
+worse than none. `test_lsp_guidance_sync.py` pins both halves, so a server
+arriving for one of those languages fails the suite until its skill gains the
+section. Note what the tool does **not** do: its nine operations are all
 navigation, and none of them is diagnostics — error checking is `lsp_clean`'s
 job, and that validator shells out to per-language checkers rather than
 speaking LSP at all.
@@ -594,9 +624,12 @@ lowercased before use, so an uppercase key is a hidden duplicate rather than a
 distinct mapping, and two servers claiming one extension makes resolution
 undefined.
 
-Run `vise doctor` to see which of these actually **work** on your machine, plus
-the status of vise's own `ruff`/`mypy` diagnostics shell-out
-and any pending XDG state migration.
+Run `vise doctor` to see which servers this session actually has and which of
+them **work** on your machine. It reads every installed plugin's declaration —
+from the plugin's own manifest, and from the marketplace entry when the plugin
+ships no manifest, which is where the official LSP plugins keep theirs — so it
+reports the session you have rather than a map vise owns. It also reports vise's
+own `ruff`/`mypy` diagnostics shell-out and any pending XDG state migration.
 
 ### Deno projects — opt-in, and why it isn't the default
 
@@ -628,22 +661,28 @@ override** — `lspServers` is plugin-scoped only. So which
 server wins an extension both claim is **undetermined**, and shipping the
 collision would make `.ts` behavior a coin flip for every user, including
 Node users for whom it works today. A deterministic opt-in beats a
-nondeterministic default.
+nondeterministic default. Applying that rule to the other eleven servers is
+why vise now declares none at all.
 
 `vise doctor` reports the collision rather than leaving it to be discovered
-as odd behaviour. It reads every installed plugin's manifest out of
-`~/.claude/plugins/installed_plugins.json` (or `$CLAUDE_CONFIG_DIR`), resolving
+as odd behaviour. It reads every installed plugin's declaration, starting from
+`~/.claude/plugins/installed_plugins.json` (or `$CLAUDE_CONFIG_DIR`): the
+plugin's own manifest when it has one, and the marketplace entry that installed
+it when it does not — which is where the official LSP plugins keep theirs, and
+reading only the first source made this blind to every one of them. It resolves
 all three shapes `lspServers` accepts — a record, a path to a `.lsp.json`, or an
 array of either — and names both claimants for any extension claimed twice,
-comparing `.TSX`, `.tsx` and `tsx` as one claim. It does not pick a winner:
-the schema provides no way to express one, so the fix is always to remove the
-extension from one manifest. `install.sh` prints the same section, because
-installing vise beside whatever a machine already has is the moment a collision
-is introduced and the cheapest moment to undo it.
+comparing `.TSX`, `.tsx` and `tsx` as one claim. A plugin whose declaration
+cannot be read either way is named too, because a report that answers "none"
+about a file it could not open is worse than one that admits it. It does not
+pick a winner: the schema provides no way to express one, so the fix is always
+to remove the extension from one manifest, or to disable one of the two
+plugins. `install.sh` prints the same section, because installing vise beside
+whatever a machine already has is the moment a collision is introduced and the
+cheapest moment to undo it.
 
-To switch a machine over to Deno, add this to `lspServers` in
-`.claude-plugin/plugin.json` **and remove the same five extensions from the
-`typescript` entry** so exactly one server owns them:
+To use Deno, disable `typescript-lsp` and declare `deno` in a plugin of your
+own, so exactly one server owns those five extensions:
 
 ```jsonc
 "deno": {
@@ -656,9 +695,11 @@ To switch a machine over to Deno, add this to `lspServers` in
 }
 ```
 
-`vise doctor` detects this case and prints the block for you. **Restart
-Claude Code afterwards** — the LSP server map is read once at session
-start, so editing it mid-session has no effect (verified).
+`vise doctor` detects this case — a `deno.json` in the working directory, a
+`typescript-language-server` claiming `.ts`, and no `deno` server anywhere —
+and prints the block for you, naming the plugin the conflicting claim came
+from. **Restart Claude Code afterwards** — the LSP server map is read once at
+session start, so editing it mid-session has no effect (verified).
 
 This stops being a manual step if Claude Code ever ships per-project
 `lspServers` resolution; the tie-break signal is trivial (`deno.json` ⇒

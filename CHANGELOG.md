@@ -8,6 +8,64 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Behaviour change — vise declares no language servers
+
+It declared twelve, and the official marketplace ships one plugin per language
+covering exactly those twelve, under the same server names. `lspServers` is
+plugin-scoped with **no priority field, no workspace-root marker and no
+project-level override**, so anyone running vise beside an official LSP plugin
+got undetermined resolution on every extension both claimed — a server quietly
+answering for the wrong toolchain, with nothing anywhere reporting it.
+
+This README already made that argument for a single server: `deno` stays
+opt-in because claiming five extensions `typescript` already claimed would make
+`.ts` a coin flip, and "a deterministic opt-in beats a nondeterministic
+default". Declaring twelve was the same defect twelve times over.
+
+On the machine this was found on, four official LSP plugins were enabled and
+**twelve extensions were claimed twice**.
+
+Nothing in vise depended on them. No gate uses LSP — `lsp_clean`, despite the
+name, shells out to ruff, mypy, go vet, cargo check and tsc. The only consumer
+is the `LSP` navigation tool the agents carry, and that works for whoever
+installed the plugin for their language.
+
+**What to do:** install the official plugin for each language you work in —
+`/plugin install pyright-lsp@claude-plugins-official`, and the same for
+typescript-lsp, gopls-lsp, clangd-lsp, rust-analyzer-lsp, ruby-lsp, php-lsp,
+swift-lsp, lua-lsp, csharp-lsp, kotlin-lsp, jdtls-lsp. The README table maps
+each to its binary. Two of them, `jdtls-lsp` and `kotlin-lsp`, ship
+`startupTimeout`, which Claude Code refuses at load before registering the
+server; `vise doctor` now reports such a server as BROKEN rather than MISSING,
+because installing its binary cannot help.
+
+`vise doctor`'s LSP section changed with it: instead of listing vise's own map,
+it lists every server the installed plugins declare, who declared it, and
+whether it starts.
+
+### Fixed — the LSP conflict scan reported a clean machine it could not read
+
+`vise doctor` printed "none — 11 installed plugin(s) declare language servers;
+0 extension(s) claimed more than once" on a machine with twelve extensions
+claimed twice, and both halves of that line were wrong.
+
+The scan read `lspServers` out of `installPath/.claude-plugin/plugin.json` and
+nowhere else. The official per-language LSP plugins ship **no manifest at all**
+— their install directory holds a LICENSE and a README, and the whole
+declaration lives in the marketplace entry that installed them. Every one hit
+the `except: continue` and was dropped in silence while the survey still
+reported a known, clean answer.
+
+The count was wrong for a plainer reason: it counted manifests read, not
+plugins that declared anything. One plugin declared servers; the line said
+eleven did.
+
+Now: the plugin's own manifest first, its marketplace entry when that declares
+nothing, and anything unresolved is named rather than dropped. The manifest
+wins when both declare, so a plugin updated in place is not judged by what the
+catalogue said at install time — and one server is never counted into a
+conflict with itself.
+
 ### Fixed — the remedy for a missing browser installed a stranger's package
 
 The three render gates fail closed without Playwright, and every message that

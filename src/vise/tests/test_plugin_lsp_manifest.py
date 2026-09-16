@@ -1,20 +1,31 @@
-"""The LSP block in plugin.json, checked against what Claude Code accepts.
+"""vise declares no language servers, and the rules if it ever does again.
 
-vise declares twelve language servers and ships none of the binaries. That is
-fine — each is dormant until someone opens a file of its type. What is not fine
-is declaring one Claude Code will refuse: it throws before the server is
-registered, so the server can never start however well the binary is installed,
-and nothing in vise's own output said so.
+It used to declare twelve — and the official marketplace ships one plugin per
+language covering exactly those twelve, under the same server names. Since
+`lspServers` is plugin-scoped with no priority field, no workspace-root marker
+and no project-level override, a user with vise and any official LSP plugin got
+undetermined resolution on every extension both claimed. That is not a corner
+case: on the machine this was found on, four official LSP plugins were enabled
+and twelve extensions were claimed twice.
 
-Two of them shipped in exactly that state. `jdtls` and `kotlin-lsp` carried
-`startupTimeout`, and the plugin loader answers that with
+vise's own README already makes this argument for one server — it refuses to
+bundle `deno` beside `typescript` because "a deterministic opt-in beats a
+nondeterministic default". Declaring twelve was the same defect twelve times,
+so they are gone: language servers are installed per language, by the plugin
+whose only job is that language, and `vise doctor` reports what the session
+ended up with by reading everyone's manifests.
+
+The schema rules below are kept as guards rather than deleted. They cost
+nothing against an empty map and they are what a future server would have to
+satisfy — including the one that shipped broken twice: `jdtls` and
+`kotlin-lsp` carried `startupTimeout`, and the plugin loader answers that with
 
     LSP server 'jdtls': startupTimeout is not yet implemented.
     Remove this field from the configuration.
 
-These tests are the same shape as the rest of `test_asset_honesty.py`: a fact
-restated in a manifest drifts from the thing that reads it, so the suite pins
-it.
+Both official plugins still ship that field today, which is why `vise doctor`
+reports such a server as BROKEN rather than MISSING — installing the binary
+cannot help.
 """
 from __future__ import annotations
 
@@ -125,10 +136,32 @@ def test_no_two_servers_claim_the_same_extension(servers):
     assert not contested, f"more than one server claims: {contested}"
 
 
-def test_every_declared_server_has_an_install_hint():
-    """A server nobody can install is a row in `doctor` that helps nobody."""
+#: Server names the official per-language LSP plugins declare. `vise doctor`
+#: reports whatever the installed plugins declare, so its hint table is keyed
+#: to these rather than to anything vise owns. An unknown name still gets a
+#: generic "put it on PATH", so a miss degrades the row rather than losing it.
+OFFICIAL_SERVER_NAMES = frozenset({
+    "clangd", "csharp-ls", "gopls", "intelephense", "jdtls", "kotlin-lsp",
+    "lua", "pyright", "ruby-lsp", "rust-analyzer", "sourcekit-lsp",
+    "typescript",
+})
+
+
+def test_vise_declares_no_language_servers(servers):
+    """The whole point of the change. Re-adding one re-creates the collision
+    for every user who also installed the official plugin for that language,
+    and nothing in Claude Code arbitrates between them."""
+    assert servers == {}, (
+        "vise declares language servers again: "
+        f"{sorted(servers)}. The official marketplace ships one plugin per "
+        "language; `lspServers` has no priority field, so shipping both makes "
+        "resolution undefined for anyone with either installed."
+    )
+
+
+def test_doctor_can_name_an_install_for_every_official_server():
+    """A row in `doctor` that says MISSING and nothing else helps nobody."""
     from vise.cli.main import _INSTALL_HINTS
 
-    servers = _manifest().get("lspServers", {})
-    missing = sorted(set(servers) - set(_INSTALL_HINTS))
-    assert not missing, f"declared with no install hint in `vise doctor`: {missing}"
+    missing = sorted(OFFICIAL_SERVER_NAMES - set(_INSTALL_HINTS))
+    assert not missing, f"no install hint in `vise doctor` for: {missing}"
