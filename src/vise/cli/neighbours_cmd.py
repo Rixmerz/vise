@@ -41,7 +41,13 @@ def _render_gates_line(project: Path) -> str:
 
 
 def _cmd_neighbours(args: argparse.Namespace) -> int:
-    from vise.core.neighbour_state import graph_state, index_state, trace_state
+    from vise.core.neighbour_state import (
+        cube_state,
+        graph_state,
+        index_state,
+        mempalace_files,
+        trace_state,
+    )
 
     project = Path(args.project_dir or ".").expanduser().resolve()
     print(f"{project}\n")
@@ -52,6 +58,14 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
     print(f"  flowtrace         {trace.detail}")
     graph = graph_state(project)
     print(f"  Graphify          {graph.detail}")
+    cube = cube_state(project)
+    print(f"  delta-cube        {cube.detail}")
+    palace = mempalace_files(project)
+    print(
+        "  MemPalace         "
+        + (f"{', '.join(palace)} in the repo root" if palace
+           else "no project files in the repo root")
+    )
     print(f"  vise render gates {_render_gates_line(project)}")
 
     print("\nminimum versions vise's guidance assumes:")
@@ -69,13 +83,30 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
             "\nThe ingested edges came from a graph that is no longer on disk. "
             "Caller counts include code that has moved until it is re-ingested."
         )
+    if cube.refuses:
+        print(
+            "\nWithout the cube, `cube_index` fails closed. Nothing else is "
+            "affected — vise never calls delta-cube; it reads what it wrote."
+        )
+    elif cube.indexed and not cube.reindexed:
+        print(
+            "\ndelta-cube holds this repo but has never measured it: tensions "
+            "appear only after `cube_reindex`, so its zero is not a clean bill."
+        )
+    if palace:
+        print(
+            "\nMemPalace has been initialised here. Its hooks write only to its "
+            "own data dir, but these files sit in the repo root: put them in "
+            "`diff_scope`'s `allow` list or that gate goes red on files nobody "
+            "edited in the phase."
+        )
     return 0
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "neighbours",
-        help="what livespec, flowtrace and Graphify left in this repo",
+        help="what livespec, flowtrace, Graphify, delta-cube and MemPalace left here",
     )
     p.add_argument("--project-dir", default=None, help="defaults to the cwd")
     p.set_defaults(func=_cmd_neighbours)

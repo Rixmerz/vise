@@ -14,6 +14,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+import pytest
+
 from vise.core.neighbour_state import (
     error_signature,
     graph_state,
@@ -370,3 +372,165 @@ def test_a_graph_with_no_index_beside_it_is_still_reported(tmp_path: Path):
     state = graph_state(tmp_path)
     assert state.present and not state.ingested
     assert "no livespec index" in state.detail
+
+
+# --- delta-cube ---------------------------------------------------------------
+#
+# One database per machine, no project column: every fact below is scoped by
+# the repo's absolute path, and a repo indexed under a different root must not
+# count.
+
+def cube_db(data_dir: Path, *, files: list[str] = (), deltas: bool = False,
+            tensions: int = 0) -> Path:
+    """delta-cube's four durable tables, with just the columns vise reads."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db = data_dir / "dcc.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE code_points (id TEXT PRIMARY KEY, file_path TEXT UNIQUE, "
+        "updated_at TEXT);"
+        "CREATE TABLE contracts (id TEXT PRIMARY KEY, caller_id TEXT, callee_id TEXT);"
+        "CREATE TABLE deltas (id TEXT PRIMARY KEY, code_point_id TEXT);"
+        "CREATE TABLE tensions (id TEXT PRIMARY KEY, contract_id TEXT, status TEXT);"
+    )
+    for n, path in enumerate(files):
+        conn.execute("INSERT INTO code_points VALUES (?,?,?)",
+                     (f"cp{n}", path, f"2026-09-1{n % 9} 10:00:00"))
+    if files and deltas:
+        conn.execute("INSERT INTO deltas VALUES ('d1', 'cp0')")
+    if len(files) >= 2:
+        conn.execute("INSERT INTO contracts VALUES ('c1', 'cp1', 'cp0')")
+        for n in range(tensions):
+            conn.execute("INSERT INTO tensions VALUES (?, 'c1', 'detected')", (f"t{n}",))
+        conn.execute("INSERT INTO tensions VALUES ('resolved', 'c1', 'resolved')")
+    conn.commit()
+    conn.close()
+    return db
+
+
+@pytest.fixture
+def cube_dir(tmp_path: Path, monkeypatch) -> Path:
+    data = tmp_path / "dcc-data"
+    monkeypatch.setenv("DCC_DATA_DIR", str(data))
+    return data
+
+
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    return repo
+
+
+def test_no_cube_database_is_a_known_absence(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    state = cube_state(_repo(tmp_path))
+    assert state.known and not state.indexed and state.refuses
+    assert "never indexed" in state.detail
+    assert state.db.endswith("dcc.db")
+
+
+def test_a_cube_that_holds_other_repos_is_not_an_index_of_this_one(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_db(cube_dir, files=[str(tmp_path / "elsewhere" / "a.py")])
+    state = cube_state(repo)
+    assert state.known and not state.indexed
+    assert "no file under this repo" in state.detail
+
+
+def test_files_under_this_repo_make_it_indexed(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_db(cube_dir, files=[str(repo / "a.py"), str(repo / "b.py"),
+                             str(tmp_path / "elsewhere" / "c.py")])
+    state = cube_state(repo)
+    assert state.indexed and state.files == 2
+    assert state.last_indexed_at.startswith("2026-09-1")
+    assert not state.refuses
+
+
+def test_a_sibling_directory_with_a_shared_prefix_does_not_count(tmp_path: Path, cube_dir: Path):
+    """`/x/repo` must not match `/x/repo-old/a.py` — the prefix ends at the slash."""
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_db(cube_dir, files=[str(tmp_path / "repo-old" / "a.py")])
+    assert not cube_state(repo).indexed
+
+
+def test_zero_tensions_without_a_reindex_says_never_measured(tmp_path: Path, cube_dir: Path):
+    """A tension is written only by `cube_reindex`. Without one, zero means
+    nobody looked, and the state has to say so or a gate reads it as clean."""
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_db(cube_dir, files=[str(repo / "a.py"), str(repo / "b.py")])
+    state = cube_state(repo)
+    assert state.indexed and not state.reindexed and state.open_tensions == 0
+    assert "never measured" in state.detail
+
+
+def test_open_tensions_are_counted_by_status_and_scope(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_db(cube_dir, files=[str(repo / "a.py"), str(repo / "b.py")], deltas=True, tensions=3)
+    state = cube_state(repo)
+    assert state.reindexed and state.open_tensions == 3, "the resolved one is not open"
+    assert "3 open tension(s)" in state.detail
+
+
+def test_an_unreadable_cube_is_unknown_and_does_not_refuse(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    cube_dir.mkdir(parents=True)
+    (cube_dir / "dcc.db").write_bytes(b"not a database at all, just bytes\n" * 8)
+    state = cube_state(_repo(tmp_path))
+    assert not state.known
+    assert not state.refuses
+    assert "could not read" in state.detail
+
+
+def test_an_older_cube_without_the_tensions_table_is_still_an_index(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import cube_state
+
+    repo = _repo(tmp_path)
+    cube_dir.mkdir(parents=True)
+    conn = sqlite3.connect(cube_dir / "dcc.db")
+    conn.execute("CREATE TABLE code_points (id TEXT, file_path TEXT, updated_at TEXT)")
+    conn.execute("INSERT INTO code_points VALUES ('cp0', ?, '2026-09-01')", (str(repo / "a.py"),))
+    conn.commit()
+    conn.close()
+    state = cube_state(repo)
+    assert state.known and state.indexed and state.open_tensions == 0
+
+
+def test_the_database_location_honours_the_env_override(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import delta_cube_db
+
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "custom"))
+    assert delta_cube_db() == tmp_path / "custom" / "dcc.db"
+    monkeypatch.delenv("DCC_DATA_DIR")
+    assert delta_cube_db() == Path.home() / ".local" / "share" / "jig" / "dcc.db"
+
+
+# --- MemPalace ---------------------------------------------------------------
+
+def test_mempalace_files_are_reported_by_presence_only(tmp_path: Path):
+    from vise.core.neighbour_state import mempalace_files
+
+    assert mempalace_files(tmp_path) == ()
+    (tmp_path / "mempalace.yaml").write_text("palace: ~/.config/mempalace\n")
+    assert mempalace_files(tmp_path) == ("mempalace.yaml",)
+    (tmp_path / "entities.json").write_text("{}")
+    assert mempalace_files(tmp_path) == ("mempalace.yaml", "entities.json")
+
+
+def test_summary_names_the_cube_and_mempalace_even_when_absent(tmp_path: Path, cube_dir: Path):
+    from vise.core.neighbour_state import summary
+
+    out = summary(_repo(tmp_path))
+    assert "delta-cube:" in out and "MemPalace:" in out

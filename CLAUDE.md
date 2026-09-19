@@ -158,9 +158,9 @@ change makes one of these tests fail, the fix is almost never to loosen the test
 
 ## The neighbours
 
-vise names tools belonging to `livespec`, `flowtrace` and `layout-inspector` in
-about thirty places and can call none of them: MCP has no server-to-server
-channel. `src/vise/core/neighbours.py` is the one place those names live, and
+vise names tools belonging to `livespec`, `flowtrace`, `layout-inspector` and
+`delta-cube` in about thirty places and can call none of them: MCP has no
+server-to-server channel. `src/vise/core/neighbours.py` is the one place those names live, and
 `test_neighbour_contract.py` holds every asset to it.
 
 That contract keeps vise consistent with itself, which is not the same as
@@ -175,8 +175,10 @@ here could have caught it. So:
 - **Every livespec example takes `workspace`.** It is required on every call;
   there is no environment fallback.
 - **What vise *can* check is the file.** `core/neighbour_state.py` reads
-  livespec's index, flowtrace's newest trace and the provenance of a Graphify
-  ingest, with the standard library and without raising. Prefer that over a
+  livespec's index, flowtrace's newest trace, the provenance of a Graphify
+  ingest and delta-cube's one machine-wide database (scoped by this repo's
+  path — it has no project column), with the standard library and without
+  raising. Prefer that over a
   phase prompt asking an agent to check — a refusal in prose is advice to the
   party being checked. `vise neighbours` prints what it sees.
 - **Absent and unreadable are different.** A known absence fails a gate closed;

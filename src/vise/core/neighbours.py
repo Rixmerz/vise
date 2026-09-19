@@ -78,9 +78,23 @@ FLOWTRACE_TOOLS: frozenset[str] = frozenset({
     "trace_tree",
 })
 
+#: `delta-cube` — the repo as points in a feature space, with a *Delta* per
+#: reindex and a *Tension* wherever a change moved a file away from something
+#: that imports it. vise used to carry this as a hard dependency and dropped
+#: it; the `smell_*` and `tension_*` experience types are what remained. Only
+#: the two calls vise's gate message names, not the server's 36.
+#:
+#: Tensions exist only after `cube_reindex` — an index nobody re-ran holds
+#: zero of them, and zero reads as healthy. The gate says so rather than
+#: counting them.
+DELTA_CUBE_TOOLS: frozenset[str] = frozenset({
+    "cube_index_directory",
+    "cube_reindex",
+})
+
 #: Every name vise assumes a neighbour exposes. What an asset may teach.
 NEIGHBOUR_TOOLS: frozenset[str] = (
-    LIVESPEC_TOOLS | LAYOUT_INSPECTOR_TOOLS | FLOWTRACE_TOOLS
+    LIVESPEC_TOOLS | LAYOUT_INSPECTOR_TOOLS | FLOWTRACE_TOOLS | DELTA_CUBE_TOOLS
 )
 
 #: The oldest release of each neighbour in which every name above resolves and
@@ -102,7 +116,27 @@ MINIMUM_VERSIONS: dict[str, str] = {
     # coverage run loses its data — both of which would corrupt a gate that
     # reads the trace.
     "flowtrace": "2.7.0",
+    # 0.2.0 records a contract's baseline and a tension's current distance
+    # with the same metric. Below it the baseline was Euclidean and the
+    # current distance cosine, so `tension_percent` compared two scales and
+    # the count a gate would read was not a number anyone should act on.
+    "delta-cube": "0.2.0",
 }
+
+#: Where delta-cube keeps its one database. Global, not per repo: every
+#: project indexed on a machine shares it, keyed by absolute `file_path`, and
+#: `$DCC_DATA_DIR` moves it. The default is jig's data dir because delta-cube
+#: was extracted from jig and never changed it.
+DELTA_CUBE_DATA_DIR_ENV = "DCC_DATA_DIR"
+DELTA_CUBE_DEFAULT_DATA_DIR = "~/.local/share/jig"
+DELTA_CUBE_DB_NAME = "dcc.db"
+
+#: Not an MCP server vise teaches a single call of — MemPalace stores verbatim
+#: transcripts and answers questions about them, which is the half of memory
+#: vise deliberately does not hold. It earns a name here for the same reason
+#: Graphify does: `mempalace init` writes two files into the repository root,
+#: and `diff_scope` will fail on them unless its `allow` list knows.
+MEMPALACE_PROJECT_FILES: tuple[str, ...] = ("mempalace.yaml", "entities.json")
 
 #: Not an MCP server vise talks to at all — a CLI that writes a file livespec
 #: reads. It earns a name here because its presence changes what vise's own

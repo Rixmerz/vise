@@ -221,3 +221,31 @@ def test_a_probe_that_cannot_even_start_is_not_read_as_available(monkeypatch):
     monkeypatch.setattr(subprocess, "run", boom)
     ok, why = _browser_probe.browser_status_quiet()
     assert not ok and "OSError" in why
+
+
+def test_it_names_the_cube_and_mempalace_even_when_absent(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-such-dir"))
+    out = _run(tmp_path, capsys)
+    assert "delta-cube" in out and "MemPalace" in out
+    assert "cube_index" in out and "fails closed" in out
+
+
+def test_it_explains_that_mempalace_init_files_land_in_diff_scope(tmp_path, capsys, monkeypatch):
+    """The files are written by `mempalace init`, not by anyone editing, and
+    `diff_scope` cannot tell the difference. Saying so here is the whole
+    integration: vise teaches none of MemPalace's calls."""
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-such-dir"))
+    (tmp_path / "mempalace.yaml").write_text("palace: ~/.config/mempalace\n")
+    out = _run(tmp_path, capsys)
+    assert "mempalace.yaml in the repo root" in out
+    assert "diff_scope" in out
+
+
+def test_it_says_when_the_cube_holds_the_repo_but_never_measured_it(tmp_path, capsys, monkeypatch):
+    from .test_neighbour_state import cube_db
+
+    data = tmp_path / "dcc-data"
+    monkeypatch.setenv("DCC_DATA_DIR", str(data))
+    cube_db(data, files=[str(tmp_path / "a.py"), str(tmp_path / "b.py")])
+    out = _run(tmp_path, capsys)
+    assert "never measured" in out and "cube_reindex" in out

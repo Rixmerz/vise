@@ -388,6 +388,7 @@ A workflow node declares `validators:`; the gate runs them all and is
 | `ui_layout` | rendered overflow, clipping, collision and off-document content, per breakpoint | **never** — fails closed on a missing browser, an unconfigured target, or a target the server did not serve |
 | `ui_contrast` | rendered foreground against the *effective* background (nearest painting ancestor), WCAG 2.2 AA | **never** — same as `ui_layout` |
 | `symbol_index` | livespec has a finished index for this repo (`.mcp-docs/docs.db`) | only when the database exists and cannot be read — a *known* absence fails closed |
+| `cube_index` | delta-cube holds files of this repo in its database (`$DCC_DATA_DIR/dcc.db`); with `require_reindex: true`, also that a reindex ever measured them | only when the database exists and cannot be read — a *known* absence fails closed |
 | `trace_captured` | a flowtrace log from this run exists and holds events | only when the trace cannot be read; no trace, or an empty one, fails closed |
 | `trace_error_gone` | the calls that raised in the reproduction trace no longer raise | no reproduction signature was recorded, or that trace held no error |
 
@@ -406,18 +407,28 @@ turn `integration` red on every repo that never opted in. The graph file carries
 the snippet that turns them on. Allowances under `design.allowances` are a
 ratchet for `design_tokens`: record what a repo has today, then lower it.
 
-The three neighbour-state gates read a file another tool left behind rather
-than running anything: livespec's `.mcp-docs/docs.db` and flowtrace's
-`.flowtrace/*.jsonl`. vise cannot call those servers — MCP has no
-server-to-server channel — which was taken to mean it could know nothing about
-them, so every phase depending on one asked the *agent* to check. That makes
-the check advice, re-weighable by the party being checked. A file is not a tool
-call, and `vise/core/neighbour_state.py` reads three facts out of two files:
-whether an index run finished, what the newest trace holds, and whether a
-Graphify graph still matches the ingest livespec recorded from it.
+The four neighbour-state gates read a file another tool left behind rather
+than running anything: livespec's `.mcp-docs/docs.db`, flowtrace's
+`.flowtrace/*.jsonl` and delta-cube's `dcc.db`. vise cannot call those servers
+— MCP has no server-to-server channel — which was taken to mean it could know
+nothing about them, so every phase depending on one asked the *agent* to check.
+That makes the check advice, re-weighable by the party being checked. A file is
+not a tool call, and `vise/core/neighbour_state.py` reads a handful of facts out
+of three files: whether an index run finished, what the newest trace holds,
+whether a Graphify graph still matches the ingest livespec recorded from it, and
+which files of this repo are points in the cube.
 
 Each separates "absent" from "unreadable" and only the first fails closed. A
 gate that refuses because of its own bug is how an override habit starts.
+
+`cube_index` deliberately does not gate on delta-cube's tension count, although
+it reads it. A tension is written only by `cube_reindex`, so a repo nobody
+re-ran holds zero — and zero is what a healthy repo holds too. The evidence says
+which it saw ("tensions never measured" or "N open tension(s)"), and a node that
+wants a *measured* zero says `require_reindex: true`, which refuses until one
+exists. Smells, debt and centrality are computed per call and never written, so
+no file can answer "how many critical smells", and vise does not pretend one
+can.
 
 `tests_fail` is deliberately not the negation of `tests_pass`. `returncode != 0`
 is the naive reading and it is wrong: a broken `conftest.py`, a bad flag or a
@@ -464,18 +475,42 @@ versions they assume are written down.
 | [`livespec`](https://github.com/Rixmerz/livespec) | what *could* run — the repo as a symbol graph | 0.31 |
 | [`flowtrace`](https://github.com/Rixmerz/flowtrace-debugger) | what *did* run — a real execution, traced | 2.7.0 |
 | [`layout-inspector`](https://github.com/Rixmerz/layout-inspector-mcp) | how it *renders* — measured geometry | 0.4.0 |
+| [`delta-cube`](https://github.com/Rixmerz/delta-cube) | how far it *moved* — files as points, a Delta per reindex, a Tension where a change pulled a file away from what imports it | 0.2.0 |
 
-Two of the three leave artifacts in the repository, which is a channel that
-does exist:
+Three of the four leave artifacts on disk, which is a channel that does exist:
 
 ```
-vise neighbours          # what livespec, flowtrace and Graphify left here
+vise neighbours          # what livespec, flowtrace, Graphify, delta-cube and MemPalace left here
 ```
 
-It reads `.mcp-docs/docs.db`, `.flowtrace/*.jsonl` and `graphify-out/graph.json`
-with nothing but the standard library, and it is the same reading the
-`symbol_index`, `trace_captured` and `trace_error_gone` gates do — so a person
-debugging a refusal sees exactly what refused.
+It reads `.mcp-docs/docs.db`, `.flowtrace/*.jsonl`, `graphify-out/graph.json`
+and delta-cube's `dcc.db` with nothing but the standard library, and it is the
+same reading the `symbol_index`, `cube_index`, `trace_captured` and
+`trace_error_gone` gates do — so a person debugging a refusal sees exactly what
+refused.
+
+delta-cube's database is one per machine, not per repo — `$DCC_DATA_DIR/dcc.db`,
+defaulting to `~/.local/share/jig/dcc.db` — and its rows carry an absolute
+`file_path` and no project column, so vise scopes every read by this repo's
+path. It is also the neighbour vise once carried inside itself: the
+`smell_*` and `tension_*` experience types are what remained when the hard
+dependency was dropped, and this is that link restored the way every other
+neighbour is linked — by reading what it wrote, never by calling it. The
+minimum version is the release in which a contract's baseline and a tension's
+current distance use the same metric; below it, the tension count is two scales
+compared to each other. The two calls vise names, `cube_index_directory` to
+create the index and `cube_reindex` to measure a change, are the only ones it
+assumes.
+
+[MemPalace](https://github.com/MemPalace/mempalace) is not in the table because
+vise teaches none of its calls. It is the other half of memory: verbatim
+transcripts, searched by question, where vise's experience memory is short
+lessons keyed to a file glob and injected on edit. The two run side by side with
+no configuration — MemPalace binds `Stop`, `SessionEnd` and `PreCompact` and
+writes only to its own data dir, so the one thing worth knowing is that
+`mempalace init` leaves `mempalace.yaml` and `entities.json` in the repo root,
+which `diff_scope` treats like any other unexpected file. `vise neighbours` and
+`vise bootstrap` say so when they are present.
 
 A fourth name shows up in that output. [Graphify](https://github.com/Graphify-Labs/graphify)
 is not an MCP server vise talks to; it is a CLI whose `graph.json` livespec

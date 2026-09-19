@@ -8,6 +8,64 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Behaviour change — a lesson and its negation are two lessons
+
+`experience_gc.consolidate` merged near-duplicates at a `difflib` ratio of
+0.85 or above. "always close the pool before returning the handler" against
+"never close the pool before returning the handler" is 0.889; "use the pooled
+connection in the migration runner" against "do not use the pooled connection
+in the migration runner" is 0.933. Both merged, the survivor was whichever had
+more confidence, and the other lesson was gone. `record` had the same hole one
+level up: it merges on `(type, file_pattern, domain)` and keeps the longer
+description, which for the second pair is the negation.
+
+The description's *polarity* — whether it carries a negation marker — is now
+part of `dedup_key` in `core/experience_rules.py`, so the store, the commit
+hook's `upsert`, the cross-process merge and the collector all keep the two
+apart with one rule rather than four guards. The collector's private copy of
+the key is gone; it reads the shared one. Measured on deltarag's side too: a
+term and its negation embed at 0.95 cosine on nomic-embed, which is why that
+project fronts every merge with the same guard. `test_experience_polarity.py`
+pins the measurement so the guard cannot outlive its reason unnoticed.
+
+An entry recorded before this change keeps its id; only what a *new* record
+merges into changes.
+
+### Added — `cube_index`, and delta-cube as a neighbour
+
+delta-cube was extracted from the same orchestrator vise was, and vise dropped
+it as a hard dependency while keeping the `smell_*` and `tension_*` experience
+types it used to fill. This restores the link the way every other neighbour is
+linked: `core/neighbour_state.cube_state` reads delta-cube's one machine-wide
+database (`$DCC_DATA_DIR/dcc.db`, default `~/.local/share/jig/dcc.db`), scoped
+by this repo's path because the schema has no project column, and answers
+whether files here are points, when they were last indexed, whether a reindex
+ever measured them, and how many tensions are still open. Standard library
+only; never raises; absent and unreadable stay distinct.
+
+`cube_index` is the gate on it. It fails closed on a known absence and does not
+gate on the tension count: a tension is written only by `cube_reindex`, so an
+unmeasured repo and a healthy one both read zero. `require_reindex: true` is
+the opt-in that refuses until a measurement exists. Smells, debt and centrality
+are never written to disk by delta-cube, so no gate here claims to read them.
+
+`core/neighbours.py` pins the two calls vise names (`cube_index_directory`,
+`cube_reindex`) and a minimum of 0.2.0 — the release in which a contract's
+baseline and a tension's current distance use the same metric. Below it the
+count vise reads is two scales compared to each other.
+
+`vise neighbours` and `vise bootstrap` report the cube alongside the others.
+
+### Added — MemPalace's project files are reported
+
+MemPalace stores verbatim transcripts and answers questions about them, which
+is the half of memory vise does not hold, and the two run side by side without
+configuration. The one thing worth knowing is that `mempalace init` writes
+`mempalace.yaml` and `entities.json` into the repo root, where `diff_scope`
+will fail on them. `vise neighbours` and `vise bootstrap` now say when they are
+present, as they do for `graphify-out/`. vise teaches none of MemPalace's calls,
+so nothing is pinned.
+
 ### Behaviour change — vise declares no language servers
 
 It declared twelve, and the official marketplace ships one plugin per language
