@@ -413,10 +413,18 @@ class ExperienceMemoryStore:
         process wrote: a writer using a finer key does not get finer entries, it
         gets entries this merge drops.
         """
-        return _rules.dedup_key({f: getattr(entry, f, "") for f in _rules.DEDUP_FIELDS})
+        fields = {f: getattr(entry, f, "") for f in _rules.DEDUP_FIELDS}
+        # The description is not a key field; the rule reads its *polarity*
+        # off it, so a lesson and its negation stay two entries.
+        fields["description"] = entry.description
+        return _rules.dedup_key(fields)
 
     def record(self, entry: ExperienceEntry) -> ExperienceEntry:
-        """Add or merge an experience entry. Deduplicates by type+file_pattern+domain."""
+        """Add or merge an experience entry.
+
+        Deduplicates by type+file_pattern+domain, and by the description's
+        polarity — `core.experience_rules.dedup_key` says why the last one.
+        """
         # Both prose fields are masked on the way in, on the same rule the commit
         # hook uses. This writer files runtime lessons, which quote error strings
         # verbatim, and whatever `experience_record` was handed — and a global

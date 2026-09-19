@@ -314,9 +314,9 @@ Where a run's money actually goes is measured above: the orchestrator, at
 60-65%. Trimming prose in the brief is not that lever. Not pre-reading the
 files the builder is about to read is.
 
-## Neighbours: three servers vise names and cannot call
+## Neighbours: the servers vise names and cannot call
 
-Three MCP servers do things vise's gates cannot, and a session can hold all of
+These MCP servers do things vise's gates cannot, and a session can hold all of
 them. vise has no server-to-server channel, so none of this is something vise
 does — it is what you put in a brief, because **a builder in a fresh context
 window has no way to know these exist.**
@@ -326,14 +326,54 @@ window has no way to know these exist.**
 | `livespec` | what *could* run — the symbol graph | `.mcp-docs/docs.db` in the repo |
 | `flowtrace` | what *did* run — a real execution | `.flowtrace/*.jsonl` in the repo |
 | `layout-inspector` | how it *renders* — measured geometry | no repo footprint; check the tool surface |
+| `mempalace` | what was *said* — earlier sessions, verbatim | a palace on the machine (`vise neighbours` says); nothing in the repo |
 
-One rule covers all three: **a brief naming tools the builder does not have is
-worse than one that says nothing.** Check your own tool surface first. If a
+One rule covers all of them: **a brief naming tools the builder does not have
+is worse than one that says nothing.** Check your own tool surface first. If a
 server is absent, say so in the brief and hold the builder to the evidence it
 does have.
 
 Each ships its own skill and subagent that cover *how* to drive it. Your job is
 *when*, and what to bring back.
+
+### MemPalace — what an earlier session already settled
+
+vise's experience memory is short lessons keyed to a file glob, injected when
+that file is edited. It does not hold what a session *decided*: the approach
+that was tried and rejected, the constraint the user stated in passing, the
+reason a dependency was chosen. MemPalace holds the transcript, verbatim, and
+searches it by question. The two divide cleanly — vise says what to watch for
+when touching this file, MemPalace says what was said last time — and neither
+needs the other configured.
+
+**When to search.** Before Step 0 when the request refers to prior work in any
+form — "like we did", "the thing we decided", "again", a feature that already
+had a first attempt — and before writing any brief whose task has a history in
+this repo. Not on greenfield edits: a rename, a typo, a new file with no past.
+Recall is question-driven, and MemPalace's own recall protocol says the same.
+
+**How.** `mempalace_search(query, wing)` with `query` as a few keywords — its
+schema caps it at 250 characters and warns that a pasted prompt sinks recall —
+and `wing` as the repo's basename, which is the wing a directory is mined
+into. `mempalace_diary_read(agent_name)` for the last hand-off when a session
+was cut short. **Paste the drawer text into the brief verbatim, with its
+`source_path`.** A subagent does not have the transcript and does not have the
+tool; what you carry over is the only way the decision reaches it. Summarising
+on the way is how a "we rejected X because Y" becomes "consider X".
+
+**Who has the tool.** You, when the server is connected. `researcher` and
+`debugger` are granted `mcp__mempalace__mempalace_search` in their charters
+and told the palace is a source, so a brief to either may say "search the
+palace for ..." — and for every other agent it may not. If the `mempalace_*`
+tools are not in your surface, the palace is absent for this session: say so
+where it would have mattered and do not ask anyone to search it.
+
+**What vise does about it.** Nothing it can call. `vise neighbours` reads
+whether a palace exists on the machine, the SessionStart hook says so at the
+top of a session, and `vise bootstrap` warns that `mempalace init` leaves
+`mempalace.yaml` and `entities.json` in the repo root where `diff_scope` will
+fail on them. MemPalace's own hooks save the transcript every fifteen
+messages; vise never writes to the palace, so nothing is filed twice.
 
 ### livespec — brief for the symbol layer
 

@@ -26,6 +26,13 @@ def _isolated_xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     """Force $XDG_DATA_HOME to a per-test tmpdir; never touch real user state."""
     xdg_data_home = tmp_path / "xdg-data"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+    # The neighbour readers look outside the repo: delta-cube keeps one
+    # database per machine and MemPalace one palace per machine. A developer
+    # who has either installed would otherwise see their real state in every
+    # test that reports neighbours, and a test that asserts "absent" would
+    # pass on CI and fail on their laptop.
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-cube"))
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "no-palace"))
 
     # experience_memory.py caches data_dir()-derived paths at import time.
     # Recompute them against the patched env so this module doesn't keep

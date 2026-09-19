@@ -1920,6 +1920,58 @@ class SymbolIndexValidator:
 
 
 @dataclass
+class CubeIndexValidator:
+    """Gate on delta-cube holding this repo. Fails closed.
+
+    The same shape as `symbol_index`, one neighbour over: a phase that reasons
+    about blast radius or tensions without the cube is guessing, and the
+    honest place for that refusal is a limit rather than a line of prose the
+    agent being limited can re-weigh.
+
+    Reads delta-cube's one machine-wide database directly, scoped by this
+    repo's path — `core/neighbour_state.py` says why the scope is a prefix.
+    Deliberately does **not** gate on the tension count. A tension exists only
+    after `cube_reindex`, so a repo nobody re-ran reads as zero tensions, and
+    zero is what a healthy repo reads too. The evidence says which of the two
+    it saw; a workflow that wants "no open tensions" as a limit has to say
+    `require_reindex: true`, which refuses when nothing was ever measured.
+    """
+
+    weight: float = 0.5
+    name: str = "cube_index"
+    #: Refuse when no reindex has been recorded for this repo, so that an
+    #: `open_tensions` of zero cannot pass for a measured zero.
+    require_reindex: bool = False
+
+    def run(self, goal: Goal) -> ValidatorRecord:
+        try:
+            from vise.core.neighbour_state import cube_state
+
+            state = cube_state(goal.project_dir)
+        except Exception as exc:  # noqa: BLE001 - a gate must not crash the graph
+            return _state_unverified(
+                self.name, self.weight, f"{self.name} raised: {exc}"
+            )
+        if not state.known:
+            return _state_unverified(self.name, self.weight, state.detail)
+        if not state.indexed:
+            return _state_failure(
+                self.name, self.weight,
+                f"{state.detail}. Run delta-cube's cube_index_directory on this "
+                f"repo first — a boundary or impact decision without the cube is "
+                f"the guess this phase exists to prevent.",
+            )
+        if self.require_reindex and not state.reindexed:
+            return _state_failure(
+                self.name, self.weight,
+                f"{state.detail}. This node requires a measured tension count, "
+                f"and none was ever measured: run cube_reindex on the changed "
+                f"files and re-traverse.",
+            )
+        return _state_pass(self.name, self.weight, state.detail)
+
+
+@dataclass
 class TraceCapturedValidator:
     """Gate on a flowtrace run having produced a usable trace. Fails closed.
 
@@ -2091,6 +2143,7 @@ _REGISTRY: dict[str, Callable[..., Validator]] = {
     "ui_layout": UiLayoutValidator,
     "ui_contrast": UiContrastValidator,
     "symbol_index": SymbolIndexValidator,
+    "cube_index": CubeIndexValidator,
     "trace_captured": TraceCapturedValidator,
     "trace_error_gone": TraceErrorGoneValidator,
 }

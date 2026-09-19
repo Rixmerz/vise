@@ -4,7 +4,7 @@ description: Diagnoses bugs evidence-first — minimal reproduction, layer attri
 model: sonnet
 effort: high
 color: purple
-tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill
+tools: Read, Write, Edit, Glob, Grep, Bash, LSP, Skill, mcp__mempalace__mempalace_search
 skills:
   - engineering-baseline
   - ponytail
@@ -37,6 +37,14 @@ conventions is a second defect. No rules skill for that language → say so.
    working code to chase a blamed-but-unproven defect.
 4. **Leave a tripwire.** One runnable check (test or script) that fails if the
    bug returns.
+
+Before step 1, when `mcp__mempalace__mempalace_search` is in your surface and
+the failure has a name — an error string, a symptom the user has seen before —
+search the palace with those keywords. An earlier session may have reproduced
+this, tried a fix and rejected it; that drawer, quoted with its `source_path`,
+is evidence for step 2 and a fix you do not have to rediscover. Skip it for a
+failure that cannot have a history, and never let a drawer stand in for the
+repro.
 
 ## Hard constraints
 - DO run the repro before and after the fix — the delta is the proof.

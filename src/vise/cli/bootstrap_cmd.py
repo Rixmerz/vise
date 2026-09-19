@@ -408,7 +408,14 @@ def _neighbours_report(project: Path) -> str:
     refuses, and a Graphify graph puts files in every diff that nobody edited.
     Both are cheaper to learn here than in the first red gate a week later.
     """
-    from vise.core.neighbour_state import GRAPHIFY_GRAPH, graph_state, index_state
+    from vise.core.neighbour_state import (
+        GRAPHIFY_GRAPH,
+        cube_state,
+        graph_state,
+        index_state,
+        mempalace_files,
+        palace_state,
+    )
 
     lines = ["\nneighbouring servers (vise names them and cannot call them):"]
     index = index_state(project)
@@ -430,6 +437,26 @@ def _neighbours_report(project: Path) -> str:
             "               `diff_scope` gate, put `graphify-out/**` in its "
             "`allow` list or it goes\n"
             "               red on a file no human touched."
+        )
+    cube = cube_state(project)
+    lines.append(f"  delta-cube {cube.detail}")
+    if cube.refuses:
+        lines.append(
+            "            -> `cube_index` fails closed until delta-cube indexes this "
+            "repo. Nothing else is affected."
+        )
+    palace = palace_state()
+    if palace.present:
+        lines.append(f"  MemPalace  {palace.detail}")
+    palace_files = mempalace_files(project)
+    if palace_files:
+        lines.append(f"  MemPalace  {', '.join(palace_files)} in the repo root")
+        lines.append(
+            "            -> written by `mempalace init`, not by anyone editing. If "
+            "you wire the\n"
+            "               `diff_scope` gate, put them in its `allow` list for the "
+            "same reason as\n"
+            "               `graphify-out/**`."
         )
     lines.append("  (`vise neighbours` reports this any time, with more detail)")
     return "\n".join(lines)

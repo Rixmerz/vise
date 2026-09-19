@@ -133,7 +133,10 @@ def test_merging_onto_a_legacy_entry_starts_its_shape_map():
         "type": "gate_blocked",
         "file_pattern": "agents/*.md",
         "domain": "general",
-        "description": "no shapes key on disk",
+        # Written before `shapes` existed. Neutral wording on purpose: the
+        # description's polarity is part of the dedup key, and a "no ..." here
+        # would make this a different experience from the incoming one.
+        "description": "legacy entry written before shapes existed",
     }))
     store.record(_entry("new incident", shape="slug-new"))
 

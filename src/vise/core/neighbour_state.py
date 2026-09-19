@@ -9,6 +9,13 @@ artifacts in the repository, and a file is not a tool call.
     livespec   `.mcp-docs/docs.db`      — SQLite. Was this repo ever indexed?
     flowtrace  `.flowtrace/*.jsonl`     — one JSON object per line. What ran?
     Graphify   `graphify-out/graph.json`— NetworkX node-link. Read by livespec.
+    delta-cube `$DCC_DATA_DIR/dcc.db`   — SQLite, one per machine. Which files
+                                          of this repo are points in it, and
+                                          how many tensions are still open.
+    MemPalace  `~/.config/mempalace/`   — the palace, one per machine. Is
+                                          there anything to recall from?
+               `mempalace.yaml`         — two files `mempalace init` leaves in
+               `entities.json`           the repo root. Read for their presence.
 
 That is the difference between a phase that *asks an agent* whether an index
 exists and a phase that *knows*. The decouple workflow's first step is
@@ -33,13 +40,33 @@ and `external_ingest` (which graph was ingested, migration 23). Both are read
 defensively: a missing table is an older livespec, not an error. Counting
 symbols or reading `symbol_edge` would couple vise to a schema it does not own
 and gains nothing a gate needs.
+
+delta-cube gets the same treatment, one layer wider, because its database is
+not per repo: `code_points.file_path` is the only thing that says which
+project a row belongs to, so every query here is scoped by that prefix. What
+is read is what is durable — points, contracts, tensions. Smells, debt and
+centrality are computed per call and never written, so no file can answer
+"how many critical smells" and this module does not pretend to.
 """
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+from vise.core.neighbours import (
+    DELTA_CUBE_DATA_DIR_ENV,
+    DELTA_CUBE_DB_NAME,
+    DELTA_CUBE_DEFAULT_DATA_DIR,
+    MEMPALACE_CONFIG_DIR_ENV,
+    MEMPALACE_LEGACY_DIR,
+    MEMPALACE_PALACE_MARKER,
+    MEMPALACE_PALACE_SUBDIR,
+    MEMPALACE_PROJECT_FILES,
+    MEMPALACE_XDG_SUBDIR,
+)
 
 #: Where livespec keeps its index, relative to the repo root.
 LIVESPEC_DB = ".mcp-docs/docs.db"
@@ -359,14 +386,238 @@ def graph_state(project: Path | str) -> GraphState:
         )
 
 
+@dataclass(frozen=True)
+class CubeState:
+    """Whether delta-cube holds this repo, and what it holds that is durable."""
+
+    #: True when the question was answered either way. False means a database
+    #: exists but could not be read — not "no index", and a gate must not
+    #: refuse on it.
+    known: bool = False
+    #: True only when at least one file under this repo is a point.
+    indexed: bool = False
+    #: Points under this repo.
+    files: int = 0
+    #: ISO timestamp of the most recently updated point, "" when unknown.
+    last_indexed_at: str = ""
+    #: Tensions in `detected` status whose callee is under this repo. Zero is
+    #: also what a repo nobody ran `cube_reindex` on reads — see `detail`.
+    open_tensions: int = 0
+    #: Whether any delta was ever recorded for a file here. Without one,
+    #: `open_tensions == 0` means "never measured", not "healthy".
+    reindexed: bool = False
+    #: Which database was read, for a message a person acts on.
+    db: str = ""
+    detail: str = "not checked"
+
+    @property
+    def refuses(self) -> bool:
+        """Should a phase that needs the cube stand down? Known absence only."""
+        return self.known and not self.indexed
+
+
+def delta_cube_db() -> Path:
+    """The one database delta-cube writes on this machine."""
+    base = os.environ.get(DELTA_CUBE_DATA_DIR_ENV) or DELTA_CUBE_DEFAULT_DATA_DIR
+    return Path(base).expanduser() / DELTA_CUBE_DB_NAME
+
+
+def cube_state(project: Path | str) -> CubeState:
+    """Has delta-cube indexed this repo? Answers without calling delta-cube.
+
+    Scoped by path prefix because the schema has no project column. A repo
+    inside another indexed repo (a worktree, a vendored checkout) is counted
+    under both, which is delta-cube's model and not something a reader can
+    correct.
+    """
+    db = delta_cube_db()
+    shown = db.as_posix().replace(str(Path.home()), "~", 1)
+    try:
+        root = Path(project).resolve().as_posix().rstrip("/") + "/"
+        if not db.is_file():
+            return CubeState(
+                known=True, indexed=False, db=shown,
+                detail=f"no {shown} — delta-cube has never indexed anything here",
+            )
+        conn = _connect(db)
+        try:
+            if not _has_table(conn, "code_points"):
+                return CubeState(
+                    known=True, indexed=False, db=shown,
+                    detail=f"{shown} exists but has no code_points table",
+                )
+            like = (root.replace("%", "\\%").replace("_", "\\_") + "%",)
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, MAX(updated_at) AS latest FROM code_points "
+                "WHERE file_path LIKE ? ESCAPE '\\'",
+                like,
+            ).fetchone()
+            files = int(row["n"] or 0)
+            latest = str(row["latest"] or "")
+            reindexed = False
+            if files and _has_table(conn, "deltas"):
+                hit = conn.execute(
+                    "SELECT 1 FROM deltas d JOIN code_points cp ON d.code_point_id = cp.id "
+                    "WHERE cp.file_path LIKE ? ESCAPE '\\' LIMIT 1",
+                    like,
+                ).fetchone()
+                reindexed = hit is not None
+            tensions = 0
+            if files and _has_table(conn, "tensions") and _has_table(conn, "contracts"):
+                hit = conn.execute(
+                    "SELECT COUNT(*) AS n FROM tensions t "
+                    "JOIN contracts c ON t.contract_id = c.id "
+                    "JOIN code_points cp ON c.callee_id = cp.id "
+                    "WHERE t.status = 'detected' AND cp.file_path LIKE ? ESCAPE '\\'",
+                    like,
+                ).fetchone()
+                tensions = int(hit["n"] or 0)
+        finally:
+            conn.close()
+        if not files:
+            return CubeState(
+                known=True, indexed=False, db=shown,
+                detail=f"{shown} holds no file under this repo — not indexed here",
+            )
+        if reindexed:
+            measure = f"{tensions} open tension(s)"
+        else:
+            measure = "tensions never measured — no reindex recorded"
+        return CubeState(
+            known=True, indexed=True, files=files, last_indexed_at=latest,
+            open_tensions=tensions, reindexed=reindexed, db=shown,
+            detail=(
+                f"delta-cube holds {files} file(s) of this repo "
+                f"(last indexed {latest or 'unknown'}); {measure}"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - a state, never an exception
+        return CubeState(
+            known=False, db=shown,
+            detail=f"could not read {shown}: {type(exc).__name__}: {exc}",
+        )
+
+
+@dataclass(frozen=True)
+class PalaceState:
+    """Whether this machine has a MemPalace palace to recall from.
+
+    Machine-wide, like the cube: a palace holds every project its owner has
+    mined, scoped inside by *wing*. Nothing here says whether the
+    `mempalace_*` tools are connected to the running session — a config file
+    cannot know that — so a consumer says "if the tools are connected", and
+    never "call this".
+    """
+
+    #: True when the question was answered either way.
+    known: bool = False
+    #: A config dir exists that MemPalace would recognise as an install.
+    configured: bool = False
+    #: The palace directory holds a store. False with `configured` True means
+    #: an install that has mined nothing yet, or a non-default backend whose
+    #: store vise does not know the filename of — `detail` says which.
+    present: bool = False
+    config_dir: str = ""
+    detail: str = "not checked"
+
+
+def _mempalace_config_dir() -> Path:
+    """MemPalace's config dir, resolved the way its own `config.py` does."""
+    env = os.environ.get(MEMPALACE_CONFIG_DIR_ENV)
+    if env and env.strip():
+        return Path(env).expanduser()
+    legacy = Path(MEMPALACE_LEGACY_DIR).expanduser()
+    if legacy.is_dir() and (
+        (legacy / "config.json").is_file()
+        or (legacy / "people_map.json").is_file()
+        or (legacy / MEMPALACE_PALACE_SUBDIR / MEMPALACE_PALACE_MARKER).is_file()
+    ):
+        return legacy
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg and xdg.strip() and Path(xdg).expanduser().is_absolute():
+        return Path(xdg).expanduser() / MEMPALACE_XDG_SUBDIR
+    return Path.home() / ".config" / MEMPALACE_XDG_SUBDIR
+
+
+def palace_state() -> PalaceState:
+    """Is there a MemPalace palace on this machine? Read, never asked."""
+    try:
+        config_dir = _mempalace_config_dir()
+        shown = config_dir.as_posix().replace(str(Path.home()), "~", 1)
+        config_file = config_dir / "config.json"
+        if not config_dir.is_dir():
+            return PalaceState(
+                known=True, config_dir=shown,
+                detail=f"no {shown} — MemPalace is not set up on this machine",
+            )
+        palace = config_dir / MEMPALACE_PALACE_SUBDIR
+        if config_file.is_file():
+            try:
+                configured_path = json.loads(
+                    config_file.read_text(encoding="utf-8")
+                ).get("palace_path")
+                if configured_path:
+                    palace = Path(str(configured_path)).expanduser()
+            except Exception:  # noqa: BLE001 - an unreadable config is still an install
+                pass
+        configured = config_file.is_file() or palace.is_dir()
+        if not configured:
+            return PalaceState(
+                known=True, config_dir=shown,
+                detail=f"{shown} exists but holds neither config.json nor a palace",
+            )
+        if (palace / MEMPALACE_PALACE_MARKER).is_file():
+            return PalaceState(
+                known=True, configured=True, present=True, config_dir=shown,
+                detail=f"MemPalace palace at {shown} — earlier sessions are searchable",
+            )
+        if palace.is_dir() and any(palace.iterdir()):
+            return PalaceState(
+                known=True, configured=True, present=True, config_dir=shown,
+                detail=(
+                    f"MemPalace palace at {shown} on a non-default backend — "
+                    "earlier sessions are probably searchable"
+                ),
+            )
+        return PalaceState(
+            known=True, configured=True, present=False, config_dir=shown,
+            detail=f"MemPalace is set up at {shown} but has mined nothing yet",
+        )
+    except Exception as exc:  # noqa: BLE001 - a state, never an exception
+        return PalaceState(
+            known=False,
+            detail=f"could not read MemPalace's config dir: {type(exc).__name__}: {exc}",
+        )
+
+
+def mempalace_files(project: Path | str) -> tuple[str, ...]:
+    """The MemPalace project files present in this repo root, if any.
+
+    MemPalace's hooks write only to its own data dir; `mempalace init` is the
+    one step that touches the repository, and these are what it leaves. Their
+    presence is the whole fact — vise reads nothing inside them.
+    """
+    try:
+        root = Path(project)
+        return tuple(n for n in MEMPALACE_PROJECT_FILES if (root / n).is_file())
+    except Exception:  # noqa: BLE001 - a report, never an exception
+        return ()
+
+
 def summary(project: Path | str) -> str:
     """One line per neighbour. What `/vise:status` and bootstrap report."""
     project = Path(project)
-    lines = [f"livespec:  {index_state(project).detail}"]
+    lines = [f"livespec:   {index_state(project).detail}"]
     trace = trace_state(project)
-    lines.append(f"flowtrace: {trace.detail}")
+    lines.append(f"flowtrace:  {trace.detail}")
     graph = graph_state(project)
-    lines.append(f"Graphify:  {graph.detail}")
+    lines.append(f"Graphify:   {graph.detail}")
+    lines.append(f"delta-cube: {cube_state(project).detail}")
+    palace = palace_state()
+    present = mempalace_files(project)
+    files = (f"; {', '.join(present)} in the repo root" if present
+             else "; no project files in the repo root")
+    lines.append(f"MemPalace:  {palace.detail}{files}")
     return "\n".join(lines)
 
 
@@ -374,12 +625,18 @@ __all__ = [
     "FLOWTRACE_DIR",
     "GRAPHIFY_GRAPH",
     "LIVESPEC_DB",
+    "CubeState",
     "GraphState",
     "IndexState",
+    "PalaceState",
     "TraceState",
+    "cube_state",
+    "delta_cube_db",
     "error_signature",
     "graph_state",
     "index_state",
+    "mempalace_files",
+    "palace_state",
     "summary",
     "trace_state",
 ]
