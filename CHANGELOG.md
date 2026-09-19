@@ -8,6 +8,116 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Behaviour change — a lesson and its negation are two lessons
+
+`experience_gc.consolidate` merged near-duplicates at a `difflib` ratio of
+0.85 or above. "always close the pool before returning the handler" against
+"never close the pool before returning the handler" is 0.889; "use the pooled
+connection in the migration runner" against "do not use the pooled connection
+in the migration runner" is 0.933. Both merged, the survivor was whichever had
+more confidence, and the other lesson was gone. `record` had the same hole one
+level up: it merges on `(type, file_pattern, domain)` and keeps the longer
+description, which for the second pair is the negation.
+
+The description's *polarity* — whether it carries a negation marker — is now
+part of `dedup_key` in `core/experience_rules.py`, so the store, the commit
+hook's `upsert`, the cross-process merge and the collector all keep the two
+apart with one rule rather than four guards. The collector's private copy of
+the key is gone; it reads the shared one. Measured on deltarag's side too: a
+term and its negation embed at 0.95 cosine on nomic-embed, which is why that
+project fronts every merge with the same guard. `test_experience_polarity.py`
+pins the measurement so the guard cannot outlive its reason unnoticed.
+
+An entry recorded before this change keeps its id; only what a *new* record
+merges into changes.
+
+### Added — `context_cost.py` says what a tool result cost, measured
+
+Every tool result enters the conversation and stays there until compaction,
+and nothing in Claude Code says how much was just spent. context-mode built a
+product on that observation and answered it with prompting — a routing block
+that tells the model to prefer its sandbox, four narrow denies (curl, wget,
+inline HTTP, build tools, WebFetch), and a per-call "bytes avoided" that is a
+constant guessed before the tool runs (8 KB per blocked curl, 16 KB per
+WebFetch). Bash and Read, the two that dominate context spend, are advised
+once per session and never blocked; the sandbox is a plain `spawn` with no
+isolation; and its hooks rewrite `~/.claude/settings.json` and
+`installed_plugins.json` from inside PreToolUse. None of that is coming here.
+
+What can be measured is. PostToolUse receives the actual `tool_response`, and
+the new hook takes its size, keeps one small ledger per session under the
+data dir, and speaks in two cases: a single result over 32 KB, with the
+bounded form of the same call (`| tail -n 60`, `offset`/`limit`, `-l`) and at
+most three times per tool per session; and the session total crossing each
+256 KB, with the breakdown by tool. Silent otherwise, never blocks, fails open
+to the ledger. `VISE_CONTEXT_CALL_KB` and `VISE_CONTEXT_SESSION_KB` move the
+thresholds. Ideas, not code: context-mode is Elastic-2.0, and this reads a
+number it only estimated.
+
+### Added — `cube_index`, and delta-cube as a neighbour
+
+delta-cube was extracted from the same orchestrator vise was, and vise dropped
+it as a hard dependency while keeping the `smell_*` and `tension_*` experience
+types it used to fill. This restores the link the way every other neighbour is
+linked: `core/neighbour_state.cube_state` reads delta-cube's one machine-wide
+database (`$DCC_DATA_DIR/dcc.db`, default `~/.local/share/jig/dcc.db`), scoped
+by this repo's path because the schema has no project column, and answers
+whether files here are points, when they were last indexed, whether a reindex
+ever measured them, and how many tensions are still open. Standard library
+only; never raises; absent and unreadable stay distinct.
+
+`cube_index` is the gate on it. It fails closed on a known absence and does not
+gate on the tension count: a tension is written only by `cube_reindex`, so an
+unmeasured repo and a healthy one both read zero. `require_reindex: true` is
+the opt-in that refuses until a measurement exists. Smells, debt and centrality
+are never written to disk by delta-cube, so no gate here claims to read them.
+
+`core/neighbours.py` pins the two calls vise names (`cube_index_directory`,
+`cube_reindex`) and a minimum of 0.2.0 — the release in which a contract's
+baseline and a tension's current distance use the same metric. Below it the
+count vise reads is two scales compared to each other.
+
+`vise neighbours` and `vise bootstrap` report the cube alongside the others.
+
+### Added — MemPalace enters the flow
+
+MemPalace stores verbatim transcripts and answers questions about them, which
+is the half of memory vise does not hold: what an earlier session decided,
+tried and rejected. vise's experience memory says what to watch for when a
+file is edited; it has never said what was said last time, and Claude Code's
+transcripts expire. The two run side by side with nothing configured, and
+this release makes the palace part of vise's flow at the four moments where a
+session would otherwise not know it exists:
+
+- **Session start.** `hooks/session_restore.py` reads whether a palace exists
+  on the machine (`core/neighbour_state.palace_state`, resolved the way
+  MemPalace's own `config.py` resolves it: env override, legacy `~/.mempalace`,
+  XDG) and emits three lines: search it before deciding what an earlier
+  session may have settled, quote the drawer verbatim, and say so if the
+  `mempalace_*` tools are not connected. MemPalace's own Claude Code plugin
+  injects nothing at SessionStart — it wires that only for Cursor. Its own
+  `try`, noted to the failsafe ledger; a palace that cannot be read must not
+  take the state block down.
+- **Before a brief.** The orchestration skill gains a MemPalace section: when
+  the task has a history in this repo, search with a few keywords and the
+  repo's basename as `wing`, and paste the drawer into the brief verbatim
+  with its `source_path`. A subagent has neither the transcript nor the tool.
+- **Research and debugging.** `researcher` and `debugger` are granted
+  `mcp__mempalace__mempalace_search` and told the palace is a source to cite
+  and quote, and to say when it could not be consulted. No other charter is:
+  a brief may ask those two to search and may not ask anyone else.
+- **Bootstrap and `vise neighbours`.** Both report the palace, and both still
+  say when `mempalace init` left `mempalace.yaml` and `entities.json` in the
+  repo root, where `diff_scope` fails on them.
+
+`core/neighbours.py` pins the two calls vise teaches, `mempalace_search` and
+`mempalace_diary_read`, at 3.3.0 — the release in which MemPalace's `Stop`
+hook stopped returning a `block` every fifteenth message to make the agent
+write its save in chat, which landed beside vise's own Stop gate. vise never
+writes to the palace: MemPalace's hooks save the transcript on their own, and
+a second writer would file the same session twice. There is no gate on it — a
+memory is a resource to consult, not a condition to hold a phase on.
+
 ### Behaviour change — vise declares no language servers
 
 It declared twelve, and the official marketplace ships one plugin per language

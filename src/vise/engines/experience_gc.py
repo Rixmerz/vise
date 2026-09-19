@@ -1,8 +1,10 @@
 """experience_gc — scored garbage collection for the experience memory store.
 
 Pipeline (applied in order):
-  1. consolidate(entries) — merge near-duplicates sharing (type, file_pattern,
-     domain) with difflib description similarity ≥ 0.85.
+  1. consolidate(entries) — merge near-duplicates sharing the store's identity
+     (type, file_pattern, domain, and the description's polarity) with difflib
+     description similarity ≥ 0.85. Polarity is in the key because similarity
+     is blind to it: "never X" and "always X" score 0.89.
   2. score_entry(entry, now) — age-decayed score with confirmation boost and
      superseded penalty.
   3. Drop entries whose score falls below *threshold*, except those seen
@@ -28,6 +30,8 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
+
+from vise.core import experience_rules as _rules
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -116,12 +120,15 @@ def _description_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
-def _dedup_key(entry: dict[str, Any]) -> tuple[str, str, str]:
-    return (
-        str(entry.get("type") or ""),
-        str(entry.get("file_pattern") or ""),
-        str(entry.get("domain") or ""),
-    )
+def _dedup_key(entry: dict[str, Any]) -> tuple[str, ...]:
+    """The store's identity, not a copy of it.
+
+    This used to restate the three fields, which meant the one thing the store
+    later added to its key — the description's polarity — never reached the
+    consolidator, and ``consolidate`` would have gone on merging "never X"
+    into "always X" at 0.89 similarity while ``record`` kept them apart.
+    """
+    return _rules.dedup_key(entry)
 
 
 def consolidate(

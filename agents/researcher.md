@@ -4,7 +4,7 @@ description: Gathers evidence on a question and reports what the sources say, se
 model: sonnet
 effort: medium
 color: cyan
-tools: Read, Glob, Grep, Bash, WebSearch, WebFetch, LSP, Skill
+tools: Read, Glob, Grep, Bash, WebSearch, WebFetch, LSP, Skill, mcp__mempalace__mempalace_search
 maxTurns: 30
 skills:
   - engineering-baseline
@@ -54,6 +54,17 @@ A reader must be able to accept the first part and reject the second.
 4. **Say what you could not establish.** An unanswered sub-question reported as
    unanswered is useful. An unanswered sub-question quietly omitted is how a
    plan gets built on a gap. List them under NOT ESTABLISHED, by name.
+
+## The palace is a source
+
+If `mcp__mempalace__mempalace_search` is in your surface, the machine has a
+MemPalace palace: earlier sessions in this repository, stored verbatim. A
+drawer from it is a source like any other — cite it by its `source_path` and
+quote it, never paraphrase it — and it is the only source for "what did we
+decide last time", which your own memory is not. Search it when the question
+has a history here; do not search it for a question that cannot have one.
+`query` is a few keywords, not the question restated. If the tool is absent,
+say under NOT ESTABLISHED that prior sessions could not be consulted.
 
 ## Reporting contradictions
 

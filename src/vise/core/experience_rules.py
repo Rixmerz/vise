@@ -53,9 +53,45 @@ CONFIDENCE_CAP = 0.95
 CONFIDENCE_DECAY = 0.7
 
 
-def dedup_key(entry: Mapping[str, Any]) -> tuple[str, str, str]:
-    """The identity of an experience: same kind, same place, same domain."""
-    return tuple(str(entry.get(f) or "") for f in DEDUP_FIELDS)  # type: ignore[return-value]
+#: Words that flip what a lesson says to do. A lesson is "negated" when its
+#: description carries one of these; "" otherwise. Word-bounded and lowercase.
+#:
+#: The markers are the plain English ones and not a grammar, because the
+#: question is narrow: does this sentence say *do* or *don't*. A marker inside
+#: a compound like "not only" misfires, and that is the cheap direction to be
+#: wrong in — two lessons kept apart that could have merged, rather than one
+#: lesson that swallowed its opposite.
+NEGATION_MARKERS: frozenset[str] = frozenset({
+    "never", "not", "no", "don't", "dont", "doesn't", "doesnt", "isn't",
+    "isnt", "aren't", "arent", "wasn't", "wasnt", "cannot", "can't", "cant",
+    "shouldn't", "shouldnt", "mustn't", "mustnt", "won't", "wont", "avoid",
+    "without", "stop", "unless",
+})
+
+_WORD = re.compile(r"[a-z']+")
+
+
+def polarity(text: str) -> str:
+    """``"negated"`` when *text* carries a negation marker, else ``""``.
+
+    Part of an experience's identity, because prose similarity is blind to it.
+    "always close the pool before returning the handler" and "never close the
+    pool before returning the handler" are 0.89 similar by ``difflib`` and
+    about 0.95 by cosine on a small embedder — deltarag measured the second
+    on nomic-embed, vise measured the first on its own consolidation — and
+    every merge rule that keeps the longer or the more confident string would
+    keep one of them and silently drop the other. Two lessons that disagree on
+    *do* versus *don't* are two lessons, whatever else they share.
+    """
+    words = set(_WORD.findall(str(text or "").lower()))
+    return "negated" if words & NEGATION_MARKERS else ""
+
+
+def dedup_key(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    """The identity of an experience: same kind, same place, same domain — and
+    the same polarity, read off the description. See :func:`polarity`."""
+    fields = tuple(str(entry.get(f) or "") for f in DEDUP_FIELDS)
+    return (*fields, polarity(str(entry.get("description") or "")))
 
 
 def confidence_for(occurrences: int) -> float:
@@ -269,12 +305,14 @@ __all__ = [
     "CONFIDENCE_DECAY",
     "DEDUP_FIELDS",
     "MAX_ENTRIES",
+    "NEGATION_MARKERS",
     "REDACTED",
     "confidence_for",
     "dedup_key",
     "evict",
     "merge",
     "new_id",
+    "polarity",
     "redact",
     "upsert",
 ]

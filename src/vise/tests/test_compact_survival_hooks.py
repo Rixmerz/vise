@@ -312,3 +312,60 @@ def test_precompact_still_silent_when_nothing_active_and_nothing_open(
     out, code = _run(precompact_state, isolated)
     assert out == ""
     assert code == 0
+
+
+# --- the palace note --------------------------------------------------------
+#
+# MemPalace's own Claude Code plugin injects nothing at SessionStart, so a
+# palace is a store nobody is told about. vise says so, in three lines, only
+# when one exists, and only as "if the tools are connected".
+
+def _palace(config_dir: Path) -> None:
+    (config_dir / "palace").mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}")
+    (config_dir / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+
+
+def test_session_restore_says_nothing_about_a_palace_that_is_not_there(isolated: Path) -> None:
+    out, _ = _run(session_restore, isolated, {"source": "startup"})
+    assert out == ""
+
+
+def test_session_restore_names_the_palace_and_the_wing(isolated: Path, tmp_path: Path) -> None:
+    _palace(tmp_path / "mp")
+    out, code = _run(session_restore, isolated, {"source": "startup"},
+                     env={"MEMPALACE_CONFIG_DIR": str(tmp_path / "mp")})
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "MemPalace palace at" in context
+    assert 'mempalace_search(query=<a few keywords>, wing="proj")' in context
+    assert "mempalace_diary_read" in context
+    assert "not connected, say so" in context
+    assert len(context.splitlines()) <= 3
+
+
+def test_the_palace_note_precedes_the_state_block(isolated: Path, tmp_path: Path) -> None:
+    _palace(tmp_path / "mp")
+    _write_graph_state(isolated)
+    out, _ = _run(session_restore, isolated, {"source": "compact"},
+                  env={"MEMPALACE_CONFIG_DIR": str(tmp_path / "mp")})
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert context.index("MemPalace palace") < context.index("Active state restored")
+    assert "debug-flow" in context
+
+
+def test_a_palace_that_cannot_be_read_does_not_take_the_state_block_down(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from vise.core import neighbour_state
+
+    def boom() -> None:
+        raise RuntimeError("palace on fire")
+
+    monkeypatch.setattr(neighbour_state, "palace_state", boom)
+    _write_graph_state(isolated)
+    out, code = _run(session_restore, isolated, {"source": "compact"})
+    assert code == 0
+    context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "debug-flow" in context
+    assert "MemPalace" not in context

@@ -262,3 +262,82 @@ def test_each_gate_is_reachable_from_a_workflow_file(name: str):
     built = build_validators([{"type": name, "weight": 0.5}])
     assert [v.name for v in built] == [name]
     assert built[0].weight == 0.5
+
+
+# --- cube_index -------------------------------------------------------------
+#
+# Same three-way split as the others, plus the one thing this gate refuses to
+# read as a fact: a tension count of zero from a repo nobody ever re-ran
+# `cube_reindex` on.
+
+from .test_neighbour_state import cube_db  # noqa: E402
+
+
+@pytest.fixture
+def cube_dir(tmp_path: Path, monkeypatch) -> Path:
+    data = tmp_path / "dcc-data"
+    monkeypatch.setenv("DCC_DATA_DIR", str(data))
+    return data
+
+
+def test_cube_index_is_registered_and_buildable():
+    from vise.engines.validators import CubeIndexValidator
+
+    assert _REGISTRY["cube_index"] is CubeIndexValidator
+    built = build_validators([{"type": "cube_index", "weight": 0.3, "require_reindex": True}])
+    assert isinstance(built[0], CubeIndexValidator)
+    assert built[0].weight == 0.3 and built[0].require_reindex is True
+
+
+def test_cube_index_fails_closed_when_no_database_exists(goal, cube_dir):
+    from vise.engines.validators import CubeIndexValidator
+
+    record = CubeIndexValidator().run(goal)
+    assert not record.passed
+    assert record.outcome == "failed"
+    assert "cube_index_directory" in record.evidence
+
+
+def test_cube_index_fails_closed_when_the_cube_holds_other_repos(goal, cube_dir, tmp_path):
+    from vise.engines.validators import CubeIndexValidator
+
+    cube_db(cube_dir, files=[str(tmp_path.parent / "elsewhere" / "a.py")])
+    record = CubeIndexValidator().run(goal)
+    assert not record.passed and record.outcome == "failed"
+
+
+def test_cube_index_passes_on_files_under_this_repo(goal, cube_dir, tmp_path):
+    from vise.engines.validators import CubeIndexValidator
+
+    cube_db(cube_dir, files=[str(tmp_path / "a.py"), str(tmp_path / "b.py")])
+    record = CubeIndexValidator().run(goal)
+    assert record.passed and record.outcome == "verified"
+    assert "never measured" in record.evidence, "an unmeasured zero is named as such"
+
+
+def test_cube_index_with_require_reindex_refuses_an_unmeasured_repo(goal, cube_dir, tmp_path):
+    from vise.engines.validators import CubeIndexValidator
+
+    cube_db(cube_dir, files=[str(tmp_path / "a.py"), str(tmp_path / "b.py")])
+    record = CubeIndexValidator(require_reindex=True).run(goal)
+    assert not record.passed and record.outcome == "failed"
+    assert "cube_reindex" in record.evidence
+
+
+def test_cube_index_with_require_reindex_passes_once_measured(goal, cube_dir, tmp_path):
+    from vise.engines.validators import CubeIndexValidator
+
+    cube_db(cube_dir, files=[str(tmp_path / "a.py"), str(tmp_path / "b.py")],
+            deltas=True, tensions=2)
+    record = CubeIndexValidator(require_reindex=True).run(goal)
+    assert record.passed and record.outcome == "verified"
+    assert "2 open tension(s)" in record.evidence, "read, reported, not gated on"
+
+
+def test_cube_index_is_unverified_when_the_database_cannot_be_read(goal, cube_dir):
+    from vise.engines.validators import CubeIndexValidator
+
+    cube_dir.mkdir(parents=True)
+    (cube_dir / "dcc.db").write_bytes(b"garbage" * 64)
+    record = CubeIndexValidator().run(goal)
+    assert record.passed and record.outcome == "unverified" and record.source == "asserted"
