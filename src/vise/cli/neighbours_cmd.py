@@ -46,6 +46,7 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
         graph_state,
         index_state,
         mempalace_files,
+        palace_state,
         trace_state,
     )
 
@@ -60,10 +61,12 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
     print(f"  Graphify          {graph.detail}")
     cube = cube_state(project)
     print(f"  delta-cube        {cube.detail}")
-    palace = mempalace_files(project)
+    palace = palace_state()
+    print(f"  MemPalace         {palace.detail}")
+    palace_files = mempalace_files(project)
     print(
-        "  MemPalace         "
-        + (f"{', '.join(palace)} in the repo root" if palace
+        "                    "
+        + (f"{', '.join(palace_files)} in the repo root" if palace_files
            else "no project files in the repo root")
     )
     print(f"  vise render gates {_render_gates_line(project)}")
@@ -93,7 +96,13 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
             "\ndelta-cube holds this repo but has never measured it: tensions "
             "appear only after `cube_reindex`, so its zero is not a clean bill."
         )
-    if palace:
+    if palace.present:
+        print(
+            "\nA palace exists, so earlier sessions are searchable. vise's "
+            "SessionStart hook says so each session; the orchestration skill "
+            "says when to search it and what to paste into a brief."
+        )
+    if palace_files:
         print(
             "\nMemPalace has been initialised here. Its hooks write only to its "
             "own data dir, but these files sit in the repo root: put them in "

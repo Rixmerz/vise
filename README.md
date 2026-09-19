@@ -122,6 +122,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 | PostToolUse | `Edit\|Write\|MultiEdit`, `Bash` | `snapshot_trigger.py` | Captures a git snapshot (30 s throttle) — **opt-in**, no-ops unless `VISE_SNAPSHOT_ON_EDIT` is truthy |
 | PostToolUse | `Edit\|Write\|MultiEdit` | `edit_feedback.py` | Runs a fast ruff-only pass on the edited Python file and prints a concise findings summary to stderr — feedback only, never blocks |
 | PostToolUse | `Bash` | `experience_recorder.py` | Records learnings from commit `Why:` messages |
+| PostToolUse | `Bash\|Read\|Grep\|Glob\|WebFetch\|WebSearch` | `context_cost.py` | Measures the bytes a result put into context — the real size, from `tool_response`, never an estimate — and says so once when a single result passes 32 KB (with the bounded form of the same call, three times per tool at most) and once per 256 KB of session total. Silent otherwise; `VISE_CONTEXT_CALL_KB` / `VISE_CONTEXT_SESSION_KB` move the thresholds |
 | PostToolUse | `mcp__.*__graph_traverse` | `workflow_post_traverse.py` | Post-phase feedback |
 | PreCompact | `*` | `precompact_state.py` | Tells the summarizer to preserve active workflow/goal state across compaction |
 | SessionStart | `startup\|resume\|compact` | `session_restore.py` | Re-injects active workflow/goal state after compact/resume/startup |
@@ -476,18 +477,20 @@ versions they assume are written down.
 | [`flowtrace`](https://github.com/Rixmerz/flowtrace-debugger) | what *did* run — a real execution, traced | 2.7.0 |
 | [`layout-inspector`](https://github.com/Rixmerz/layout-inspector-mcp) | how it *renders* — measured geometry | 0.4.0 |
 | [`delta-cube`](https://github.com/Rixmerz/delta-cube) | how far it *moved* — files as points, a Delta per reindex, a Tension where a change pulled a file away from what imports it | 0.2.0 |
+| [`mempalace`](https://github.com/MemPalace/mempalace) | what was *said* — earlier sessions, verbatim, searched by question | 3.3.0 |
 
-Three of the four leave artifacts on disk, which is a channel that does exist:
+Four of the five leave artifacts on disk, which is a channel that does exist:
 
 ```
 vise neighbours          # what livespec, flowtrace, Graphify, delta-cube and MemPalace left here
 ```
 
-It reads `.mcp-docs/docs.db`, `.flowtrace/*.jsonl`, `graphify-out/graph.json`
-and delta-cube's `dcc.db` with nothing but the standard library, and it is the
-same reading the `symbol_index`, `cube_index`, `trace_captured` and
-`trace_error_gone` gates do — so a person debugging a refusal sees exactly what
-refused.
+It reads `.mcp-docs/docs.db`, `.flowtrace/*.jsonl`, `graphify-out/graph.json`,
+delta-cube's `dcc.db` and MemPalace's config dir with nothing but the standard
+library, and the first four are the same reading the `symbol_index`,
+`cube_index`, `trace_captured` and `trace_error_gone` gates do — so a person
+debugging a refusal sees exactly what refused. MemPalace has no gate: a memory
+is a resource to consult, not a condition to hold a phase on.
 
 delta-cube's database is one per machine, not per repo — `$DCC_DATA_DIR/dcc.db`,
 defaulting to `~/.local/share/jig/dcc.db` — and its rows carry an absolute
@@ -502,15 +505,38 @@ compared to each other. The two calls vise names, `cube_index_directory` to
 create the index and `cube_reindex` to measure a change, are the only ones it
 assumes.
 
-[MemPalace](https://github.com/MemPalace/mempalace) is not in the table because
-vise teaches none of its calls. It is the other half of memory: verbatim
-transcripts, searched by question, where vise's experience memory is short
-lessons keyed to a file glob and injected on edit. The two run side by side with
-no configuration — MemPalace binds `Stop`, `SessionEnd` and `PreCompact` and
-writes only to its own data dir, so the one thing worth knowing is that
-`mempalace init` leaves `mempalace.yaml` and `entities.json` in the repo root,
-which `diff_scope` treats like any other unexpected file. `vise neighbours` and
-`vise bootstrap` say so when they are present.
+### MemPalace — the other half of memory
+
+vise's experience memory is short lessons keyed to a file glob, injected when
+that file is edited, decaying as they age. It holds *what to watch for*. It
+does not hold *what was decided*: the approach an earlier session tried and
+rejected, the constraint a user stated in passing, the reason a dependency was
+picked. Those live in the transcript, and Claude Code deletes transcripts after
+thirty days. [MemPalace](https://github.com/MemPalace/mempalace) mines them
+first — verbatim, no summarising — and searches them by question. The two
+divide cleanly and need nothing configured to coexist: MemPalace binds `Stop`,
+`SessionEnd` and `PreCompact`, writes only to its own data dir, and its tool
+names, slash commands and skills share nothing with vise's.
+
+Where it enters vise's flow, in the order a session meets it:
+
+| Moment | What happens | Where |
+|---|---|---|
+| session start | if a palace exists on the machine, three lines say so and how to ask it — *if* the `mempalace_*` tools are connected, which a config file cannot know | `hooks/session_restore.py` |
+| before a brief | when the task has a history here, the orchestrator searches the palace and pastes the drawer **verbatim, with its `source_path`**, into the brief — a subagent has neither the transcript nor the tool | `skills/orchestration` |
+| research and debugging | `researcher` and `debugger` are granted `mcp__mempalace__mempalace_search` and told the palace is a source: cite it, quote it, and say when it could not be consulted | `agents/researcher.md`, `agents/debugger.md` |
+| bootstrap and `vise neighbours` | whether a palace exists, and whether `mempalace init` left `mempalace.yaml` and `entities.json` in the repo root — which `diff_scope` fails on unless its `allow` list knows | `vise bootstrap`, `vise neighbours` |
+
+vise never writes to the palace. MemPalace's own hooks save the transcript
+every fifteen messages, and a second writer would file the same session twice.
+The two calls vise names, `mempalace_search` and `mempalace_diary_read`, are
+pinned in `core/neighbours.py` at 3.3.0 — the release in which the `Stop`
+hook stopped making the agent write its save in chat; below it, that hook
+returns a `block` beside vise's own Stop gate every fifteenth message.
+
+Recall is question-driven, and both projects say so: search when the request
+refers to prior work, not on a rename. The note at session start is three lines
+for that reason — the palace is a resource, not a phase.
 
 A fourth name shows up in that output. [Graphify](https://github.com/Graphify-Labs/graphify)
 is not an MCP server vise talks to; it is a CLI whose `graph.json` livespec

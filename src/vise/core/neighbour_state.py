@@ -12,7 +12,9 @@ artifacts in the repository, and a file is not a tool call.
     delta-cube `$DCC_DATA_DIR/dcc.db`   — SQLite, one per machine. Which files
                                           of this repo are points in it, and
                                           how many tensions are still open.
-    MemPalace  `mempalace.yaml`         — two files `mempalace init` leaves in
+    MemPalace  `~/.config/mempalace/`   — the palace, one per machine. Is
+                                          there anything to recall from?
+               `mempalace.yaml`         — two files `mempalace init` leaves in
                `entities.json`           the repo root. Read for their presence.
 
 That is the difference between a phase that *asks an agent* whether an index
@@ -58,7 +60,12 @@ from vise.core.neighbours import (
     DELTA_CUBE_DATA_DIR_ENV,
     DELTA_CUBE_DB_NAME,
     DELTA_CUBE_DEFAULT_DATA_DIR,
+    MEMPALACE_CONFIG_DIR_ENV,
+    MEMPALACE_LEGACY_DIR,
+    MEMPALACE_PALACE_MARKER,
+    MEMPALACE_PALACE_SUBDIR,
     MEMPALACE_PROJECT_FILES,
+    MEMPALACE_XDG_SUBDIR,
 )
 
 #: Where livespec keeps its index, relative to the repo root.
@@ -491,6 +498,98 @@ def cube_state(project: Path | str) -> CubeState:
         )
 
 
+@dataclass(frozen=True)
+class PalaceState:
+    """Whether this machine has a MemPalace palace to recall from.
+
+    Machine-wide, like the cube: a palace holds every project its owner has
+    mined, scoped inside by *wing*. Nothing here says whether the
+    `mempalace_*` tools are connected to the running session — a config file
+    cannot know that — so a consumer says "if the tools are connected", and
+    never "call this".
+    """
+
+    #: True when the question was answered either way.
+    known: bool = False
+    #: A config dir exists that MemPalace would recognise as an install.
+    configured: bool = False
+    #: The palace directory holds a store. False with `configured` True means
+    #: an install that has mined nothing yet, or a non-default backend whose
+    #: store vise does not know the filename of — `detail` says which.
+    present: bool = False
+    config_dir: str = ""
+    detail: str = "not checked"
+
+
+def _mempalace_config_dir() -> Path:
+    """MemPalace's config dir, resolved the way its own `config.py` does."""
+    env = os.environ.get(MEMPALACE_CONFIG_DIR_ENV)
+    if env and env.strip():
+        return Path(env).expanduser()
+    legacy = Path(MEMPALACE_LEGACY_DIR).expanduser()
+    if legacy.is_dir() and (
+        (legacy / "config.json").is_file()
+        or (legacy / "people_map.json").is_file()
+        or (legacy / MEMPALACE_PALACE_SUBDIR / MEMPALACE_PALACE_MARKER).is_file()
+    ):
+        return legacy
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg and xdg.strip() and Path(xdg).expanduser().is_absolute():
+        return Path(xdg).expanduser() / MEMPALACE_XDG_SUBDIR
+    return Path.home() / ".config" / MEMPALACE_XDG_SUBDIR
+
+
+def palace_state() -> PalaceState:
+    """Is there a MemPalace palace on this machine? Read, never asked."""
+    try:
+        config_dir = _mempalace_config_dir()
+        shown = config_dir.as_posix().replace(str(Path.home()), "~", 1)
+        config_file = config_dir / "config.json"
+        if not config_dir.is_dir():
+            return PalaceState(
+                known=True, config_dir=shown,
+                detail=f"no {shown} — MemPalace is not set up on this machine",
+            )
+        palace = config_dir / MEMPALACE_PALACE_SUBDIR
+        if config_file.is_file():
+            try:
+                configured_path = json.loads(
+                    config_file.read_text(encoding="utf-8")
+                ).get("palace_path")
+                if configured_path:
+                    palace = Path(str(configured_path)).expanduser()
+            except Exception:  # noqa: BLE001 - an unreadable config is still an install
+                pass
+        configured = config_file.is_file() or palace.is_dir()
+        if not configured:
+            return PalaceState(
+                known=True, config_dir=shown,
+                detail=f"{shown} exists but holds neither config.json nor a palace",
+            )
+        if (palace / MEMPALACE_PALACE_MARKER).is_file():
+            return PalaceState(
+                known=True, configured=True, present=True, config_dir=shown,
+                detail=f"MemPalace palace at {shown} — earlier sessions are searchable",
+            )
+        if palace.is_dir() and any(palace.iterdir()):
+            return PalaceState(
+                known=True, configured=True, present=True, config_dir=shown,
+                detail=(
+                    f"MemPalace palace at {shown} on a non-default backend — "
+                    "earlier sessions are probably searchable"
+                ),
+            )
+        return PalaceState(
+            known=True, configured=True, present=False, config_dir=shown,
+            detail=f"MemPalace is set up at {shown} but has mined nothing yet",
+        )
+    except Exception as exc:  # noqa: BLE001 - a state, never an exception
+        return PalaceState(
+            known=False,
+            detail=f"could not read MemPalace's config dir: {type(exc).__name__}: {exc}",
+        )
+
+
 def mempalace_files(project: Path | str) -> tuple[str, ...]:
     """The MemPalace project files present in this repo root, if any.
 
@@ -514,11 +613,11 @@ def summary(project: Path | str) -> str:
     graph = graph_state(project)
     lines.append(f"Graphify:   {graph.detail}")
     lines.append(f"delta-cube: {cube_state(project).detail}")
+    palace = palace_state()
     present = mempalace_files(project)
-    lines.append(
-        "MemPalace:  " + (f"{', '.join(present)} in the repo root" if present
-                          else "no project files in the repo root")
-    )
+    files = (f"; {', '.join(present)} in the repo root" if present
+             else "; no project files in the repo root")
+    lines.append(f"MemPalace:  {palace.detail}{files}")
     return "\n".join(lines)
 
 
@@ -529,6 +628,7 @@ __all__ = [
     "CubeState",
     "GraphState",
     "IndexState",
+    "PalaceState",
     "TraceState",
     "cube_state",
     "delta_cube_db",
@@ -536,6 +636,7 @@ __all__ = [
     "graph_state",
     "index_state",
     "mempalace_files",
+    "palace_state",
     "summary",
     "trace_state",
 ]

@@ -86,6 +86,16 @@
         ]
       },
       {
+        "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PYTHONPATH=\"${CLAUDE_PLUGIN_ROOT}/src\" \"${CLAUDE_PLUGIN_ROOT}/bin/vise-run\" \"${CLAUDE_PLUGIN_ROOT}/src/vise/hooks/context_cost.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "mcp__.*__graph_traverse",
         "hooks": [
           {

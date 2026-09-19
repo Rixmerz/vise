@@ -92,9 +92,27 @@ DELTA_CUBE_TOOLS: frozenset[str] = frozenset({
     "cube_reindex",
 })
 
+#: `mempalace` — what was *said*: verbatim transcripts, searched by question.
+#: The half of memory vise deliberately does not hold. vise's experience
+#: memory is short lessons keyed to a file glob and injected on edit;
+#: MemPalace is the record of what a session decided, tried and rejected, in
+#: its own words. Only the two read calls vise teaches; the server has 45.
+#:
+#: `mempalace_search` takes `query` (keywords only, 250 chars — its own
+#: schema says a pasted prompt sinks recall), optional `wing` (MemPalace's
+#: word for a project; the repo's basename by its convention) and `limit`.
+#: `mempalace_diary_read` takes `agent_name` and `last_n`. Nothing here
+#: writes: MemPalace's own hooks save the transcript every fifteen messages,
+#: and a second writer would file the same session twice.
+MEMPALACE_TOOLS: frozenset[str] = frozenset({
+    "mempalace_diary_read",
+    "mempalace_search",
+})
+
 #: Every name vise assumes a neighbour exposes. What an asset may teach.
 NEIGHBOUR_TOOLS: frozenset[str] = (
-    LIVESPEC_TOOLS | LAYOUT_INSPECTOR_TOOLS | FLOWTRACE_TOOLS | DELTA_CUBE_TOOLS
+    LIVESPEC_TOOLS | LAYOUT_INSPECTOR_TOOLS | FLOWTRACE_TOOLS
+    | DELTA_CUBE_TOOLS | MEMPALACE_TOOLS
 )
 
 #: The oldest release of each neighbour in which every name above resolves and
@@ -121,6 +139,11 @@ MINIMUM_VERSIONS: dict[str, str] = {
     # current distance cosine, so `tension_percent` compared two scales and
     # the count a gate would read was not a number anyone should act on.
     "delta-cube": "0.2.0",
+    # 3.3.0 is where MemPalace's Stop hook stopped making the agent write the
+    # save in chat: below it, every fifteenth human message the hook returns
+    # a `block` decision, which lands beside vise's own Stop gate and costs
+    # the turn. From 3.3.0 the hook saves silently and the two coexist.
+    "mempalace": "3.3.0",
 }
 
 #: Where delta-cube keeps its one database. Global, not per repo: every
@@ -137,6 +160,16 @@ DELTA_CUBE_DB_NAME = "dcc.db"
 #: Graphify does: `mempalace init` writes two files into the repository root,
 #: and `diff_scope` will fail on them unless its `allow` list knows.
 MEMPALACE_PROJECT_FILES: tuple[str, ...] = ("mempalace.yaml", "entities.json")
+
+#: Where MemPalace keeps its config and, under it, the palace. Resolved in
+#: the order its own `config.py` uses: the env override, then a legacy
+#: `~/.mempalace` that really holds an install, then XDG. The palace itself
+#: is `palace/` under that dir unless `config.json` moves it.
+MEMPALACE_CONFIG_DIR_ENV = "MEMPALACE_CONFIG_DIR"
+MEMPALACE_LEGACY_DIR = "~/.mempalace"
+MEMPALACE_XDG_SUBDIR = "mempalace"
+MEMPALACE_PALACE_SUBDIR = "palace"
+MEMPALACE_PALACE_MARKER = "chroma.sqlite3"
 
 #: Not an MCP server vise talks to at all — a CLI that writes a file livespec
 #: reads. It earns a name here because its presence changes what vise's own

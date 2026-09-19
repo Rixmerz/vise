@@ -534,3 +534,98 @@ def test_summary_names_the_cube_and_mempalace_even_when_absent(tmp_path: Path, c
 
     out = summary(_repo(tmp_path))
     assert "delta-cube:" in out and "MemPalace:" in out
+
+
+# --- MemPalace palace ----------------------------------------------------------
+#
+# Machine-wide, resolved the way MemPalace's own config.py resolves it. The
+# conftest points MEMPALACE_CONFIG_DIR at a tmp dir for every test, so the
+# developer's real palace never shows up here.
+
+def _palace(config_dir: Path, *, store: bool = True, config: dict | None = None,
+            palace_dir: Path | None = None) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    if config is not None:
+        (config_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    palace = palace_dir or (config_dir / "palace")
+    palace.mkdir(parents=True, exist_ok=True)
+    if store:
+        (palace / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+
+
+def test_no_config_dir_is_a_known_absence(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import palace_state
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "nothing"))
+    state = palace_state()
+    assert state.known and not state.configured and not state.present
+    assert "not set up" in state.detail
+
+
+def test_a_palace_with_a_store_is_present(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import palace_state
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
+    _palace(tmp_path / "mp", config={"palace_path": str(tmp_path / "mp" / "palace")})
+    state = palace_state()
+    assert state.configured and state.present
+    assert "searchable" in state.detail
+
+
+def test_an_install_that_mined_nothing_is_configured_but_not_present(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import palace_state
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
+    _palace(tmp_path / "mp", store=False, config={})
+    state = palace_state()
+    assert state.configured and not state.present
+    assert "mined nothing" in state.detail
+
+
+def test_config_json_can_move_the_palace(tmp_path: Path, monkeypatch):
+    """`palace_path` in config.json wins over the default subdirectory."""
+    from vise.core.neighbour_state import palace_state
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
+    elsewhere = tmp_path / "vault"
+    _palace(tmp_path / "mp", config={"palace_path": str(elsewhere)}, palace_dir=elsewhere)
+    assert palace_state().present
+
+
+def test_a_non_default_backend_is_reported_as_probably_searchable(tmp_path: Path, monkeypatch):
+    """Six backends ship; only the default writes chroma.sqlite3. A palace dir
+    with *something* in it is an install vise cannot name the store of, and
+    saying "absent" there would hide a real palace."""
+    from vise.core.neighbour_state import palace_state
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
+    _palace(tmp_path / "mp", store=False, config={})
+    (tmp_path / "mp" / "palace" / "exact.sqlite3").write_bytes(b"x")
+    state = palace_state()
+    assert state.present and "probably" in state.detail
+
+
+def test_the_config_dir_resolves_like_mempalace_does(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import _mempalace_config_dir
+
+    monkeypatch.delenv("MEMPALACE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert _mempalace_config_dir() == tmp_path / "xdg" / "mempalace"
+    # A legacy ~/.mempalace wins only when it really holds an install.
+    (tmp_path / ".mempalace").mkdir()
+    assert _mempalace_config_dir() == tmp_path / "xdg" / "mempalace"
+    (tmp_path / ".mempalace" / "config.json").write_text("{}")
+    assert _mempalace_config_dir() == tmp_path / ".mempalace"
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    (tmp_path / ".mempalace" / "config.json").unlink()
+    assert _mempalace_config_dir() == tmp_path / ".config" / "mempalace"
+
+
+def test_summary_names_the_palace(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import summary
+
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
+    _palace(tmp_path / "mp", config={})
+    out = summary(_repo(tmp_path))
+    assert "MemPalace:  MemPalace palace at" in out

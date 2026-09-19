@@ -19,7 +19,7 @@ Treat those files with the same care as the code.
 | `agents/` | 22 bundled subagent charters |
 | `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
-| `hooks/hooks.json` | 13 hook registrations across 11 scripts, 6 events |
+| `hooks/hooks.json` | 14 hook registrations across 12 scripts, 6 events |
 | `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |

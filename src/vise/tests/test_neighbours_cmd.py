@@ -249,3 +249,16 @@ def test_it_says_when_the_cube_holds_the_repo_but_never_measured_it(tmp_path, ca
     cube_db(data, files=[str(tmp_path / "a.py"), str(tmp_path / "b.py")])
     out = _run(tmp_path, capsys)
     assert "never measured" in out and "cube_reindex" in out
+
+
+def test_it_reports_the_palace_and_what_follows(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-such-dir"))
+    mp = tmp_path / "mp"
+    (mp / "palace").mkdir(parents=True)
+    (mp / "config.json").write_text("{}")
+    (mp / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(mp))
+    out = _run(tmp_path, capsys)
+    assert "MemPalace palace at" in out
+    assert "earlier sessions are searchable" in out
+    assert "mempalace" in out and "3.3.0" in out

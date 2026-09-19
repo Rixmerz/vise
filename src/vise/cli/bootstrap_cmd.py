@@ -414,6 +414,7 @@ def _neighbours_report(project: Path) -> str:
         graph_state,
         index_state,
         mempalace_files,
+        palace_state,
     )
 
     lines = ["\nneighbouring servers (vise names them and cannot call them):"]
@@ -444,9 +445,12 @@ def _neighbours_report(project: Path) -> str:
             "            -> `cube_index` fails closed until delta-cube indexes this "
             "repo. Nothing else is affected."
         )
-    palace = mempalace_files(project)
-    if palace:
-        lines.append(f"  MemPalace  {', '.join(palace)} in the repo root")
+    palace = palace_state()
+    if palace.present:
+        lines.append(f"  MemPalace  {palace.detail}")
+    palace_files = mempalace_files(project)
+    if palace_files:
+        lines.append(f"  MemPalace  {', '.join(palace_files)} in the repo root")
         lines.append(
             "            -> written by `mempalace init`, not by anyone editing. If "
             "you wire the\n"
