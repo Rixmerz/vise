@@ -48,6 +48,11 @@ MEASURED_TOOLS: frozenset[str] = frozenset({
 
 DEFAULT_CALL_KB = 32
 DEFAULT_SESSION_KB = 256
+#: The two knobs, as constants so `test_env_var_docs_sync` can see they are
+#: read: a single result over the first is named; the session total crossing
+#: each multiple of the second is reported.
+CALL_KB_ENV_VAR = "VISE_CONTEXT_CALL_KB"
+SESSION_KB_ENV_VAR = "VISE_CONTEXT_SESSION_KB"
 #: Per-tool nudges per session. Three, then silence: the point was made.
 MAX_CALL_NOTES_PER_TOOL = 3
 
@@ -184,8 +189,8 @@ def main() -> int:
         ledger = _load(path)
         lines = account(
             ledger, tool, size,
-            call_kb=_kb("VISE_CONTEXT_CALL_KB", DEFAULT_CALL_KB),
-            session_kb=_kb("VISE_CONTEXT_SESSION_KB", DEFAULT_SESSION_KB),
+            call_kb=_kb(CALL_KB_ENV_VAR, DEFAULT_CALL_KB),
+            session_kb=_kb(SESSION_KB_ENV_VAR, DEFAULT_SESSION_KB),
         )
         _save(path, ledger)
         if lines:
