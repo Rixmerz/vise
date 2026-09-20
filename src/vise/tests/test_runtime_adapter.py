@@ -199,10 +199,47 @@ def test_no_json_envelope_is_an_environment_failure():
 
 
 def test_an_errored_session_is_an_environment_failure():
-    result = _worker(stdout=_envelope("", is_error=True, subtype="max_turns")).run(_brief())
+    """The example used to be `max_turns`, which is the one errored session that
+    is NOT environmental — a ceiling is the plan's size, not the machine's. The
+    test asserted the defect, so it named a subtype that really is one."""
+    result = _worker(
+        stdout=_envelope("", is_error=True, subtype="error_during_execution")
+    ).run(_brief())
     assert result.verdict is Verdict.INCONCLUSIVE
     assert result.classification is FailureKind.ENVIRONMENT_BUG
-    assert "max_turns" in result.summary
+    assert "error_during_execution" in result.summary
+
+
+# --- a turn ceiling is not an environment failure ---------------------------
+#
+# The distinction is worth money. An environment failure earns a retry at the
+# same rung, because a missing binary may be there next time. A ceiling is
+# still there next time, so the retry buys a second bill for what the first
+# already established.
+
+
+@pytest.mark.parametrize("subtype", ["error_max_turns", "max_turns"])
+def test_a_turn_ceiling_is_classified_as_the_plan_not_the_environment(subtype):
+    result = _worker(stdout=_envelope("", is_error=True, subtype=subtype)).run(_brief())
+    assert result.verdict is Verdict.INCONCLUSIVE, "it reported no verdict"
+    assert result.classification is FailureKind.SPEC_BUG
+    assert result.classification is not FailureKind.ENVIRONMENT_BUG
+
+
+def test_the_ceiling_message_names_the_number_and_both_remedies():
+    """The old message was the raw CLI subtype. It did not say what the ceiling
+    was, where it is set, or that a retry cannot clear it — so a run could not
+    tell "too big for its allowance" from "wrong", and paid to find out."""
+    from vise.runtime.adapters.claude_code import DEFAULT_MAX_TURNS
+
+    result = _worker(
+        stdout=_envelope("", is_error=True, subtype="error_max_turns")
+    ).run(_brief(budget=TaskBudget(max_turns=7)))
+    assert "all 7 of its turns" in result.summary, "the ceiling it actually hit"
+    assert "max_turns" in result.summary, "where to raise it"
+    assert str(DEFAULT_MAX_TURNS) in result.summary, "what it defaults to"
+    assert "split it" in result.summary, "the other way out"
+    assert "reaches the same wall" in result.summary, "why a retry is not one"
 
 
 def test_a_stream_of_json_lines_uses_the_last_object():

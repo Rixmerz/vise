@@ -286,3 +286,24 @@ def test_the_tree_hash_is_stable_when_truly_nothing_changed(tmp_path):
     repo = _git_repo(tmp_path)
     (repo / "app.py").write_text("one\n", encoding="utf-8")
     assert tree_hash(repo) == tree_hash(repo)
+
+
+def test_the_unchanged_tree_refusal_names_both_states_rather_than_asserting_one():
+    """It used to end "so nothing was written or committed", which is an
+    inference and not a reading.
+
+    Two different things produce an unchanged tree, and the expensive one is
+    the second: the work was already there before the task started. Committing
+    a run's partial output does exactly that to every task still queued behind
+    it, so a correct worker finds its job done, reports honestly, and is
+    refused — with a message telling it the one thing that is not true. A
+    reader who believes it looks for the write that never happened instead of
+    at the commit that already made it.
+    """
+    outcome = check_result(_brief(), _pass(), baseline_tree="same", current_tree="same")
+    assert not outcome.accepted
+    refusal = next(r for r in outcome.refusals if "unchanged tree" in r)
+    assert "nothing was written" in refusal, "the first reading, still named"
+    assert "already there before the task began" in refusal, "the second one"
+    assert "partial run" in refusal, "and what puts a repo in that state"
+    assert "cannot tell them apart" in refusal, "said plainly, not implied"

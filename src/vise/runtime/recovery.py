@@ -224,6 +224,24 @@ def decide(
         classification = result.classification
 
     if result.verdict is Verdict.INCONCLUSIVE:
+        # An inconclusive whose cause is already known does not need a second
+        # observation to learn it again.
+        #
+        # The case this exists for is a turn ceiling. The adapter classifies it
+        # the moment it sees the subtype, so by here the cause is not in doubt:
+        # the task did not fit its allowance. Retrying it at the same allowance
+        # is the "waiting for nothing" the escalation rule below refuses, paid
+        # in a whole worker instead of a backoff — and it was reached by the
+        # generic branch underneath, which retries at the same rung precisely
+        # because it assumes the cause is unknown and might have cleared.
+        if classification in REPLAN_KINDS and replans_used < max_replans:
+            return RecoveryDecision(
+                Recovery.REPLAN, TaskState.PENDING,
+                f"inconclusive, and classified {classification.value} — the cause is "
+                f"known and it is the plan, so the same task tried again the same way "
+                f"reaches the same wall",
+            )
+
         # Nothing was learned about the code. Trying again at a bigger model
         # would be paying more to learn nothing again.
         #
