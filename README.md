@@ -527,6 +527,13 @@ Where it enters vise's flow, in the order a session meets it:
 | research and debugging | `researcher` and `debugger` are granted `mcp__mempalace__mempalace_search` and told the palace is a source: cite it, quote it, and say when it could not be consulted | `agents/researcher.md`, `agents/debugger.md` |
 | bootstrap and `vise neighbours` | whether a palace exists, and whether `mempalace init` left `mempalace.yaml` and `entities.json` in the repo root — which `diff_scope` fails on unless its `allow` list knows | `vise bootstrap`, `vise neighbours` |
 
+vise never installs it either, and that is the same decision as not writing to
+it: a palace is machine-wide and holds its owner's conversations, which no
+other plugin's installer gets to decide for them. What `vise doctor` and `vise
+neighbours` do when none exists is name the package — MemPalace is the one
+neighbour whose absence is otherwise invisible, because a machine that has
+never seen it looks exactly like one whose owner declined it.
+
 vise never writes to the palace. MemPalace's own hooks save the transcript
 every fifteen messages, and a second writer would file the same session twice.
 The two calls vise names, `mempalace_search` and `mempalace_diary_read`, are

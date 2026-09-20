@@ -17,7 +17,7 @@ import argparse
 from pathlib import Path
 
 from vise.cli._browser_probe import browser_status_quiet
-from vise.core.neighbours import MINIMUM_VERSIONS
+from vise.core.neighbours import MEMPALACE_ABSENT_HINT, MINIMUM_VERSIONS
 
 
 def _render_gates_line(project: Path) -> str:
@@ -102,6 +102,10 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
             "SessionStart hook says so each session; the orchestration skill "
             "says when to search it and what to paste into a brief."
         )
+    elif palace.known:
+        print("")
+        for hint in MEMPALACE_ABSENT_HINT:
+            print(hint)
     if palace_files:
         print(
             "\nMemPalace has been initialised here. Its hooks write only to its "
