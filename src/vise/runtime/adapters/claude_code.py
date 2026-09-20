@@ -55,6 +55,27 @@ _FENCE_RE = re.compile(
 DEFAULT_MAX_TURNS = 20
 DEFAULT_TIMEOUT_S = 900
 
+#: What a CLI result subtype contains when the worker used every turn it was
+#: given without reporting a verdict.
+#:
+#: Worth separating from every other ``is_error`` because the right response is
+#: the opposite one. An errored session is an environment failure and earns a
+#: retry at the same rung, which is correct when a binary was missing and the
+#: next attempt may find it there. A ceiling does not clear: the same task, at
+#: the same ceiling, reaches the same wall, and a retry buys a second bill for
+#: the same information. That is the mistake ``recovery`` already refuses one
+#: door down — an escalation waiting for something that is not coming.
+#:
+#: A substring, not an equality, and deliberately. This is a name owned by the
+#: other side of a boundary — the CLI's, not vise's — and vise has been wrong
+#: about exactly that before: ``core/neighbours.py`` carries the incident where
+#: two tool names it had pinned turned out never to have existed. The observed
+#: spellings are ``error_max_turns`` and ``max_turns``. Being wrong about which
+#: costs nothing in one direction (a differently-worded ceiling still gets the
+#: better message) and costs the whole fix in the other, where it would never
+#: fire and nobody would see that it had not.
+TURN_EXHAUSTED_MARKER = "max_turns"
+
 RESULT_INSTRUCTIONS = f"""
 When you are done, emit exactly one fenced block, last thing in your reply:
 
@@ -249,10 +270,39 @@ class ClaudeCodeWorker:
             )
 
         if envelope.get("is_error"):
+            subtype = str(envelope.get("subtype") or "")
+            if TURN_EXHAUSTED_MARKER in subtype:
+                # Named, with the number and both remedies. The old message
+                # here was "the session errored: error_max_turns", which hands
+                # back a raw CLI subtype: it does not say what the ceiling was,
+                # where it is set, or that a retry cannot clear it. A run that
+                # cannot tell "this task is too big for its allowance" from
+                # "this task is wrong" pays to find out, once per attempt.
+                ceiling = brief.budget.max_turns or self.max_turns
+                return TaskResult(
+                    task_id=brief.task_id,
+                    verdict=Verdict.INCONCLUSIVE,
+                    summary=(
+                        f"the worker used all {ceiling} of its turns without reporting a "
+                        f"verdict. A ceiling is not a fault and does not clear on its "
+                        f"own: the same task at the same ceiling reaches the same wall. "
+                        f"Either raise `max_turns` on this task (the default is "
+                        f"{DEFAULT_MAX_TURNS}) or split it into smaller tasks."
+                    ),
+                    # Inconclusive about the *code* — nothing was learned about
+                    # it — but not about the cause, which is mechanically known
+                    # and is the plan. `recovery` reads this to replan instead
+                    # of spending a retry on a wall it can already see.
+                    classification=FailureKind.SPEC_BUG,
+                    changed_paths=changed_paths,
+                    usage=usage,
+                    model=brief.model,
+                    effort=brief.effort,
+                )
             return TaskResult(
                 task_id=brief.task_id,
                 verdict=Verdict.INCONCLUSIVE,
-                summary=f"the session errored: {str(envelope.get('subtype') or text)[:300]}",
+                summary=f"the session errored: {subtype or str(text)[:300]}",
                 classification=FailureKind.ENVIRONMENT_BUG,
                 changed_paths=changed_paths,
                 usage=usage,

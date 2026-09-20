@@ -193,6 +193,18 @@ that are ambiguous: twelve agents take `backend`, so a task that does not name a
 language is reported as unroutable rather than sent to whichever charter sorts
 first.
 
+The plan also prints, as notes, two things a run would otherwise reveal by
+charging for them. A writing task that declares **no acceptance criteria** is
+never verified — the scheduler dispatches a verifier only for a task that
+declares them — so what grades its work is the honesty gates alone, and those
+check the *shape* of a claim (evidence quoted, tree moved, paths owned) and
+never its content. A writing task that declares **no ownership** has every path
+it writes fall outside a claim it never made; in a shared tree only a peer's
+claim can excuse that, and under `--isolate` nothing can, so the pass is
+refused. Neither stops a run. Both are worth knowing before one starts, because
+a run that ends in a refusal nobody could have predicted from the plan is a
+plan that was not worth reading.
+
 Exit code is non-zero when the plan has problems, so a plan with an unroutable
 task cannot be scripted past.
 

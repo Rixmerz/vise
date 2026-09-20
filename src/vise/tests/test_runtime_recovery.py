@@ -323,3 +323,51 @@ def test_a_pass_does_not_repeat_a_failure_that_read_the_same():
 def test_one_attempt_cannot_repeat_anything():
     assert repeated_answer([_at(1, "haiku", "")]) is None
     assert repeated_answer([]) is None
+
+
+# --- an inconclusive whose cause is already known ---------------------------
+#
+# The branch above retries at the same rung because it assumes the cause is
+# unknown and might have cleared. A turn ceiling is the case where it is known
+# and cannot: the adapter classifies it the moment it reads the subtype, and
+# the same task at the same ceiling reaches the same wall.
+#
+# `test_inconclusive_retries_once_then_stops` above records that this exact
+# failure — a task that ran out of turns — reached production once before. It
+# was fixed by counting the retry correctly. This is the other half: not
+# spending it.
+
+
+def test_inconclusive_with_a_known_plan_cause_replans_instead_of_retrying():
+    move = decide(
+        _result(Verdict.INCONCLUSIVE, classification=FailureKind.SPEC_BUG),
+        _inconclusive_attempts(1),
+    )
+    assert move.action is Recovery.REPLAN, move.reason
+    assert "same wall" in move.reason
+
+
+def test_an_inconclusive_with_no_stated_cause_still_retries():
+    """The guard is narrow on purpose: it fires only when something already
+    established what went wrong, never on an inconclusive as such."""
+    move = decide(_result(Verdict.INCONCLUSIVE), _inconclusive_attempts(1))
+    assert move.action is Recovery.RETRY, move.reason
+
+
+def test_an_environment_cause_keeps_its_retry():
+    """A missing binary may be there next time; that retry is worth buying."""
+    move = decide(
+        _result(Verdict.INCONCLUSIVE, classification=FailureKind.ENVIRONMENT_BUG),
+        _inconclusive_attempts(1),
+    )
+    assert move.action is Recovery.RETRY, move.reason
+
+
+def test_once_the_replan_budget_is_spent_it_falls_back_to_the_old_path():
+    move = decide(
+        _result(Verdict.INCONCLUSIVE, classification=FailureKind.SPEC_BUG),
+        _inconclusive_attempts(1),
+        replans_used=99,
+        max_replans=1,
+    )
+    assert move.action is not Recovery.REPLAN

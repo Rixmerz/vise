@@ -162,7 +162,11 @@ def check_result(
         if baseline_tree == current_tree:
             refusals.append(
                 "passed with an unchanged tree — neither the working tree nor HEAD "
-                "moved since the task started, so nothing was written or committed"
+                "moved since this task started. Two different things look like "
+                "this: nothing was written, or the work was already there before "
+                "the task began — which is what committing a partial run does to "
+                "every task still queued behind it. This gate cannot tell them "
+                "apart, so it names both rather than asserting the first"
             )
 
     # Paths another task was concurrently entitled to write are not this task's
