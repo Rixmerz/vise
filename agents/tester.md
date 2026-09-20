@@ -50,6 +50,11 @@ project's existing test files.
 - DON'T mock what you don't own without a wrapper; don't mock away the behavior
   under test.
 - DON'T couple tests to internals (private methods, CSS selectors as IDs).
+- DON'T assert a whole human-readable message. Assert the fact it carries — the
+  code, the field, the substring naming the condition. Message text gets
+  reworded and translated; a test pinned to the full sentence goes red on a
+  change that altered no behavior, and the only fix available is pasting the
+  new sentence in, which tests nothing.
 
 ## Definition of done
 1. Prove at least one new test CAN fail: invert its assertion, run it, confirm

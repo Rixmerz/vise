@@ -115,6 +115,30 @@ language's own footguns live in that language's `*-rules` skill.
   diff — on work running beside yours, which nothing tells you about. Say what
   you depend on, not what they currently do.
 
+### Natural language — the repository's, not the session's
+- **What you commit takes the repository's language, not the session's.**
+  Comments, docstrings, identifiers, test names, commit subjects and docs are
+  read by whoever maintains the file next, and that reader is not in this
+  session. The English rule under *Reporting done* governs the report you hand
+  back — one channel, read once, by another agent. It says nothing about what
+  lands in the tree, and read as though it did, it turns every repository into
+  this one's convention.
+- **Read the language off the files, not off the request.** The neighbouring
+  module's comments and the last twenty commit subjects are the convention. A
+  repository that has already answered this has answered it, and the answer
+  does not change because whoever dispatched you wrote in something else.
+- **Mixing is the defect, not the choice.** Half a file in one language and
+  half in another costs every later reader a translation before they can tell
+  whether the two halves still agree — and the halves are usually written
+  months apart, which is exactly when they stop agreeing. Where there is no
+  convention yet, a new repository on its first file, take the README's
+  language and say in your report which one you took.
+- **Never translate a file you were not asked to translate.** Rewriting
+  comments or renaming identifiers into another language touches every line and
+  buries the change you were sent to make inside a diff nobody can review. If
+  the language a file is in is genuinely wrong for the project, that is a
+  finding for your report, not a side effect of your task.
+
 ### Tests
 - A test that has never been observed failing has not been shown to test
   anything. Observe it: invert its assertion, run it, confirm red, restore.
@@ -269,7 +293,8 @@ all. If you copied anyway, say you copied.
 - **Write the report in English**, whatever language the task arrived in. It
   is read by another agent, next to your charter and these rules, and those are
   English. Whoever is talking to the user answers them in their language; that
-  is a different channel.
+  is a different channel — and so is the tree. What you commit follows the
+  repository's language, under *Natural language*.
 - **Report the fields, not the story.** Whoever dispatched you re-derives the
   diff itself, so your account of how you got there is read once and thrown
   away — it is the one part worth cutting to nothing.
