@@ -260,6 +260,16 @@ rules before it can apply it, and a constraint that comes through that trip
 slightly changed still reads like a plausible instruction. You answer the
 *user* in the user's language; that is a different channel.
 
+There is a third channel, and it is the only one that leaves a trace after the
+run: **what the wave writes into the repository takes the repository's
+language**, whichever that is. `engineering-baseline` carries the rule, and the
+brief does not restate it. What the brief must not do is imply otherwise — an
+agent holding one language rule, the one governing the channel it is answering
+on, applies it to the comment, the test name and the commit subject too, into a
+tree that had already answered the question. Where a repository's convention is
+not obvious from the files a task touches, that is a constraint, and it goes in
+the brief like any other.
+
 Then the size. "Every prompt is self-contained" is in the hard rules below and
 reads backwards easily: it means **the agent needs nothing out of your window**,
 not *tell it everything*. It already holds its charter, its rules skills, and

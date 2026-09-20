@@ -8,6 +8,32 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — what you commit takes the repository's language
+
+Both language rules vise shipped named a channel: `orchestration` requires the
+brief to be English, `engineering-baseline` requires the report to be English,
+and each closed by carving out the same exception — the user is answered in the
+user's language. Nothing named the tree. An agent holding two rules of the form
+"this channel is English, the user channel is not", and nothing about the files
+it is writing, settles the third case by analogy with whichever it read last,
+and a session conducted in one language leaves a repository written in another
+half in each.
+
+`engineering-baseline` — which all 22 charters preload — now carries **Natural
+language — the repository's, not the session's**: what you commit takes the
+repository's language, read off the files you are editing and the recent commit
+subjects rather than off the request; mixing is the defect rather than either
+choice; and a file you were not asked to translate is never translated as a
+side effect, because that diff buries the change it came with. The report rule
+now names the tree as the other channel, so neither half can be read as the
+whole rule again. `orchestration` says the same for a wave, and points at the
+skill rather than restating it.
+
+`tester` gains the assertion half: assert the condition a message names, not
+the whole sentence. The drift surfaced as red tests, which is the good case —
+but they were red because they had pasted whole messages, so the repair on
+offer was pasting the new message in, which tests nothing.
+
 ### Fixed — a turn ceiling is the plan's size, not the machine's
 
 A worker that used every turn it was given came back as an errored session:
