@@ -165,6 +165,20 @@ MEMPALACE_PROJECT_FILES: tuple[str, ...] = ("mempalace.yaml", "entities.json")
 #: the order its own `config.py` uses: the env override, then a legacy
 #: `~/.mempalace` that really holds an install, then XDG. The palace itself
 #: is `palace/` under that dir unless `config.json` moves it.
+#: What to say to someone who has no palace, and nothing more than that.
+#:
+#: vise does not install MemPalace and should not: a palace is machine-wide
+#: and holds its owner's conversations, which is not a decision another
+#: plugin's installer gets to make for them. Every other neighbour is offered
+#: the same way — named, never installed — and MemPalace is the one whose
+#: absence is otherwise invisible, because a repo that has never seen it looks
+#: exactly like a repo whose owner declined it.
+MEMPALACE_ABSENT_HINT: tuple[str, ...] = (
+    "no palace on this machine — earlier sessions are not searchable.",
+    "MemPalace mines Claude Code transcripts (which expire after 30 days) and",
+    "searches them verbatim: `uv tool install mempalace`, then `mempalace init <repo>`.",
+)
+
 MEMPALACE_CONFIG_DIR_ENV = "MEMPALACE_CONFIG_DIR"
 MEMPALACE_LEGACY_DIR = "~/.mempalace"
 MEMPALACE_XDG_SUBDIR = "mempalace"

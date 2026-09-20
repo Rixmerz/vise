@@ -139,4 +139,39 @@ def test_doctor_reports_every_section_and_never_fails(capsys):
     out = capsys.readouterr().out
     for section in ("LSP servers", "Python diagnostics", "XDG state migration"):
         assert section in out
-    assert "declared:" in out
+    # The LSP section has two real outcomes and this asserts it reached one of
+    # them, rather than printing a header over nothing.
+    #
+    # It used to assert `declared:` alone. That line belongs to the populated
+    # branch — `declared: N by M plugin(s)` — and a machine with no LSP plugin
+    # gets "none — no installed plugin declares a language server" instead.
+    # Every CI runner is such a machine, so the assertion held on a laptop and
+    # failed in CI from the release that rewrote this section onward. Matching
+    # the section *header* would have been worse: the loop above already
+    # asserts it, so the test would have passed while checking nothing.
+    assert ("declared:" in out) or ("no installed plugin declares" in out)
+
+
+def test_doctor_offers_mempalace_when_no_palace_exists(capsys, tmp_path, monkeypatch):
+    """`install.sh` prints this section, so it is where someone first learns
+    the palace exists. Only when it is absent, and only as a package name."""
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "no-palace"))
+    assert main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "mempalace" in out and "needs >= 3.3.0" in out
+    assert "no palace on this machine" in out
+    assert "uv tool install mempalace" in out
+
+
+def test_doctor_reports_a_palace_as_machine_wide_not_per_repo(capsys, tmp_path, monkeypatch):
+    """One palace per machine holding every project its owner mined. Labelling
+    it "this repo" would be a lie about what was read."""
+    mp = tmp_path / "mp"
+    (mp / "palace").mkdir(parents=True)
+    (mp / "config.json").write_text("{}")
+    (mp / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(mp))
+    assert main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "this machine: MemPalace palace at" in out
+    assert "uv tool install mempalace" not in out

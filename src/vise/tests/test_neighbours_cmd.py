@@ -262,3 +262,29 @@ def test_it_reports_the_palace_and_what_follows(tmp_path, capsys, monkeypatch):
     assert "MemPalace palace at" in out
     assert "earlier sessions are searchable" in out
     assert "mempalace" in out and "3.3.0" in out
+
+
+def test_it_offers_mempalace_when_there_is_no_palace(tmp_path, capsys, monkeypatch):
+    """The one neighbour whose absence is otherwise invisible.
+
+    A repo that has never seen MemPalace looks exactly like a repo whose owner
+    declined it, so the absent case names the package. vise never installs it:
+    a palace is machine-wide and holds its owner's conversations.
+    """
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-such-dir"))
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "no-palace"))
+    out = _run(tmp_path, capsys)
+    assert "no palace on this machine" in out
+    assert "uv tool install mempalace" in out
+
+
+def test_the_offer_is_absent_once_a_palace_exists(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("DCC_DATA_DIR", str(tmp_path / "no-such-dir"))
+    mp = tmp_path / "mp"
+    (mp / "palace").mkdir(parents=True)
+    (mp / "config.json").write_text("{}")
+    (mp / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(mp))
+    out = _run(tmp_path, capsys)
+    assert "uv tool install mempalace" not in out
+    assert "earlier sessions are searchable" in out

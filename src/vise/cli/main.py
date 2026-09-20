@@ -291,19 +291,35 @@ def _cmd_doctor() -> int:
     # has one. Reported here rather than re-derived in install.sh: the LSP hint
     # table was duplicated there once, and the copy went stale.
     try:
-        from vise.core.neighbour_state import graph_state, index_state, trace_state
-        from vise.core.neighbours import MINIMUM_VERSIONS
+        from vise.core.neighbour_state import (
+            graph_state,
+            index_state,
+            palace_state,
+            trace_state,
+        )
+        from vise.core.neighbours import MEMPALACE_ABSENT_HINT, MINIMUM_VERSIONS
 
         project = Path.cwd()
         footprints = {
             "livespec": index_state(project).detail,
             "flowtrace": trace_state(project).detail,
         }
+        # MemPalace's footprint is not in the repo: one palace per machine,
+        # holding every project its owner mined. Labelled apart from the
+        # per-repo lines for that reason — "this repo" would be a lie about
+        # what was read.
+        palace = palace_state()
+        machine = {"mempalace": palace.detail} if palace.present else {}
         for name, minimum in sorted(MINIMUM_VERSIONS.items()):
             found = footprints.get(name)
             lines.append(f"  {name:<17} needs >= {minimum}")
             if found:
                 lines.append(f"                    this repo: {found}")
+            if name in machine:
+                lines.append(f"                    this machine: {machine[name]}")
+            if name == "mempalace" and not palace.present and palace.known:
+                for hint in MEMPALACE_ABSENT_HINT:
+                    lines.append(f"                    {hint}")
         graph = graph_state(project)
         if graph.present:
             lines.append(f"  Graphify          {graph.detail}")

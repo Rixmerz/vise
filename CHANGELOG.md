@@ -8,6 +8,31 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — the absent palace is offered, never installed
+
+`vise doctor` and `vise neighbours` now name MemPalace's package when no
+palace exists on the machine, and report an existing one as `this machine:`
+rather than `this repo:` — one palace holds every project its owner mined, so
+the per-repo label was a lie about what had been read. `install.sh` already
+prints the doctor's neighbour section, which is where someone first meets it.
+
+vise does not install it and should not: a palace holds its owner's
+conversations, and that is not a decision another plugin's installer gets to
+make. MemPalace is simply the one neighbour whose absence is invisible — a
+machine that has never seen it looks exactly like one whose owner declined it,
+where a missing livespec index or flowtrace log is visible in the repo.
+
+### Fixed — the doctor test asserted a line the doctor only sometimes prints
+
+`test_doctor_reports_every_section_and_never_fails` asserted `declared:`,
+which belongs to the branch that lists installed language servers. Since
+vise stopped declaring its own, a machine with no LSP plugin — every CI
+runner — gets "none — no installed plugin declares a language server"
+instead, so the test passed on a laptop and failed in CI on every branch.
+It now accepts either of the section's two real outcomes. Matching the
+section header instead would have been worse: the loop above it already
+asserts the header, so the test would have gone green while checking nothing.
+
 ### Behaviour change — a lesson and its negation are two lessons
 
 `experience_gc.consolidate` merged near-duplicates at a `difflib` ratio of
