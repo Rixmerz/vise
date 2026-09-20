@@ -527,6 +527,36 @@ def plan(
             f"{pt.expands.source}'s '{pt.expands.key}', at most {pt.expands.cap}; "
             f"the shape line counts it once"
         )
+    # Two properties of a plan that the run otherwise reveals by charging for
+    # them. Both are read off the plan rather than guessed: the scheduler
+    # verifies only a task that declares acceptance criteria, and `honesty`
+    # refuses a written path that falls outside its task's ownership. Neither
+    # stops a run — which is why they are notes — but a run that ends in a
+    # refusal nobody could have seen coming is a plan that was not worth
+    # reading beforehand.
+    unverified = sorted(
+        t.task_id for w in waves for t in w.tasks if t.writes and not t.verifiers
+    )
+    if unverified and verify_cost:
+        notes.append(
+            f"{len(unverified)} writing task(s) declare no acceptance criteria, so "
+            f"nothing grades what they produce: the honesty gates check the shape of "
+            f"a claim — evidence quoted, tree moved, paths owned — and never its "
+            f"content. {', '.join(unverified[:6])}"
+            + (" …" if len(unverified) > 6 else "")
+        )
+    unclaimed = sorted(
+        t.task_id for w in waves for t in w.tasks if t.writes and not t.ownership
+    )
+    if unclaimed:
+        notes.append(
+            f"{len(unclaimed)} writing task(s) declare no ownership, so every path "
+            f"they write falls outside their claim. In a shared tree only a peer's "
+            f"claim can excuse that; under `--isolate` nothing can, and the pass is "
+            f"refused. {', '.join(unclaimed[:6])}"
+            + (" …" if len(unclaimed) > 6 else "")
+        )
+
     if (expanding or planned_repeating) and remaining is not None \
             and running_ceiling > remaining >= running_cost:
         # A note and not a problem, by the same rule as over-declared

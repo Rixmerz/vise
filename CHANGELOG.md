@@ -8,6 +8,71 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Fixed — a turn ceiling is the plan's size, not the machine's
+
+A worker that used every turn it was given came back as an errored session:
+`INCONCLUSIVE`, classified `ENVIRONMENT_BUG`, summarised as `the session
+errored: error_max_turns`. Three things were wrong with that, and together they
+cost real money in a real run.
+
+The classification was wrong in the expensive direction. `ENVIRONMENT_BUG`
+means something was missing and may be there next time, so it earns a retry at
+the same rung. A ceiling is still there next time. The retry buys a second bill
+for what the first already established, which is the mistake `recovery` refuses
+one door down: an escalation waiting for something that is not coming.
+
+The message named a raw CLI subtype. It did not say what the ceiling was, where
+it is set, or that a retry cannot clear it — so a run could not tell "this task
+is too big for its allowance" from "this task is wrong", and paid once per
+attempt to find out.
+
+And `INCONCLUSIVE` short-circuits `decide` before any classification is read,
+so even a correct classification would have been ignored. The adapter now
+recognises the subtype, names the ceiling it actually hit, the default, and
+both remedies (raise `max_turns` on the task, or split it), and classifies it
+`SPEC_BUG` — the task does not fit as specified. `recovery` reads that ahead of
+the retry: an inconclusive whose cause is *already known*, and is the plan,
+replans instead of spending an attempt reaching the same wall.
+
+`test_inconclusive_retries_once_then_stops` records that this same failure —
+a task that ran out of turns — reached production once before and was fixed by
+counting the retry correctly. This is the other half: not spending it.
+
+The subtype is matched as a substring rather than compared. It is a name owned
+by the other side of a boundary, and `core/neighbours.py` carries the incident
+where two names vise had pinned turned out never to have existed. Being wrong
+about the exact spelling costs nothing in one direction and the whole fix in
+the other, where it would never fire and nobody would see that it had not.
+
+### Fixed — the unchanged-tree refusal asserted a cause it had not checked
+
+It ended "so nothing was written or committed". That is an inference, and it is
+false in the case that matters: the work was already there before the task
+started. Committing a run's partial output does exactly that to every task
+still queued behind it, so a correct worker finds its job done, reports
+honestly, and is refused — by a message telling it the one thing that is not
+true. A reader who believes it goes looking for the write that never happened
+instead of at the commit that already made it.
+
+Nothing about the gate changes. It still refuses, because it still cannot tell
+the two apart. It now says so, names both, and names what puts a repository in
+the second state. Same distinction as everywhere else here: absent and
+unreadable are different, and a check that cannot tell must not pick one.
+
+### Added — the plan names two things the run would otherwise charge to reveal
+
+`vise runtime plan` gains two notes. A **writing task with no acceptance
+criteria** is never verified: the scheduler dispatches a verifier only for a
+task that declares them, and silently for one that does not, leaving the
+honesty gates — which check the shape of a claim and never its content — as
+the only thing grading the work. A **writing task with no ownership** has every
+path it writes fall outside a claim it never made; in a shared tree only a
+peer's claim can excuse that, and under `--isolate` nothing can.
+
+Notes, not problems: both run fine, and blocking on them would break graphs
+that are merely terse. What they buy is that a run ending in a refusal is one
+the plan could have predicted.
+
 ### Added — the absent palace is offered, never installed
 
 `vise doctor` and `vise neighbours` now name MemPalace's package when no

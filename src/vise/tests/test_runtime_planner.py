@@ -434,3 +434,73 @@ def test_a_task_without_until_carries_no_repeats():
     assert planned.cost_usd == pytest.approx(planned.ceiling_usd)
     assert "rounds" not in result.render()
     assert result.to_dict()["waves"][0]["tasks"][0]["repeats"] is None
+
+
+# --- what the plan says before the run charges for it -----------------------
+#
+# Both of these are properties a run otherwise reveals by spending money on
+# them: one ends in a refusal, the other in no grading at all. Neither stops a
+# run, so both are notes — but a plan that could not have predicted the
+# refusal was not worth reading first.
+
+
+def _verifying_registry() -> AgentRegistry:
+    reg = _registry()
+    reg.agents["verifier"] = AgentSpec(
+        id="verifier", role="verify", description="d", model="sonnet",
+        effort="medium", writes=False, capabilities=("verify",),
+    )
+    return reg
+
+
+def test_a_writing_task_with_no_acceptance_criteria_is_named_in_the_notes():
+    """The scheduler verifies only a task that declares criteria, and says so
+    to nobody. What is left grading the work is the honesty gates, which check
+    the shape of a claim and never its content."""
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"])]
+    result = _plan(tasks, registry=_verifying_registry())
+    note = next((n for n in result.notes if "acceptance criteria" in n), None)
+    assert note is not None, result.notes
+    assert "a" in note
+    assert "never its content" in note
+    assert not result.problems, "it is a note, not a refusal"
+
+
+def test_a_task_that_declares_criteria_is_not_named():
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"],
+                  acceptance=["an expired token is rejected"])]
+    result = _plan(tasks, registry=_verifying_registry())
+    assert not any("acceptance criteria" in n for n in result.notes)
+
+
+def test_a_read_only_task_is_not_named_for_either():
+    """It writes nothing, so it can neither escape a claim nor ship ungraded."""
+    tasks = [Task(id="r", name="r", role="review", writes=False)]
+    result = _plan(tasks, registry=_verifying_registry())
+    assert not any("acceptance criteria" in n or "no ownership" in n
+                   for n in result.notes)
+
+
+def test_a_writing_task_with_no_ownership_is_named_in_the_notes():
+    """Every path it writes falls outside a claim it never made, so `honesty`
+    refuses the pass — and under `--isolate` no peer's claim can excuse it."""
+    tasks = [Task(id="a", name="a", role="backend",
+                  acceptance=["it works"])]
+    result = _plan(tasks, registry=_verifying_registry())
+    note = next((n for n in result.notes if "no ownership" in n), None)
+    assert note is not None, result.notes
+    assert "--isolate" in note, "where the excuse does not exist"
+
+
+def test_a_task_that_claims_paths_is_not_named():
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"],
+                  acceptance=["it works"])]
+    result = _plan(tasks, registry=_verifying_registry())
+    assert not any("no ownership" in n for n in result.notes)
+
+
+def test_the_unverified_note_stays_quiet_when_verification_is_off_run_wide():
+    """Then it is a decision someone made, not a gap in a task."""
+    tasks = [Task(id="a", name="a", role="backend", ownership=["src/**"])]
+    result = _plan(tasks, registry=_verifying_registry(), verify=False)
+    assert not any("acceptance criteria" in n for n in result.notes)
