@@ -671,7 +671,7 @@ def screenshot(
         )
 
     # A failed capture must not leave a PREVIOUS capture at the path the caller
-    # is about to read. Leaving it looks like success: the designer is told to
+    # is about to read. Leaving it looks like success: the ui-designer is told to
     # capture and then Read the file, so one that misses the exit code reads
     # last week's screenshot and revises its brief against a UI that no longer
     # exists. A missing file is an unambiguous signal; a stale image is a

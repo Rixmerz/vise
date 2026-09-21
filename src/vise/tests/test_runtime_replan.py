@@ -36,7 +36,7 @@ def _registry() -> AgentRegistry:
     for spec in (
         AgentSpec(id="backend-python", role="backend", description="d",
                   model="sonnet", capabilities=("backend", "python")),
-        AgentSpec(id="designer", role="design", description="d", model="opus",
+        AgentSpec(id="ui-designer", role="design", description="d", model="opus",
                   writes=False, capabilities=("design",)),
     ):
         reg.agents[spec.id] = spec

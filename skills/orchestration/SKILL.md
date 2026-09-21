@@ -46,6 +46,7 @@ entirely — so orchestrated work skipped every phase gate on the repo.
    | The request is… | `graph_activate(graph_name=…)` |
    |---|---|
    | build/add/implement something new | `feature-dev` |
+   | build/reshape a user-facing screen or flow | `ui-feature` |
    | something is broken, failing, wrong | `debug` |
    | check quality, audit, harden | `quality-gate` |
    | review a PR / a branch | `pr-review` |
@@ -139,7 +140,8 @@ agent carries nothing. Pass its name as `subagent_type`.
 | Server-side Python / Go / Rust / TypeScript | `vise:backend-python` · `vise:backend-go` · `vise:backend-rust` · `vise:backend-typescript` |
 | Server-side Java / C# / Kotlin / Ruby / PHP / C·C++ | `vise:backend-java` · `vise:backend-csharp` · `vise:backend-kotlin` · `vise:backend-ruby` · `vise:backend-php` · `vise:backend-cpp` |
 | Server-side Swift / Lua (Vapor, OpenResty, engine glue) | `vise:backend-swift` · `vise:backend-lua` |
-| What a new or reshaped UI should look like — palette, type, layout | `vise:designer` |
+| Which screens exist, what each does, and every state it can be in | `vise:ux-designer` |
+| What a new or reshaped UI should look like — palette, type, layout | `vise:ui-designer` |
 | UI — components, pages, hooks, styling, accessibility | `vise:frontend` |
 | Schema change, index, data backfill | `vise:db-migrator` |
 | A bug — reproduce, attribute, smallest fix | `vise:debugger` |

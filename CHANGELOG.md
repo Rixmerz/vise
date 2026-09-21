@@ -8,6 +8,74 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — who decides what a screen *does*, ahead of what it looks like
+
+The fleet carried one `designer`, and it decided appearance: palette, type
+scale, layout, one signature element. Nothing owned the other half — which
+screens exist, what happens on each, and the states each one can be in. So a
+feature arrived styled, built to its happy path, and missing everything a
+person meets on the second day: the list before it has rows, the request that
+takes four seconds, the field that rejects what they typed, the record whose
+title runs to two hundred characters, the action they want back.
+
+None of that is polish, and none of it is caught by anything vise already ran.
+The three design gates measure a rendered screen; a screen built only for the
+data it has renders correctly and passes all three. The distance between a UI
+that works and one that shipped is not a matter of taste — it is a list, and
+nobody was holding it.
+
+- **`ux-designer`** decides the flow and enumerates every state, before the
+  visual brief rather than after the build. Its output is one artifact: the
+  job in the person's words, the flow with every exit, a state table per
+  data-backed screen carrying each row's trigger and **the actual words the
+  screen shows**, and what was deliberately cut. A state that genuinely cannot
+  happen is written down as unreachable with the reason — absent and impossible
+  are different, which is the same distinction the neighbour gates draw.
+- **`ui-critique`** carries the enumeration both design agents and `frontend`
+  work from: twelve states with their triggers, six passes (second day, wrong
+  data, dead end, keyboard only, reversible, interruption), and the rule that
+  copy is part of a state rather than a follow-up. Its security section is the
+  one that gates: no internals in a user-facing string, and a 403 that reads
+  differently from a 404 tells an attacker which identifiers are real.
+- **`ui-feature`** workflow, with `states` as its own phase between `build` and
+  `verify`. Folded into the implementation phase, the states are the work that
+  gets cut the moment the happy path is demoable; as its own node it has its
+  own exit signal, so a run that skipped it is visible in the timeline and not
+  only in the product.
+
+`build` and `states` both gate on `tests_pass`, which took the mechanically
+gated node count from 24 to 26 and the floor in `test_node_gate_coverage.py`
+from 22 to 24. `states` earns its own gate rather than inheriting `build`'s:
+an empty view, an error branch or a truncation is exactly the kind of change
+that breaks a test written against the populated screen. `orient`, `flow` and
+`look` are exempt with reasons — the first is a reading phase, and the other
+two close on "the brief exists", which is mechanical and uncheckable, because
+the brief goes wherever the repo keeps design decisions. A `file_exists` gate
+would have to name one location and fail closed on every repo that chose
+another.
+
+`test_node_gate_coverage.py` was translated from Spanish while being edited,
+per this repo's rule about doing that when you are already in the file rather
+than as a sweep.
+
+### Behaviour change — `designer` is now `ui-designer`
+
+Two design agents and one of them named generically is the routing ambiguity
+this repo's own rule warns about: a description is what routes work, and
+`designer` beside `ux-designer` says nothing about which half it owns.
+
+`ux-designer` takes the **`ux`** role rather than joining `design`, and that is
+load-bearing rather than tidy. `replan.REMEDIATION_ROLE` is `"design"`, and
+`Registry.resolve` refuses to break a tie alphabetically — deliberately, since
+twelve agents take `backend` and picking the first sends a Python task to the
+C++ charter. Two agents under `design` would therefore have left every
+remediation task unroutable, reported as a routing gap rather than a crash, for
+a name nobody dispatches by. `test_design_split.py` asserts the resolution
+directly.
+
+Anything naming `vise:designer` — a project charter, a saved brief, a script —
+uses `vise:ui-designer` now.
+
 ### Added — what you commit takes the repository's language
 
 Both language rules vise shipped named a channel: `orchestration` requires the
