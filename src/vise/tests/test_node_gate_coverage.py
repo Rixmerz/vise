@@ -1,29 +1,28 @@
-"""Ningún nodo queda sin verificación mecánica por accidente.
+"""No node goes mechanically unchecked by accident.
 
-Medido sobre los 9 workflows bundleados: **46 de 49 aristas son de tipo
-`phrase`** (94%) y solo 14 de 54 nodos declaraban validadores (26%). Traducido:
-la mayor parte del "gating por fases" de vise era el agente afirmando que hizo
-algo, no una comprobación de que lo hizo. vise se presenta como un enforcer;
-en esa proporción era un asistente de disciplina.
+Measured across the bundled workflows when this was written: **46 of 49 edges
+were `phrase` edges** (94%), and only 14 of 54 nodes declared validators (26%).
+Translated: most of vise's phase gating was the agent asserting it had done
+something, not a check that it had. vise presents itself as an enforcer; at
+that ratio it was a discipline assistant.
 
-El arreglo no es poner validadores en todos lados. Muchas fases son
-genuinamente cognitivas — `understand`, `hypothesize`, `triage` — y colgarles
-una comprobación falsa es peor que no tener ninguna: enseña a la gente a
-exportar `VISE_NODE_GATE_OVERRIDE=1`, que es el hábito que las puertas existen
-para evitar.
+The fix is not validators everywhere. Many phases are genuinely cognitive —
+`understand`, `hypothesize`, `triage` — and hanging a fake check on one is
+worse than having none: it teaches people to export
+`VISE_NODE_GATE_OVERRIDE=1`, which is the habit the gates exist to prevent.
 
-El criterio que se aplicó, y que este test sostiene:
+The criterion that was applied, and that this test holds:
 
-    Un nodo cuya propia SIGNAL ya afirma algo mecánico tiene que
-    comprobarlo. Un nodo que no, tiene que decir por qué acá.
+    A node whose own SIGNAL already asserts something mechanical has to
+    check it. A node that does not has to say why, here.
 
-`debug:reproduce` era el caso más claro: el nodo pide en prosa *"Confirm that
-at least one test fails"* y no había forma de expresarlo, así que la puerta
-más fuerte de todo el workflow de debug era una frase. De ahí salió el
-validador `tests_fail`.
+`debug:reproduce` was the clearest case: the node asks in prose for *"Confirm
+that at least one test fails"* and there was no way to express that, so the
+strongest gate in the whole debug workflow was a phrase. The `tests_fail`
+validator came from there.
 
-Lo que este test protege no es el número. Es que el próximo nodo que se agregue
-sin validadores sea una decisión y no un olvido.
+What this test protects is not the number. It is that the next node added
+without validators is a decision rather than an oversight.
 """
 from __future__ import annotations
 
@@ -36,114 +35,126 @@ WORKFLOWS = pathlib.Path(__file__).resolve().parents[1] / "assets" / "workflows"
 
 
 # ---------------------------------------------------------------------------
-# Nodos deliberadamente sin comprobación mecánica, con el motivo.
+# Nodes deliberately left without a mechanical check, each with its reason.
 #
-# Agregar una entrada acá es admitir que el nodo se cierra con el juicio del
-# agente. Es una respuesta legítima; lo que no es legítimo es no responder.
+# Adding an entry here is admitting the node closes on the agent's judgement.
+# That is a legitimate answer; what is not legitimate is not answering.
 # ---------------------------------------------------------------------------
 
-_COGNITIVO = "fase de lectura y juicio: no produce artefacto que una máquina pueda leer"
-_PROSA = "el artefacto es prosa para humanos; su calidad no es comprobable por exit code"
-_EXTERNO = "el efecto vive fuera del repo (GitHub, red), no en el árbol de trabajo"
-_PROYECTO = "comprobable en principio, pero solo contra convenciones del proyecto que vise no conoce"
-_INVESTIGACION = (
-    "el artefacto es una afirmación sobre el mundo, no un árbol de trabajo: "
-    "no hay suite que corra ni exit code que consultar. La comprobación real "
-    "de este workflow es la cita reabierta en `verify`, y ningún validador del "
-    "registro puede confirmar que alguien la abrió"
+_COGNITIVE = "a reading-and-judgement phase: produces no artifact a machine can read"
+_PROSE = "the artifact is prose for humans; its quality is not checkable by exit code"
+_EXTERNAL = "the effect lives outside the repo (GitHub, the network), not in the working tree"
+_PROJECT = (
+    "checkable in principle, but only against project conventions vise does not know"
+)
+_RESEARCH = (
+    "the artifact is a claim about the world, not a working tree: there is no "
+    "suite to run and no exit code to consult. This workflow's real check is "
+    "the citation reopened in `verify`, and no validator in the registry can "
+    "confirm that anyone opened it"
 )
 
-_SIN_INDICE = (
-    "el artefacto es una lista de candidatos que salió de livespec, otro "
-    "servidor MCP: vise no puede llamarlo y por lo tanto no puede comprobar "
-    "lo que trajo. La comprobación real de este workflow es `tests_pass` en "
-    "`move`, que es lo único que puede decir si el movimiento conservó el "
-    "comportamiento"
+_NO_INDEX = (
+    "the artifact is a list of candidates that came out of livespec, another "
+    "MCP server: vise cannot call it and therefore cannot check what it "
+    "returned. This workflow's real check is `tests_pass` in `move`, which is "
+    "the only thing that can say whether the move preserved behaviour"
 )
 
 UNVERIFIED_BY_DESIGN: dict[tuple[str, str], str] = {
     # --- decouple ------------------------------------------------------------
-    ("decouple", "survey"): _SIN_INDICE,
+    ("decouple", "survey"): _NO_INDEX,
     ("decouple", "triage"): (
-        "la decisión sí es mecánica, pero la toma `vise.runtime.decouple.triage` "
-        "dentro de la sesión, no un validador del registro: el nodo no escribe "
-        "nada que una puerta pueda leer del árbol de trabajo"
+        "the decision is mechanical, but `vise.runtime.decouple.triage` takes "
+        "it inside the session rather than a validator from the registry: the "
+        "node writes nothing a gate could read out of the working tree"
     ),
-    ("decouple", "report"): _PROSA,
+    ("decouple", "report"): _PROSE,
     # --- research ------------------------------------------------------------
-    # vise's gates are built for repositories. Este es el primer workflow
-    # cuyo producto es una respuesta y no un diff, y decirlo aquí es más
-    # honesto que inventar un validador que finja comprobarlo.
-    ("research", "scope"): _INVESTIGACION,
-    ("research", "gather"): _INVESTIGACION,
-    ("research", "verify"): _INVESTIGACION,
-    ("research", "contradict"): _INVESTIGACION,
-    ("research", "synthesize"): _PROSA,
+    # vise's gates are built for repositories. This is the first workflow whose
+    # product is an answer rather than a diff, and saying so here is more
+    # honest than inventing a validator that pretends to check it.
+    ("research", "scope"): _RESEARCH,
+    ("research", "gather"): _RESEARCH,
+    ("research", "verify"): _RESEARCH,
+    ("research", "contradict"): _RESEARCH,
+    ("research", "synthesize"): _PROSE,
     # --- debug ---------------------------------------------------------------
-    ("debug", "understand"): _COGNITIVO,
-    ("debug", "classify"): _COGNITIVO,
-    ("debug", "analyze"): _COGNITIVO,
-    ("debug", "hypothesize"): _COGNITIVO,
-    ("debug", "strategy-tests"): _COGNITIVO,
+    ("debug", "understand"): _COGNITIVE,
+    ("debug", "classify"): _COGNITIVE,
+    ("debug", "analyze"): _COGNITIVE,
+    ("debug", "hypothesize"): _COGNITIVE,
+    ("debug", "strategy-tests"): _COGNITIVE,
     ("debug", "strategy-flowtrace"): (
-        "el nodo produce artefactos — reportes de profiler, y una traza de "
-        "flowtrace cuando ese server está en la sesión — pero ninguno existe "
-        "en un repo que no optó por esa herramienta. `trace_captured` viaja "
-        "comentado en el propio archivo, con el motivo, como `diff_scope` en "
-        "decouple: una puerta que falla cerrado sobre un artefacto que nadie "
-        "produce bloquea a todos los demás repos"
+        "the node produces artifacts — profiler reports, and a flowtrace trace "
+        "when that server is in the session — but neither exists in a repo "
+        "that never opted into the tool. `trace_captured` ships commented in "
+        "the file itself, with the reason, the way `diff_scope` does in "
+        "decouple: a gate that fails closed on an artifact nobody produces "
+        "blocks every other repo"
     ),
-    ("debug", "strategy-hybrid"): _COGNITIVO,
+    ("debug", "strategy-hybrid"): _COGNITIVE,
     ("debug", "unreproducible"): (
-        "es la salida del caso en que NO hay reproducción; exigirle una "
-        "comprobación verde sería exigir lo contrario de lo que el nodo significa"
+        "this is the exit for the case where there is NO reproduction; "
+        "requiring a green check would require the opposite of what the node "
+        "means"
     ),
-    ("debug", "report"): _PROSA,
+    ("debug", "report"): _PROSE,
     # --- dogfood -------------------------------------------------------------
-    ("dogfood", "run-on-self"): _COGNITIVO,
-    ("dogfood", "capture-issues"): _COGNITIVO,
-    ("dogfood", "triage"): _COGNITIVO,
-    ("dogfood", "file"): _EXTERNO,
+    ("dogfood", "run-on-self"): _COGNITIVE,
+    ("dogfood", "capture-issues"): _COGNITIVE,
+    ("dogfood", "triage"): _COGNITIVE,
+    ("dogfood", "file"): _EXTERNAL,
     # --- feature-dev ---------------------------------------------------------
-    ("feature-dev", "orient"): _COGNITIVO,
-    ("feature-dev", "design"): _COGNITIVO,
+    ("feature-dev", "orient"): _COGNITIVE,
+    ("feature-dev", "design"): _COGNITIVE,
     ("feature-dev", "commit"): (
-        "el commit ya pasó por `validate`, que sí comprueba; repetir la suite "
-        "acá solo agrega latencia a un nodo que no cambia el árbol"
+        "the commit already went through `validate`, which does check; running "
+        "the suite again here only adds latency to a node that does not change "
+        "the tree"
     ),
     # --- migration -----------------------------------------------------------
-    ("migration", "design"): _COGNITIVO,
+    ("migration", "design"): _COGNITIVE,
     ("migration", "apply"): (
-        "aplicar la migración corre contra un sistema real (base de datos, "
-        "servicio); vise no puede distinguir un fallo de aplicación de un "
-        "entorno ausente, y equivocarse acá bloquea un workflow a mitad de camino"
+        "applying the migration runs against a real system (a database, a "
+        "service); vise cannot tell an application failure from an absent "
+        "environment, and being wrong here blocks a workflow halfway through"
     ),
     # --- pr-review -----------------------------------------------------------
-    ("pr-review", "fetch"): _EXTERNO,
-    ("pr-review", "analyze"): _COGNITIVO,
-    ("pr-review", "comment"): _EXTERNO,
+    ("pr-review", "fetch"): _EXTERNAL,
+    ("pr-review", "analyze"): _COGNITIVE,
+    ("pr-review", "comment"): _EXTERNAL,
     # --- quality-gate --------------------------------------------------------
     ("quality-gate", "deep-passes"): (
-        "las cuatro fases previas ya comprueban mecánicamente; este nodo es el "
-        "lazo de profundización sobre lo que aquellas reportaron"
+        "the four phases before it already check mechanically; this node is the "
+        "deepening loop over what they reported"
     ),
     # --- release -------------------------------------------------------------
-    ("release", "changelog"): _PROSA,
-    ("release", "version-bump"): _PROYECTO,
-    ("release", "tag"): _PROYECTO,
-    ("release", "notify"): _EXTERNO,
+    ("release", "changelog"): _PROSE,
+    ("release", "version-bump"): _PROJECT,
+    ("release", "tag"): _PROJECT,
+    ("release", "notify"): _EXTERNAL,
     # --- security-audit ------------------------------------------------------
     ("security-audit", "scan"): (
-        "deliberadamente sin puerta: un scanner que sale distinto de cero acá "
-        "significa que ENCONTRÓ algo, que es el resultado esperado del nodo. "
-        "El nodo lo dice en su propio comentario"
+        "deliberately ungated: a scanner exiting non-zero here means it FOUND "
+        "something, which is the node's expected result. The node says so in "
+        "its own comment"
     ),
-    ("security-audit", "triage"): _COGNITIVO,
-    ("security-audit", "doc"): _PROSA,
+    ("security-audit", "triage"): _COGNITIVE,
+    ("security-audit", "doc"): _PROSE,
     # --- sprint-e2e ----------------------------------------------------------
-    ("sprint-e2e", "orient"): _COGNITIVO,
-    ("sprint-e2e", "contract"): _PROYECTO,
-    ("sprint-e2e", "close"): _PROSA,
+    ("sprint-e2e", "orient"): _COGNITIVE,
+    ("sprint-e2e", "contract"): _PROJECT,
+    ("sprint-e2e", "close"): _PROSE,
+    # --- ui-feature ----------------------------------------------------------
+    ("ui-feature", "orient"): _COGNITIVE,
+    # `flow` and `look` both close on "the brief exists", which is mechanical —
+    # and uncheckable, because the brief goes wherever this repo keeps design
+    # decisions: the change proposal, a DESIGN.md, a UX.md. A `file_exists`
+    # gate would have to name one of them and would fail closed on every repo
+    # that chose another.
+    ("ui-feature", "flow"): _PROJECT,
+    ("ui-feature", "look"): _PROJECT,
 }
 
 
@@ -159,65 +170,65 @@ def _all_nodes() -> list[tuple[str, str, dict]]:
 
 
 # ---------------------------------------------------------------------------
-# la invariante
+# the invariant
 # ---------------------------------------------------------------------------
 
 def test_every_node_either_verifies_or_says_why_not():
-    """La regla entera, en una aserción."""
+    """The whole rule, in one assertion."""
     silent = [
         (wf, nid)
         for wf, nid, n in _all_nodes()
         if not n.get("validators") and (wf, nid) not in UNVERIFIED_BY_DESIGN
     ]
     assert not silent, (
-        "estos nodos no comprueban nada y tampoco declaran por qué:\n  "
+        "these nodes check nothing and do not declare why:\n  "
         + "\n  ".join(f"{wf}:{nid}" for wf, nid in silent)
-        + "\n\nAgregá validadores, o una entrada en UNVERIFIED_BY_DESIGN con el motivo."
+        + "\n\nAdd validators, or an UNVERIFIED_BY_DESIGN entry with the reason."
     )
 
 
 def test_the_exemption_list_has_no_stale_entries():
-    """Un nodo renombrado o al que se le agregaron validadores deja basura acá."""
+    """A renamed node, or one that gained validators, leaves litter here."""
     real = {(wf, nid) for wf, nid, _ in _all_nodes()}
     verified = {(wf, nid) for wf, nid, n in _all_nodes() if n.get("validators")}
 
     ghosts = sorted(k for k in UNVERIFIED_BY_DESIGN if k not in real)
-    assert not ghosts, f"exentos que ya no existen: {ghosts}"
+    assert not ghosts, f"exemptions for nodes that no longer exist: {ghosts}"
 
     redundant = sorted(k for k in UNVERIFIED_BY_DESIGN if k in verified)
     assert not redundant, (
-        f"exentos que SÍ comprueban — borrá la excusa: {redundant}"
+        f"exemptions for nodes that DO check — delete the excuse: {redundant}"
     )
 
 
 def test_every_exemption_states_a_reason():
     empty = sorted(k for k, v in UNVERIFIED_BY_DESIGN.items() if not (v or "").strip())
-    assert not empty, f"exentos sin motivo: {empty}"
+    assert not empty, f"exemptions with no reason: {empty}"
 
 
 # ---------------------------------------------------------------------------
-# el trinquete — que la proporción no vuelva atrás en silencio
+# the ratchet — so the ratio cannot quietly go backwards
 # ---------------------------------------------------------------------------
 
-# Subilo cuando el número real suba; nunca lo bajes para que pase un cambio.
-# Es el mismo trinquete que el piso de cobertura en CLAUDE.md.
-MIN_VERIFIED_NODES = 22
+# Raise it when the real number rises; never lower it to make a change pass.
+# Same ratchet as the coverage floor in CLAUDE.md.
+MIN_VERIFIED_NODES = 24
 
 
 def test_the_number_of_mechanically_gated_nodes_does_not_regress():
     verified = [1 for _wf, _nid, n in _all_nodes() if n.get("validators")]
     assert len(verified) >= MIN_VERIFIED_NODES, (
-        f"{len(verified)} nodos comprueban mecánicamente, el piso es "
-        f"{MIN_VERIFIED_NODES} — se le sacaron validadores a un nodo"
+        f"{len(verified)} nodes check mechanically, the floor is "
+        f"{MIN_VERIFIED_NODES} — validators were taken off a node"
     )
 
 
 # ---------------------------------------------------------------------------
-# los validadores declarados tienen que existir de verdad
+# a declared validator has to actually exist
 # ---------------------------------------------------------------------------
 
 def test_every_declared_validator_type_is_in_the_registry():
-    """Un tipo con typo no es un nodo laxo: `build_validators` falla cerrado."""
+    """A typo'd type is not a lax node: `build_validators` fails closed."""
     from vise.engines.validators import _REGISTRY
 
     unknown = sorted({
@@ -226,7 +237,7 @@ def test_every_declared_validator_type_is_in_the_registry():
         for v in (n.get("validators") or [])
         if (v.get("type") or v.get("name")) not in _REGISTRY
     })
-    assert not unknown, f"tipos de validador que no existen: {unknown}"
+    assert not unknown, f"validator types that do not exist: {unknown}"
 
 
 @pytest.mark.parametrize("wf,nid", [
@@ -235,15 +246,18 @@ def test_every_declared_validator_type_is_in_the_registry():
     ("sprint-e2e", "e2e"),
     ("migration", "reversibility-check"),
     ("security-audit", "fix-criticals"),
+    # The node this workflow exists for. Folded into `build` it is the work
+    # that gets cut the moment the happy path is demoable.
+    ("ui-feature", "states"),
 ])
 def test_the_nodes_whose_signal_is_a_mechanical_claim_check_it(wf: str, nid: str):
-    """Los casos concretos que motivaron el cambio, fijados uno por uno."""
+    """The concrete cases that motivated the change, pinned one by one."""
     node = next(n for w, i, n in _all_nodes() if (w, i) == (wf, nid))
-    assert node.get("validators"), f"{wf}:{nid} afirma algo mecánico y no lo comprueba"
+    assert node.get("validators"), f"{wf}:{nid} asserts something mechanical and does not check it"
 
 
 def test_reproduce_checks_that_a_test_actually_fails():
-    """`tests_pass` acá sería exactamente al revés de lo que el nodo pide."""
+    """`tests_pass` here would be exactly the opposite of what the node asks."""
     node = next(n for w, i, n in _all_nodes() if (w, i) == ("debug", "reproduce"))
     types = {v.get("type") for v in node["validators"]}
     assert "tests_fail" in types

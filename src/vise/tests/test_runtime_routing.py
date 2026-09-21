@@ -112,7 +112,7 @@ def test_a_charter_model_does_not_overrule_the_policy():
 
 
 def test_a_charter_supplies_the_default_for_a_role_the_policy_does_not_cover():
-    agent = AgentSpec(id="designer", role="design", description="d",
+    agent = AgentSpec(id="ui-designer", role="design", description="d",
                       model="opus", effort="high")
     decision = route(role="design", agent=agent)
     assert (decision.model, decision.effort) == ("opus", "high")

@@ -122,4 +122,4 @@ def test_every_charter_preloads_the_baseline(charter: Path):
 
 def test_there_are_charters_to_check():
     """A glob that silently matches nothing turns the test above green."""
-    assert len(CHARTERS) == 22, f"expected 22 charters, found {len(CHARTERS)}"
+    assert len(CHARTERS) == 23, f"expected 23 charters, found {len(CHARTERS)}"

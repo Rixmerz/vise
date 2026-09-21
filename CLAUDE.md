@@ -14,10 +14,10 @@ Treat those files with the same care as the code.
 |---|---|
 | `src/vise/` | the MCP server, engines, hooks, CLI, recipes |
 | `src/vise/engines/` | validators and the logic they gate on — the three design gates live here |
-| `src/vise/assets/workflows/` | the 11 bundled `*-graph.yaml` workflows |
+| `src/vise/assets/workflows/` | the 12 bundled `*-graph.yaml` workflows |
 | `src/vise/tests/` | the whole suite — asset honesty tests live here too |
-| `agents/` | 22 bundled subagent charters |
-| `skills/` | 23 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, and the 15 `*-rules`) |
+| `agents/` | 23 bundled subagent charters |
+| `skills/` | 24 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, `ui-critique`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 14 hook registrations across 12 scripts, 6 events |
 | `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |

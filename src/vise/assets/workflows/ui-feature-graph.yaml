@@ -1,0 +1,258 @@
+metadata:
+  name: "UI Feature"
+  description: "Build a user-facing feature that is finished rather than merely working: decide the flow and every state first, then the visual direction, then implement — with the states as their own phase that cannot be skipped."
+  version: "1.0.0"
+  type: "graph"
+  author: "vise"
+
+# Why this exists beside feature-dev.
+#
+# `feature-dev` gates on "do the checks pass", which is the right question for
+# code whose contract is a test. A user-facing screen has a second contract
+# nothing executes: the states it can be in. A screen built to its happy path
+# passes every test, renders, and is visibly unfinished the first time someone
+# opens it before any data exists — and no test suite says so, because nothing
+# is broken.
+#
+# The shape follows from that. Two deciding phases before any code, in a fixed
+# order: `flow` decides what happens and which states exist, `look` decides what
+# it looks like. Reversing them produces a palette applied to a dead end, which
+# is the more expensive of the two mistakes because it looks finished.
+#
+# `states` is a separate phase from `build` on purpose. Folded into the
+# implementation phase it is the work that gets cut when the happy path is
+# demoable — which is exactly the failure this workflow exists to prevent. As
+# its own node it has its own exit signal, and a run that skipped it is visible
+# in the timeline rather than only in the product.
+
+nodes:
+  - id: "orient"
+    name: "Orient"
+    is_start: true
+    tools_blocked:
+      - "Edit"
+      - "Write"
+    prompt_injection: |
+      PHASE: ORIENT
+      Read the product before designing anything for it. Writing is blocked
+      here; this phase produces understanding, not files.
+      1. Find the screens that already exist and how a person reaches them —
+         routes, navigation, entry points from outside the app.
+      2. Read the data these screens show at its real shape. What does the API
+         actually return, which fields are nullable, what does the list look
+         like at zero rows and at ten thousand? Read the type or the schema.
+         A mock is a statement about the happy path.
+      3. Find the patterns this product has already settled: how it confirms a
+         destructive action, where errors surface, whether it has a toast, what
+         its empty views look like. These outrank every preference downstream.
+      4. Name the one thing you could not establish from the repo.
+      Signal: say "oriented" when the existing flows and the real data shapes
+      are written down with the files they came from.
+
+  - id: "flow"
+    name: "Flow and states"
+    tools_blocked:
+      - "Edit"
+    prompt_injection: |
+      PHASE: FLOW AND STATES
+      Decide what happens. Not what it looks like — that is the next phase, and
+      taking it now produces a palette applied to a dead end.
+      Dispatch `vise:ux-designer`, or do this work directly against the
+      `ui-critique` skill. Either way the output is one artifact:
+      1. THE JOB — what a person came here to get done, in their words, in one
+         sentence.
+      2. THE FLOW — the steps, the entry point, and every exit, including the
+         screen someone lands on when they abandon halfway.
+      3. THE STATES — for every screen that reads or writes data, the full set
+         from `ui-critique`: empty-first-run, empty-after-filter,
+         loading-first-paint, loading-refresh, partial, recoverable error,
+         permanent error, forbidden, stale, too much, too long, in flight.
+         Every row carries its trigger and the actual words the screen shows.
+         A state this screen cannot reach is written down as unreachable with
+         the reason — absent and impossible are different.
+      4. WHAT YOU CUT — the state or step deliberately left out, and what would
+         bring it back.
+      No open questions. A question left in a brief becomes a guess in the
+      build.
+      Signal: say "flow decided" when the brief exists and every data-backed
+      screen has its state table.
+
+  - id: "look"
+    name: "Visual direction"
+    tools_blocked:
+      - "Edit"
+    prompt_injection: |
+      PHASE: VISUAL DIRECTION
+      Now decide what it looks like, for the states the previous phase named —
+      not for the happy path alone. An empty state and an error state are
+      screens; they get the same direction as the populated one.
+      Dispatch `vise:ui-designer`, or work directly against `design-brief`.
+      If this repo already has a palette, a type scale or a token file, your
+      job is to use and extend it, and to say which file it came from.
+      Inventing a second palette beside an existing one is the worst outcome
+      available in this phase.
+      Signal: say "direction set" when the visual brief exists with its four
+      parts and names the system it documents or establishes.
+
+  - id: "build"
+    name: "Build the flow"
+    # The happy path landing must not break what was already green. Same gate
+    # `feature-dev:implement` carries, and for the same reason: this is the
+    # first node that changes the tree.
+    validators:
+      - type: tests_pass
+        weight: 1.0
+    prompt_injection: |
+      PHASE: BUILD
+      Implement the flow on its happy path, deriving every colour, size and
+      space from the visual brief. A hex or a font size that is not in the
+      brief does not go in the CSS.
+      Semantic HTML before ARIA. Keyboard reachable with a visible focus style
+      as you go, not as a pass at the end.
+      Do NOT declare this phase done by showing the populated screen. The
+      populated screen is the part that was always going to work.
+      Signal: say "flow built" when the happy path runs end to end.
+
+  - id: "states"
+    name: "Build the states"
+    # Not a repeat of the node above for the sake of symmetry: building an
+    # empty view, an error branch or a truncation is exactly the kind of change
+    # that breaks a test written against the populated screen, and this node
+    # changes the tree as much as `build` does. Nothing in the registry can read
+    # a brief's state table, so this is the strongest check available here —
+    # the table itself is reported at `verify` and read by a person.
+    validators:
+      - type: tests_pass
+        weight: 1.0
+    prompt_injection: |
+      PHASE: STATES
+      This is the phase that decides whether the feature shipped or merely
+      works. Build every state the flow brief named, and prove each one.
+      1. Walk the brief's state tables row by row. For each: implement it, then
+         make it appear — empty the data, throttle the network, return the 403,
+         paste the two-hundred-character title. A state you have not seen is a
+         state you have not built.
+      2. Any row you cannot reach: say so, and say whether that is because it
+         is unreachable or because you could not trigger it. Those are
+         different, and only one of them is finished.
+      3. Run the `ui-critique` passes against the running UI: second day,
+         wrong data, dead end, keyboard only, reversible, interruption.
+         Fix what they find here rather than filing it.
+      4. The copy in every state is the copy the brief wrote. If you improved
+         it, say which line and why, so the brief can absorb it.
+      Signal: say "states built" when every row is implemented or explicitly
+      accounted for, and you have seen each one you claim.
+
+  - id: "verify"
+    name: "Verify"
+    is_end: true
+    # `design_tokens` scans source and needs nothing installed, so it can never
+    # skip for being unavailable — it is the one design gate that always runs.
+    # The two render gates are opt-in because they need a configured target to
+    # drive a browser at, and a gate that fails closed on a repo that never
+    # configured one teaches people to override gates. Turn them on in a repo
+    # that has a render config:
+    #
+    #     - type: ui_layout
+    #       weight: 1.0
+    #     - type: ui_contrast
+    #       weight: 1.0
+    #
+    # ui_layout reports overflow, clipping, collision and off-document content
+    # per breakpoint. ui_contrast measures computed foreground against the
+    # effective background in the default, hover and focus states, at WCAG 2.2
+    # AA. Both are worth far more here than on a backend change.
+    validators:
+      - type: design_tokens
+        weight: 1.0
+    prompt_injection: |
+      PHASE: VERIFY
+      1. Build, typecheck and the existing suite: green, with the output.
+      2. The design-token gate runs here and fails closed. A hardcoded colour
+         it finds is a decision that escaped the brief — fix it at the source
+         rather than allowing it. Allowances are a ratchet in
+         `.vise/quality.yaml` under `design.allowances`: record what a repo has
+         today and lower it, never raise it to pass.
+      3. Report the state table as a table: every row, and whether it is built,
+         unreachable, or outstanding. This is the artifact a reviewer reads;
+         "the UI is done" is not one.
+      4. Name the one state you are least confident in, and what would settle
+         it. A run that names nothing here checked nothing here.
+      Signal: say "verified" when the suite is green and the state table is
+      reported.
+
+edges:
+  - id: "orient-to-flow"
+    from: "orient"
+    to: "flow"
+    condition:
+      type: "phrase"
+      phrases:
+        - "oriented"
+        - "next phase"
+        - "advance"
+
+  - id: "flow-to-look"
+    from: "flow"
+    to: "look"
+    condition:
+      type: "phrase"
+      phrases:
+        - "flow decided"
+        - "next phase"
+        - "advance"
+
+  - id: "look-to-build"
+    from: "look"
+    to: "build"
+    condition:
+      type: "phrase"
+      phrases:
+        - "direction set"
+        - "next phase"
+        - "advance"
+
+  - id: "build-to-states"
+    from: "build"
+    to: "states"
+    condition:
+      type: "phrase"
+      phrases:
+        - "flow built"
+        - "next phase"
+        - "advance"
+
+  - id: "states-to-verify"
+    from: "states"
+    to: "verify"
+    condition:
+      type: "phrase"
+      phrases:
+        - "states built"
+        - "next phase"
+        - "advance"
+
+  # Building the states is where a flow's gaps surface: a state nobody can
+  # trigger usually means the flow has no path to it, which is a decision to
+  # revisit rather than a row to mark outstanding.
+  - id: "states-to-flow"
+    from: "states"
+    to: "flow"
+    condition:
+      type: "phrase"
+      phrases:
+        - "the flow has no path to this state"
+        - "decide the flow again"
+    priority: 2
+
+  # A token the gate rejects is usually a decision the visual brief never made,
+  # not a value to allow.
+  - id: "verify-to-look"
+    from: "verify"
+    to: "look"
+    condition:
+      type: "phrase"
+      phrases:
+        - "this value is not in the brief"
+        - "set the direction again"
+    priority: 2

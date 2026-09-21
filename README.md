@@ -8,7 +8,7 @@ vise is a Python MCP server + hook suite that gives Claude Code sessions structu
 
 ## Features
 
-- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 11 bundled workflows (feature-dev, debug, research, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own. Validators that cannot run — no linter on PATH, no checker installed, nothing in scope — still pass, because blocking a repo over tooling it doesn't use would be wrong. They report that pass as **unverified** rather than clean, so a green gate that verified nothing is visibly not the same as one that did.
+- **Phase-gated workflow enforcer** — workflows are directed graphs; each node can inject phase-specific prompts, enable/block tools (e.g. no Edit/Write during a "think" phase), and hold transitions behind per-node validator gates until declared checks pass. 12 bundled workflows (feature-dev, debug, research, PR review, release, security audit, DB migration, quality gate, …) plus a `graph_builder_*` API to author your own. Validators that cannot run — no linter on PATH, no checker installed, nothing in scope — still pass, because blocking a repo over tooling it doesn't use would be wrong. They report that pass as **unverified** rather than clean, so a green gate that verified nothing is visibly not the same as one that did.
 - **Cross-project experience memory** — learnings recorded per file/topic and ranked by one formula (`engines/relevance.py`): glob locality, keyword overlap, domain, and confidence under FSRS-style retrievability decay. Hooks inject relevant past learnings when you edit a file; `experience_*` tools query them on demand, and both rank identically — `test_relevance_parity.py` holds them to it. Entries are embedded with fastembed on record; `experience_derive_checklist` scores a task description against them, which is the comparison embeddings are good at. Retrieval *by file path* is not semantic, and used to claim it was.
 - **Git snapshots** — orphan-ref snapshots (`refs/vise/snapshots/<id>`) fire automatically on workflow phase transitions. Per-edit snapshots (30 s throttle) are **opt-in** — off by default, enable with `VISE_SNAPSHOT_ON_EDIT=1`. `snapshot_create` also works on demand at any time. Restore any snapshot without touching your branch or reflog.
 - **Goals & gates** — `goal_*` tools plus a Stop hook that blocks ending the turn with an unfinished active goal. Like per-edit snapshots, the gate is **opt-in** — off by default, enable with `VISE_GOAL_GATE=1`. The `goal_*` tools work regardless; only the blocking behaviour is gated.
@@ -101,7 +101,7 @@ uv venv && uv pip install -e .
 
 Inside a Claude Code session with vise loaded:
 
-1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 11 bundled workflows.
+1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 12 bundled workflows.
 2. **Work the phases** — `graph_traverse` advances between nodes. The enforcer blocks tools the current phase forbids; validator gates (tests, lint, capabilities) must pass before a gated transition.
 3. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
 4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
@@ -142,7 +142,7 @@ src/vise/
 ├── hooks/         # Claude Code hook entry points (see table above)
 ├── runtime/       # agent execution plane — contracts, registry, model router,
 │                  # ownership, budget, artifacts, planner (see docs/)
-├── assets/        # bundled workflows (11), recipes (11)
+├── assets/        # bundled workflows (12), recipes (11)
 ├── core/          # embeddings, session, paths, git snapshot plumbing
 └── cli/           # `vise` CLI (graph/experience/insights/runtime, offline)
 ```
@@ -420,6 +420,18 @@ turn `integration` red on every repo that never opted in. The graph file carries
 the snippet that turns them on. Allowances under `design.allowances` are a
 ratchet for `design_tokens`: record what a repo has today, then lower it.
 
+What none of the three can check is whether a state exists at all. They measure
+the screen that was rendered; a screen built only for the data it has is
+correct, passes every gate above, and is visibly unfinished the first time
+someone opens it before any data exists. That half is not mechanical, so it is
+staffed rather than gated: `ux-designer` decides which screens exist and
+enumerates every state each can be in — empty, filtered-to-nothing, loading,
+refreshing, partial, forbidden, stale, too much, too long — before
+`ui-designer` decides what any of it looks like. `ui-critique` carries the
+enumeration, and the `ui-feature` workflow makes building those states its own
+phase, because folded into the implementation phase it is the work that gets
+cut the moment the happy path is demoable.
+
 The four neighbour-state gates read a file another tool left behind rather
 than running anything: livespec's `.mcp-docs/docs.db`, flowtrace's
 `.flowtrace/*.jsonl` and delta-cube's `dcc.db`. vise cannot call those servers
@@ -573,7 +585,7 @@ that a path runs.
 
 ## Project agents
 
-vise ships 22 agents. A project can add its own in `.vise/agents/*.md`, and the
+vise ships 23 agents. A project can add its own in `.vise/agents/*.md`, and the
 runtime layers them over the bundled fleet — same frontmatter, same rules:
 
 ```
