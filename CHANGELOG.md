@@ -6,7 +6,7 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
-## [Unreleased]
+## [0.1.0a29] - 2026-09-22
 
 ### Added — who decides what a screen *does*, ahead of what it looks like
 
