@@ -338,7 +338,7 @@ window has no way to know these exist.**
 | `livespec` | what *could* run — the symbol graph | `.mcp-docs/docs.db` in the repo |
 | `flowtrace` | what *did* run — a real execution | `.flowtrace/*.jsonl` in the repo |
 | `layout-inspector` | how it *renders* — measured geometry | no repo footprint; check the tool surface |
-| `mempalace` | what was *said* — earlier sessions, verbatim | a palace on the machine (`vise neighbours` says); nothing in the repo |
+| `tasky` | what was *said* and *tried* — earlier sessions, verbatim, and the fixes that failed | one ledger on the machine, read per repo (`vise neighbours` says); nothing in the repo |
 
 One rule covers all of them: **a brief naming tools the builder does not have
 is worse than one that says nothing.** Check your own tool surface first. If a
@@ -348,44 +348,49 @@ does have.
 Each ships its own skill and subagent that cover *how* to drive it. Your job is
 *when*, and what to bring back.
 
-### MemPalace — what an earlier session already settled
+### tasky — what an earlier session already settled
 
 vise's experience memory is short lessons keyed to a file glob, injected when
 that file is edited. It does not hold what a session *decided*: the approach
 that was tried and rejected, the constraint the user stated in passing, the
-reason a dependency was chosen. MemPalace holds the transcript, verbatim, and
-searches it by question. The two divide cleanly — vise says what to watch for
-when touching this file, MemPalace says what was said last time — and neither
-needs the other configured.
+reason a dependency was chosen. tasky holds the transcript, verbatim, copied
+before Claude Code deletes it, and per repository the problems met with every
+fix tried and why each failed. The two divide cleanly — vise says what to
+watch for when touching this file, tasky says what was said and tried last
+time — and neither needs the other configured.
 
 **When to search.** Before Step 0 when the request refers to prior work in any
 form — "like we did", "the thing we decided", "again", a feature that already
 had a first attempt — and before writing any brief whose task has a history in
-this repo. Not on greenfield edits: a rename, a typo, a new file with no past.
-Recall is question-driven, and MemPalace's own recall protocol says the same.
+this repo. Before any fix, when the failure has a name. Not on greenfield
+edits: a rename, a typo, a new file with no past. Recall is question-driven.
 
-**How.** `mempalace_search(query, wing)` with `query` as a few keywords — its
-schema caps it at 250 characters and warns that a pasted prompt sinks recall —
-and `wing` as the repo's basename, which is the wing a directory is mined
-into. `mempalace_diary_read(agent_name)` for the last hand-off when a session
-was cut short. **Paste the drawer text into the brief verbatim, with its
-`source_path`.** A subagent does not have the transcript and does not have the
-tool; what you carry over is the only way the decision reaches it. Summarising
-on the way is how a "we rejected X because Y" becomes "consider X".
+**How.** `search_history(query)` for problems and milestones, each problem with
+its chain of fixes in order and why each failed; `get_problem(id)` for one
+chain in full; `dead_ends()` for the fixes that were believed correct and did
+not work. `search_conversations(query)` for what was said, with the turns
+around each hit. `last_session()` for the last hand-off when a session was cut
+short. `query` is a few keywords — tasky matches words, not meaning, so a
+pasted prompt or a paraphrase sinks recall; use the words the work would have
+used. Every call defaults to this repository; `scope="all"` searches every
+one. **Paste the hit into the brief verbatim, with its session and date or
+its problem `#id`.** A subagent does not have the transcript and may not have
+the tool; what you carry over is the only way the decision reaches it.
+Summarising on the way is how a "we rejected X because Y" becomes "consider
+X", and a fix that already failed gets applied a second time.
 
 **Who has the tool.** You, when the server is connected. `researcher` and
-`debugger` are granted `mcp__mempalace__mempalace_search` in their charters
-and told the palace is a source, so a brief to either may say "search the
-palace for ..." — and for every other agent it may not. If the `mempalace_*`
-tools are not in your surface, the palace is absent for this session: say so
-where it would have mattered and do not ask anyone to search it.
+`debugger` are granted `search_history`, `search_conversations` and
+`get_problem` in their charters and told earlier sessions are a source, so a
+brief to either may say "search tasky for ..." — and for every other agent it
+may not. If the tasky tools are not in your surface, earlier sessions are
+absent for this session: say so where it would have mattered and do not ask
+anyone to search them.
 
-**What vise does about it.** Nothing it can call. `vise neighbours` reads
-whether a palace exists on the machine, the SessionStart hook says so at the
-top of a session, and `vise bootstrap` warns that `mempalace init` leaves
-`mempalace.yaml` and `entities.json` in the repo root where `diff_scope` will
-fail on them. MemPalace's own hooks save the transcript every fifteen
-messages; vise never writes to the palace, so nothing is filed twice.
+**What vise does about it.** Nothing it can call. `vise neighbours` reads how
+many sessions of this repo the ledger holds, and the SessionStart hook says so
+at the top of a session. tasky's own hooks copy the transcript as it grows;
+vise never writes to the ledger, so nothing is filed twice.
 
 ### livespec — brief for the symbol layer
 

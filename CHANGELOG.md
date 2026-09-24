@@ -6,6 +6,57 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [0.1.0a30] - 2026-09-24
+
+### Changed — tasky replaces MemPalace as the other half of memory
+
+**Behaviour change.** Every place vise pointed at MemPalace now points at
+[tasky](https://github.com/Rixmerz/tasky), and MemPalace is no longer named
+anywhere. The four moments stay the same; what sits behind them changed.
+
+MemPalace answered one question, *what was said*, and vise could only tell
+whether a palace existed on the machine — not whether it held anything of the
+repository in front of it. tasky answers that question and a second one that
+matters more to a debugger: *what was tried*. It keeps every message of every
+session, copied before Claude Code deletes the transcript, and per repository
+the problems met with the ordered chain of fixes tried and why each failed.
+A brief that carries "this fix was applied on the 12th and failed because X"
+stops the same fix going in twice, which a verbatim transcript alone did not.
+
+- **Session start.** `hooks/session_restore.py` reads tasky's ledger
+  (`core/neighbour_state.ledger_state`, resolved the way tasky's own
+  `config.py` resolves it: `$TASKY_HOME`, then `$XDG_DATA_HOME/tasky`, then
+  `~/.local/share/tasky`) and speaks only when it holds sessions *of this
+  repo* — how many, since when, how many problems are open — with the calls
+  to make if the tasky tools are connected. A ledger holding only other
+  repositories says nothing: the tools default to this one and would find
+  nothing. Same three-line cap, same own `try` with a failsafe note.
+- **Before a brief.** The orchestration skill's recall section now names
+  `search_history`, `get_problem`, `dead_ends`, `search_conversations` and
+  `last_session`, and tells the orchestrator to paste a hit verbatim with its
+  session and date or its problem `#id`.
+- **Research and debugging.** `researcher` and `debugger` are granted
+  `mcp__plugin_tasky_tasky__search_history`, `…__search_conversations` and
+  `…__get_problem` in place of `mcp__mempalace__mempalace_search`. The
+  debugger searches the failure's name before reproducing it, and a fix an
+  earlier session saw fail is one it must not apply again.
+- **`vise neighbours`, `vise bootstrap`, `vise doctor`.** Report the ledger
+  per repo rather than per machine, since the count is scoped by this repo's
+  path; when there is no ledger at all, name the plugin to install. An
+  installed ledger that holds nothing of this repo does not get the install
+  offer — it would tell someone to install what they have.
+
+`core/neighbours.py` pins the five calls at tasky 0.11.0, the release in which
+`search_history` stopped coming back empty when one word of the query was not
+in the record. tasky matches words, not meaning, so every surface that teaches
+a query says to use the words the work would have used.
+
+Removed with MemPalace: `PalaceState`, `palace_state`, `mempalace_files`,
+`MEMPALACE_*` and the `diff_scope` warning about `mempalace.yaml` and
+`entities.json`, which tasky does not write. The ledger is scoped by path, so
+a second clone or worktree of a repository reads as having no history until a
+session runs there; tasky itself groups them by git remote.
+
 ## [0.1.0a29] - 2026-09-22
 
 ### Added — who decides what a screen *does*, ahead of what it looks like

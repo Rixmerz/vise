@@ -294,31 +294,29 @@ def _cmd_doctor() -> int:
         from vise.core.neighbour_state import (
             graph_state,
             index_state,
-            palace_state,
+            ledger_state,
             trace_state,
         )
-        from vise.core.neighbours import MEMPALACE_ABSENT_HINT, MINIMUM_VERSIONS
+        from vise.core.neighbours import MINIMUM_VERSIONS, TASKY_ABSENT_HINT
 
         project = Path.cwd()
+        # tasky keeps one ledger per machine, but the line reads only this
+        # repo's sessions out of it, so it is a per-repo footprint like the
+        # other two.
+        ledger = ledger_state(project)
         footprints = {
             "livespec": index_state(project).detail,
             "flowtrace": trace_state(project).detail,
         }
-        # MemPalace's footprint is not in the repo: one palace per machine,
-        # holding every project its owner mined. Labelled apart from the
-        # per-repo lines for that reason — "this repo" would be a lie about
-        # what was read.
-        palace = palace_state()
-        machine = {"mempalace": palace.detail} if palace.present else {}
+        if ledger.installed:
+            footprints["tasky"] = ledger.detail
         for name, minimum in sorted(MINIMUM_VERSIONS.items()):
             found = footprints.get(name)
             lines.append(f"  {name:<17} needs >= {minimum}")
             if found:
                 lines.append(f"                    this repo: {found}")
-            if name in machine:
-                lines.append(f"                    this machine: {machine[name]}")
-            if name == "mempalace" and not palace.present and palace.known:
-                for hint in MEMPALACE_ABSENT_HINT:
+            if name == "tasky" and ledger.known and not ledger.installed:
+                for hint in TASKY_ABSENT_HINT:
                     lines.append(f"                    {hint}")
         graph = graph_state(project)
         if graph.present:

@@ -12,10 +12,9 @@ artifacts in the repository, and a file is not a tool call.
     delta-cube `$DCC_DATA_DIR/dcc.db`   — SQLite, one per machine. Which files
                                           of this repo are points in it, and
                                           how many tensions are still open.
-    MemPalace  `~/.config/mempalace/`   — the palace, one per machine. Is
-                                          there anything to recall from?
-               `mempalace.yaml`         — two files `mempalace init` leaves in
-               `entities.json`           the repo root. Read for their presence.
+    tasky      `~/.local/share/tasky/`  — SQLite, one ledger per machine.
+               `tasky.db`                 How many sessions of this repo it
+                                          holds, and how many problems are open.
 
 That is the difference between a phase that *asks an agent* whether an index
 exists and a phase that *knows*. The decouple workflow's first step is
@@ -60,12 +59,10 @@ from vise.core.neighbours import (
     DELTA_CUBE_DATA_DIR_ENV,
     DELTA_CUBE_DB_NAME,
     DELTA_CUBE_DEFAULT_DATA_DIR,
-    MEMPALACE_CONFIG_DIR_ENV,
-    MEMPALACE_LEGACY_DIR,
-    MEMPALACE_PALACE_MARKER,
-    MEMPALACE_PALACE_SUBDIR,
-    MEMPALACE_PROJECT_FILES,
-    MEMPALACE_XDG_SUBDIR,
+    TASKY_DB_NAME,
+    TASKY_DEFAULT_DATA_HOME,
+    TASKY_HOME_ENV,
+    TASKY_XDG_SUBDIR,
 )
 
 #: Where livespec keeps its index, relative to the repo root.
@@ -499,109 +496,108 @@ def cube_state(project: Path | str) -> CubeState:
 
 
 @dataclass(frozen=True)
-class PalaceState:
-    """Whether this machine has a MemPalace palace to recall from.
+class LedgerState:
+    """Whether tasky's ledger holds earlier sessions of this repo.
 
-    Machine-wide, like the cube: a palace holds every project its owner has
-    mined, scoped inside by *wing*. Nothing here says whether the
-    `mempalace_*` tools are connected to the running session — a config file
-    cannot know that — so a consumer says "if the tools are connected", and
-    never "call this".
+    Machine-wide, like the cube: one ledger holds every repository its owner
+    worked in, and a session's absolute `cwd` is what places it, so a read is
+    scoped by this repo's path. tasky itself groups a repository's clones and
+    worktrees by their git remote; a path prefix cannot, so a second checkout
+    reads as a repo with no history until a session runs there. Nothing here
+    says whether the tasky tools are connected to the running session — a
+    database cannot know that — so a consumer says "if the tools are
+    connected", and never "call this".
     """
 
     #: True when the question was answered either way.
     known: bool = False
-    #: A config dir exists that MemPalace would recognise as an install.
-    configured: bool = False
-    #: The palace directory holds a store. False with `configured` True means
-    #: an install that has mined nothing yet, or a non-default backend whose
-    #: store vise does not know the filename of — `detail` says which.
-    present: bool = False
-    config_dir: str = ""
+    #: The ledger file exists: tasky is set up on this machine.
+    installed: bool = False
+    #: Sessions whose working directory is this repo or under it.
+    sessions: int = 0
+    #: Problems recorded under this repo still in state `open`.
+    open_problems: int = 0
+    #: Date the oldest of those sessions started, "" when there are none.
+    since: str = ""
+    #: Which database was read, for a message a person acts on.
+    db: str = ""
     detail: str = "not checked"
 
-
-def _mempalace_config_dir() -> Path:
-    """MemPalace's config dir, resolved the way its own `config.py` does."""
-    env = os.environ.get(MEMPALACE_CONFIG_DIR_ENV)
-    if env and env.strip():
-        return Path(env).expanduser()
-    legacy = Path(MEMPALACE_LEGACY_DIR).expanduser()
-    if legacy.is_dir() and (
-        (legacy / "config.json").is_file()
-        or (legacy / "people_map.json").is_file()
-        or (legacy / MEMPALACE_PALACE_SUBDIR / MEMPALACE_PALACE_MARKER).is_file()
-    ):
-        return legacy
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg and xdg.strip() and Path(xdg).expanduser().is_absolute():
-        return Path(xdg).expanduser() / MEMPALACE_XDG_SUBDIR
-    return Path.home() / ".config" / MEMPALACE_XDG_SUBDIR
+    @property
+    def present(self) -> bool:
+        """Is there anything of this repo to recall? Earlier sessions only."""
+        return self.sessions > 0
 
 
-def palace_state() -> PalaceState:
-    """Is there a MemPalace palace on this machine? Read, never asked."""
+def tasky_db() -> Path:
+    """The ledger tasky writes on this machine, resolved like its `config.py`."""
+    home = os.environ.get(TASKY_HOME_ENV)
+    if home and home.strip():
+        return Path(home).expanduser().absolute() / TASKY_DB_NAME
+    xdg = os.environ.get("XDG_DATA_HOME")
+    base = xdg if xdg and xdg.strip() else TASKY_DEFAULT_DATA_HOME
+    return Path(base).expanduser() / TASKY_XDG_SUBDIR / TASKY_DB_NAME
+
+
+def ledger_state(project: Path | str) -> LedgerState:
+    """Does tasky hold earlier sessions of this repo? Read, never asked.
+
+    Two counts and a date, nothing more: the messages themselves are what the
+    tools are for, and reading them here would couple vise to a schema it does
+    not own for a fact no hook needs.
+    """
+    db = tasky_db()
+    shown = db.as_posix().replace(str(Path.home()), "~", 1)
     try:
-        config_dir = _mempalace_config_dir()
-        shown = config_dir.as_posix().replace(str(Path.home()), "~", 1)
-        config_file = config_dir / "config.json"
-        if not config_dir.is_dir():
-            return PalaceState(
-                known=True, config_dir=shown,
-                detail=f"no {shown} — MemPalace is not set up on this machine",
+        root = Path(project).resolve().as_posix().rstrip("/")
+        if not db.is_file():
+            return LedgerState(
+                known=True, db=shown,
+                detail=f"no {shown} — tasky is not set up on this machine",
             )
-        palace = config_dir / MEMPALACE_PALACE_SUBDIR
-        if config_file.is_file():
-            try:
-                configured_path = json.loads(
-                    config_file.read_text(encoding="utf-8")
-                ).get("palace_path")
-                if configured_path:
-                    palace = Path(str(configured_path)).expanduser()
-            except Exception:  # noqa: BLE001 - an unreadable config is still an install
-                pass
-        configured = config_file.is_file() or palace.is_dir()
-        if not configured:
-            return PalaceState(
-                known=True, config_dir=shown,
-                detail=f"{shown} exists but holds neither config.json nor a palace",
+        conn = _connect(db)
+        try:
+            if not _has_table(conn, "sessions"):
+                return LedgerState(
+                    known=True, installed=True, db=shown,
+                    detail=f"{shown} exists but has no sessions table",
+                )
+            under = (root, root.replace("%", "\\%").replace("_", "\\_") + "/%")
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, MIN(started_at) AS since FROM sessions "
+                "WHERE cwd = ? OR cwd LIKE ? ESCAPE '\\'",
+                under,
+            ).fetchone()
+            sessions = int(row["n"] or 0)
+            since = str(row["since"] or "")[:10]
+            problems = 0
+            if sessions and _has_table(conn, "problems"):
+                hit = conn.execute(
+                    "SELECT COUNT(*) AS n FROM problems "
+                    "WHERE state = 'open' AND (cwd = ? OR cwd LIKE ? ESCAPE '\\')",
+                    under,
+                ).fetchone()
+                problems = int(hit["n"] or 0)
+        finally:
+            conn.close()
+        if not sessions:
+            return LedgerState(
+                known=True, installed=True, db=shown,
+                detail=f"tasky ledger at {shown} holds no session of this repo yet",
             )
-        if (palace / MEMPALACE_PALACE_MARKER).is_file():
-            return PalaceState(
-                known=True, configured=True, present=True, config_dir=shown,
-                detail=f"MemPalace palace at {shown} — earlier sessions are searchable",
-            )
-        if palace.is_dir() and any(palace.iterdir()):
-            return PalaceState(
-                known=True, configured=True, present=True, config_dir=shown,
-                detail=(
-                    f"MemPalace palace at {shown} on a non-default backend — "
-                    "earlier sessions are probably searchable"
-                ),
-            )
-        return PalaceState(
-            known=True, configured=True, present=False, config_dir=shown,
-            detail=f"MemPalace is set up at {shown} but has mined nothing yet",
+        return LedgerState(
+            known=True, installed=True, sessions=sessions, open_problems=problems,
+            since=since, db=shown,
+            detail=(
+                f"tasky ledger at {shown} holds {sessions} session(s) of this repo "
+                f"since {since or 'unknown'}; {problems} open problem(s)"
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - a state, never an exception
-        return PalaceState(
-            known=False,
-            detail=f"could not read MemPalace's config dir: {type(exc).__name__}: {exc}",
+        return LedgerState(
+            known=False, db=shown,
+            detail=f"could not read {shown}: {type(exc).__name__}: {exc}",
         )
-
-
-def mempalace_files(project: Path | str) -> tuple[str, ...]:
-    """The MemPalace project files present in this repo root, if any.
-
-    MemPalace's hooks write only to its own data dir; `mempalace init` is the
-    one step that touches the repository, and these are what it leaves. Their
-    presence is the whole fact — vise reads nothing inside them.
-    """
-    try:
-        root = Path(project)
-        return tuple(n for n in MEMPALACE_PROJECT_FILES if (root / n).is_file())
-    except Exception:  # noqa: BLE001 - a report, never an exception
-        return ()
 
 
 def summary(project: Path | str) -> str:
@@ -613,11 +609,7 @@ def summary(project: Path | str) -> str:
     graph = graph_state(project)
     lines.append(f"Graphify:   {graph.detail}")
     lines.append(f"delta-cube: {cube_state(project).detail}")
-    palace = palace_state()
-    present = mempalace_files(project)
-    files = (f"; {', '.join(present)} in the repo root" if present
-             else "; no project files in the repo root")
-    lines.append(f"MemPalace:  {palace.detail}{files}")
+    lines.append(f"tasky:      {ledger_state(project).detail}")
     return "\n".join(lines)
 
 
@@ -628,15 +620,15 @@ __all__ = [
     "CubeState",
     "GraphState",
     "IndexState",
-    "PalaceState",
+    "LedgerState",
     "TraceState",
     "cube_state",
     "delta_cube_db",
     "error_signature",
     "graph_state",
     "index_state",
-    "mempalace_files",
-    "palace_state",
+    "ledger_state",
     "summary",
+    "tasky_db",
     "trace_state",
 ]

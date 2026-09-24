@@ -92,27 +92,36 @@ DELTA_CUBE_TOOLS: frozenset[str] = frozenset({
     "cube_reindex",
 })
 
-#: `mempalace` — what was *said*: verbatim transcripts, searched by question.
-#: The half of memory vise deliberately does not hold. vise's experience
-#: memory is short lessons keyed to a file glob and injected on edit;
-#: MemPalace is the record of what a session decided, tried and rejected, in
-#: its own words. Only the two read calls vise teaches; the server has 45.
+#: `tasky` — what was *said* and what was *tried*: every message of every
+#: session, copied out of the Claude Code transcripts as they grow (Claude
+#: Code deletes those after thirty days), and per repository the problems
+#: met, the ordered chain of fixes tried and why each one failed. The half of
+#: memory vise deliberately does not hold: vise's experience memory is short
+#: lessons keyed to a file glob and injected on edit; tasky is the record of
+#: what a session decided, tried and rejected. Only the read calls vise
+#: teaches; the server also has `record_attempt`, `search_tasks` and
+#: `get_architecture`.
 #:
-#: `mempalace_search` takes `query` (keywords only, 250 chars — its own
-#: schema says a pasted prompt sinks recall), optional `wing` (MemPalace's
-#: word for a project; the repo's basename by its convention) and `limit`.
-#: `mempalace_diary_read` takes `agent_name` and `last_n`. Nothing here
-#: writes: MemPalace's own hooks save the transcript every fifteen messages,
-#: and a second writer would file the same session twice.
-MEMPALACE_TOOLS: frozenset[str] = frozenset({
-    "mempalace_diary_read",
-    "mempalace_search",
+#: `search_history` and `search_conversations` take `query` — a few words,
+#: matched as words (SQLite full text, accents ignored), not by meaning: a
+#: word nobody said matches nothing, so a pasted prompt or a paraphrase sinks
+#: recall. All but `get_problem` take an optional `scope`, `"repo"` (the
+#: default, this session's repository) or `"all"`; `get_problem` takes the
+#: `id` a history hit names, `last_session` a `count` up to 5. Nothing here
+#: writes: tasky's own hooks copy the transcript, and a second writer would
+#: file the same session twice.
+TASKY_TOOLS: frozenset[str] = frozenset({
+    "dead_ends",
+    "get_problem",
+    "last_session",
+    "search_conversations",
+    "search_history",
 })
 
 #: Every name vise assumes a neighbour exposes. What an asset may teach.
 NEIGHBOUR_TOOLS: frozenset[str] = (
     LIVESPEC_TOOLS | LAYOUT_INSPECTOR_TOOLS | FLOWTRACE_TOOLS
-    | DELTA_CUBE_TOOLS | MEMPALACE_TOOLS
+    | DELTA_CUBE_TOOLS | TASKY_TOOLS
 )
 
 #: The oldest release of each neighbour in which every name above resolves and
@@ -139,11 +148,12 @@ MINIMUM_VERSIONS: dict[str, str] = {
     # current distance cosine, so `tension_percent` compared two scales and
     # the count a gate would read was not a number anyone should act on.
     "delta-cube": "0.2.0",
-    # 3.3.0 is where MemPalace's Stop hook stopped making the agent write the
-    # save in chat: below it, every fifteenth human message the hook returns
-    # a `block` decision, which lands beside vise's own Stop gate and costs
-    # the turn. From 3.3.0 the hook saves silently and the two coexist.
-    "mempalace": "3.3.0",
+    # 0.11.0 is where `search_history` stopped coming back empty when one
+    # word of the query was not in the record: it tries every word, then any
+    # word, then names the areas that do have history. Below it a keyword
+    # query phrased differently from the record returned nothing, which reads
+    # as "no history here" — the one answer recall must not give falsely.
+    "tasky": "0.11.0",
 }
 
 #: Where delta-cube keeps its one database. Global, not per repo: every
@@ -154,36 +164,30 @@ DELTA_CUBE_DATA_DIR_ENV = "DCC_DATA_DIR"
 DELTA_CUBE_DEFAULT_DATA_DIR = "~/.local/share/jig"
 DELTA_CUBE_DB_NAME = "dcc.db"
 
-#: Not an MCP server vise teaches a single call of — MemPalace stores verbatim
-#: transcripts and answers questions about them, which is the half of memory
-#: vise deliberately does not hold. It earns a name here for the same reason
-#: Graphify does: `mempalace init` writes two files into the repository root,
-#: and `diff_scope` will fail on them unless its `allow` list knows.
-MEMPALACE_PROJECT_FILES: tuple[str, ...] = ("mempalace.yaml", "entities.json")
+#: Where tasky keeps its ledger, resolved the way its own `config.py` does:
+#: `$TASKY_HOME`, else `$XDG_DATA_HOME/tasky`, else `~/.local/share/tasky`.
+#: One ledger per machine, like delta-cube's database, holding every
+#: repository its owner worked in; a session row carries its absolute `cwd`,
+#: which is what scopes a read to this repo.
+TASKY_HOME_ENV = "TASKY_HOME"
+TASKY_DEFAULT_DATA_HOME = "~/.local/share"
+TASKY_XDG_SUBDIR = "tasky"
+TASKY_DB_NAME = "tasky.db"
 
-#: Where MemPalace keeps its config and, under it, the palace. Resolved in
-#: the order its own `config.py` uses: the env override, then a legacy
-#: `~/.mempalace` that really holds an install, then XDG. The palace itself
-#: is `palace/` under that dir unless `config.json` moves it.
-#: What to say to someone who has no palace, and nothing more than that.
+#: What to say to someone who has no ledger, and nothing more than that.
 #:
-#: vise does not install MemPalace and should not: a palace is machine-wide
-#: and holds its owner's conversations, which is not a decision another
-#: plugin's installer gets to make for them. Every other neighbour is offered
-#: the same way — named, never installed — and MemPalace is the one whose
-#: absence is otherwise invisible, because a repo that has never seen it looks
-#: exactly like a repo whose owner declined it.
-MEMPALACE_ABSENT_HINT: tuple[str, ...] = (
-    "no palace on this machine — earlier sessions are not searchable.",
-    "MemPalace mines Claude Code transcripts (which expire after 30 days) and",
-    "searches them verbatim: `uv tool install mempalace`, then `mempalace init <repo>`.",
+#: vise does not install tasky and should not: a ledger is machine-wide and
+#: holds its owner's conversations, which is not a decision another plugin's
+#: installer gets to make for them. Every other neighbour is offered the same
+#: way — named, never installed — and tasky is the one whose absence is
+#: otherwise invisible, because a repo that has never seen it looks exactly
+#: like a repo whose owner declined it.
+TASKY_ABSENT_HINT: tuple[str, ...] = (
+    "no tasky ledger on this machine — earlier sessions are not searchable.",
+    "tasky copies Claude Code transcripts (which expire after 30 days) and keeps",
+    "the fixes that failed: `claude plugin marketplace add Rixmerz/claude-plugins`,",
+    "then `claude plugin install tasky@rixmerz`.",
 )
-
-MEMPALACE_CONFIG_DIR_ENV = "MEMPALACE_CONFIG_DIR"
-MEMPALACE_LEGACY_DIR = "~/.mempalace"
-MEMPALACE_XDG_SUBDIR = "mempalace"
-MEMPALACE_PALACE_SUBDIR = "palace"
-MEMPALACE_PALACE_MARKER = "chroma.sqlite3"
 
 #: Not an MCP server vise talks to at all — a CLI that writes a file livespec
 #: reads. It earns a name here because its presence changes what vise's own
