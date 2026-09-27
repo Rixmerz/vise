@@ -121,7 +121,14 @@ def _persist_evidence(goal: Goal, validator_name: str, combined_output: str) -> 
     absolute path written, or "" if persistence failed (non-fatal).
     """
     try:
-        goal_name = _sanitize(Path(goal.project_dir).resolve().name or goal.id)
+        # The same collision-proof key the goal file itself uses, so two
+        # checkouts sharing a directory name do not interleave their evidence
+        # logs in one directory.
+        from vise.hooks._xdg import project_state_dir
+
+        goal_name = _sanitize(
+            project_state_dir(Path(goal.project_dir).resolve()).name or goal.id
+        )
         evidence_dir = _goal_state_dir() / "evidence" / goal_name
         evidence_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
@@ -246,6 +253,48 @@ def _venv_pytest(project_dir: str) -> tuple[str, ...] | None:
     return None
 
 
+def _profile_cmd(project_dir: str, check: str) -> tuple[tuple[str, ...] | None, str]:
+    """The repo's own command for *check* from ``.vise/quality.yaml``, if usable.
+
+    ``tests_pass`` and ``lint_pass`` used to ignore the profile entirely and
+    read ``VISE_TEST_CMD``/``VISE_LINT_CMD`` instead, so the same fact — which
+    command tests this repo — lived in two places: one versioned, reviewable
+    and consent-gated, the other a per-machine copy ``vise bootstrap`` wrote
+    into ``.claude/settings.json``. Editing the profile left the copy behind
+    and the stale command kept winning, silently.
+
+    Reading the profile here is subject to the SAME consent rule
+    ``QualityCheckValidator`` enforces, and for the same reason: a command in
+    a file that arrived with a clone is the repository's choice, not this
+    machine's. Unapproved, it does not run, and the returned reason says what
+    to do about it.
+
+    Returns ``(cmd, "")`` when there is an approved command, else
+    ``(None, reason)`` where *reason* is "" for the ordinary "nothing
+    declared" case and a sentence when something is declared but withheld.
+
+    A caller that gets a reason must NOT fall back to its default: the repo
+    named a command, so running `pytest` instead would run the wrong tool and
+    could report a verified pass from a suite that was never this repo's. A
+    withheld command is an "I could not check", which is what `unverified`
+    is for.
+    """
+    from vise.core import consent
+    from vise.engines import quality_profile
+
+    resolved = quality_profile.resolve_check(project_dir, check)
+    if isinstance(resolved, quality_profile.UnboundCheck):
+        return None, ""
+    if not resolved:
+        return None, ""
+    if not consent.trusted(project_dir, check, resolved):
+        return None, (
+            f".vise/quality.yaml declares `{check}` but nobody on this machine "
+            f"has approved it: `{' '.join(resolved)}` — run `vise approve {check}`"
+        )
+    return tuple(resolved), ""
+
+
 def _invokes_pytest(cmd: tuple[str, ...]) -> bool:
     """True when *cmd* runs pytest, however it was spelled.
 
@@ -258,7 +307,13 @@ def _invokes_pytest(cmd: tuple[str, ...]) -> bool:
         return False
     if Path(cmd[0]).name in {"pytest", "pytest.exe"}:
         return True
-    return "pytest" in cmd[1:3]
+    # `python -m pytest`, and `coverage run -m pytest` — which is what vise's
+    # own profile binds `unit` to, and coverage propagates pytest's exit code
+    # verbatim, so 5 still means "no tests collected" there. The window stops
+    # short of the whole argv on purpose: a `-k pytest` filter or a path with
+    # "pytest" in it is not a pytest invocation. The match is on the whole
+    # token, so `--testPathPattern pytest-ish` does not count.
+    return "pytest" in cmd[1:6]
 
 
 @dataclass
@@ -268,20 +323,47 @@ class TestsPassValidator:
     test_cmd: tuple[str, ...] = ("pytest", "-q")
 
     def run(self, goal: Goal) -> ValidatorRecord:
-        # Set-once project override: the graph node hardcodes `pytest` via
-        # `type: tests_pass`, which is wrong for any non-Python repo. Rather
-        # than autodetect the runner (guessing pm + script name, JS-only,
-        # fragile), let the project name its own test command once in
-        # .claude/settings.json env. Explicit YAML `test_cmd` still wins.
+        # The graph node hardcodes `pytest` via `type: tests_pass`, which is
+        # wrong for any non-Python repo, so the runner is resolved in order of
+        # how specific and how deliberate each source is:
+        #
+        #   1. explicit `test_cmd:` on the node — the workflow author said so
+        #   2. $VISE_TEST_CMD — this machine, set by hand, deliberate
+        #   3. `checks.unit` in .vise/quality.yaml — the REPOSITORY's choice,
+        #      versioned and reviewable, once approved on this machine
+        #   4. the project's own venv running pytest
+        #   5. bare `pytest -q`
+        #
+        # (3) is the addition. It used to be missing, which is why bootstrap
+        # wrote a copy of the command into .claude/settings.json as (2) and the
+        # two drifted. Nothing autodetects the runner here: every source above
+        # is something a person wrote down.
         cmd = self.test_cmd
+        withheld = ""
         env_cmd = os.environ.get("VISE_TEST_CMD", "").strip()
         if env_cmd and cmd == ("pytest", "-q"):
             import shlex
             cmd = tuple(shlex.split(env_cmd))
         elif cmd == ("pytest", "-q"):
-            cmd = _venv_pytest(goal.project_dir) or cmd
+            profile_cmd, withheld = _profile_cmd(goal.project_dir, "unit")
+            cmd = profile_cmd or _venv_pytest(goal.project_dir) or cmd
 
-        if not cmd or not shutil.which(cmd[0]):
+        if withheld:
+            # Declared but not approved here. Falling through to `pytest` would
+            # run a different suite than the one this repo named.
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight, evidence=withheld,
+                at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
+            )
+
+        # `_runnable`, not `shutil.which`: the command runs with
+        # cwd=project_dir, and a profile's command is very often relative to it
+        # (`.venv/bin/python`, `node_modules/.bin/jest`). Pre-checking against
+        # the MCP server's cwd would skip-pass every one of those forever,
+        # green, with evidence reading "not on PATH".
+        if not cmd or not _runnable(cmd[0], goal.project_dir):
             # Fail-open, same contract as lint_pass / lsp_clean: say why, don't
             # block. Failing CLOSED here turned every node that declares
             # `tests_pass` into a hard deadlock on any repo whose runner vise
@@ -296,8 +378,9 @@ class TestsPassValidator:
                 name=self.name, passed=True, confidence_contribution=self.weight,
                 weight=self.weight,
                 evidence=(
-                    f"tests skipped: {missing} not on PATH — "
-                    f"set VISE_TEST_CMD to run this repo's suite"
+                    f"tests skipped: {missing} {_not_found_reason(missing)} — "
+                    f"declare `unit:` in .vise/quality.yaml (`vise bootstrap` "
+                    f"writes it) or set VISE_TEST_CMD"
                 ),
                 at=_now(), source="asserted", exit_code=None,
                 outcome="unverified",
@@ -362,20 +445,37 @@ class TestsFailValidator:
     test_cmd: tuple[str, ...] = ("pytest", "-q")
 
     def run(self, goal: Goal) -> ValidatorRecord:
+        # Same resolution ladder as tests_pass — this asks the same question
+        # ("which command runs this repo's tests") and must not answer it
+        # differently. No venv step: that one is a guess, and a guess that
+        # produces a *reproduction* is the wrong direction to be wrong in.
         cmd = self.test_cmd
+        withheld = ""
         env_cmd = os.environ.get("VISE_TEST_CMD", "").strip()
         if env_cmd and cmd == ("pytest", "-q"):
             import shlex
             cmd = tuple(shlex.split(env_cmd))
+        elif cmd == ("pytest", "-q"):
+            profile_cmd, withheld = _profile_cmd(goal.project_dir, "unit")
+            cmd = profile_cmd or cmd
 
-        if not cmd or not shutil.which(cmd[0]):
+        if withheld:
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight, evidence=withheld,
+                at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
+            )
+
+        if not cmd or not _runnable(cmd[0], goal.project_dir):
             missing = cmd[0] if cmd else "<empty>"
             return ValidatorRecord(
                 name=self.name, passed=True, confidence_contribution=self.weight,
                 weight=self.weight,
                 evidence=(
-                    f"reproduction not checked: {missing} not on PATH — "
-                    f"set VISE_TEST_CMD to run this repo's suite"
+                    f"reproduction not checked: {missing} "
+                    f"{_not_found_reason(missing)} — declare `unit:` in "
+                    f".vise/quality.yaml or set VISE_TEST_CMD"
                 ),
                 at=_now(), source="asserted", exit_code=None,
                 outcome="unverified",
@@ -440,17 +540,28 @@ class LintPassValidator:
     name: str = "lint_pass"
 
     def run(self, goal: Goal) -> ValidatorRecord:
-        # Set-once project override, mirroring tests_pass/VISE_TEST_CMD: the node
-        # hardcodes ruff, wrong for any non-Python repo. Let the project name its
-        # own lint command once in .claude/settings.json env.
+        # Same ladder as tests_pass, one rung shorter (no venv step): the node
+        # hardcodes ruff, wrong for any non-Python repo. $VISE_LINT_CMD is the
+        # deliberate per-machine override; `checks.lint` in .vise/quality.yaml
+        # is the repository's own answer, once approved here.
+        withheld = ""
         env_cmd = os.environ.get("VISE_LINT_CMD", "").strip()
         if env_cmd:
             import shlex
             cmd: tuple[str, ...] = tuple(shlex.split(env_cmd))
         else:
-            cmd = ("ruff", "check", ".", "--exclude", ".claude")
+            profile_cmd, withheld = _profile_cmd(goal.project_dir, "lint")
+            cmd = profile_cmd or ("ruff", "check", ".", "--exclude", ".claude")
 
-        if not cmd or not shutil.which(cmd[0]):
+        if withheld:
+            return ValidatorRecord(
+                name=self.name, passed=True, confidence_contribution=self.weight,
+                weight=self.weight, evidence=withheld,
+                at=_now(), source="asserted", exit_code=None,
+                outcome="unverified",
+            )
+
+        if not cmd or not _runnable(cmd[0], goal.project_dir):
             # Lint is advisory (low weight). A missing linter must NOT block the
             # gate on a repo that simply doesn't use it — skip-pass (fail-open),
             # consistent with lsp_clean. Evidence names the escape hatch.
@@ -458,7 +569,10 @@ class LintPassValidator:
             return ValidatorRecord(
                 name=self.name, passed=True, confidence_contribution=self.weight,
                 weight=self.weight,
-                evidence=f"lint skipped: {missing} not on PATH — set VISE_LINT_CMD to lint this repo",
+                evidence=(
+                    f"lint skipped: {missing} {_not_found_reason(missing)} — "
+                    f"declare `lint:` in .vise/quality.yaml or set VISE_LINT_CMD"
+                ),
                 at=_now(), source="asserted", exit_code=None,
                 outcome="unverified",
             )

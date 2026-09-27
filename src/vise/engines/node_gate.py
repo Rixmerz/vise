@@ -160,10 +160,16 @@ def _record_node_gate_failure(project_dir: str, node_id: str, failed: list) -> N
         from vise.engines.experience_memory import ExperienceEntry, ExperienceMemoryStore
     except Exception:
         return
+    # `project_dir` is not optional here, whatever the signature allows:
+    # without it `load` falls back to the legacy bare-basename path, so on
+    # two checkouts sharing a directory name this wrote one project's
+    # node-gate lesson into the other project's store — and every reader
+    # resolves the collision-proof path, so it was written where nothing
+    # looks. The other three call sites already pass it.
     project_name = Path(project_dir).name
     store = ExperienceMemoryStore()
     try:
-        store.load(scope="project", project_name=project_name)
+        store.load(scope="project", project_name=project_name, project_dir=project_dir)
     except Exception:
         return
     names = ", ".join(getattr(r, "name", "?") for r in failed) or "?"

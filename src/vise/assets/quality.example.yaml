@@ -15,6 +15,13 @@
 # (see src/vise/assets/workflows/quality-gate-graph.yaml), never on the
 # command, so the same workflow ships to a Python repo and a Go repo unchanged.
 #
+# Two keys are read by more than `quality_check`: `unit` is what the
+# `tests_pass` and `tests_fail` node-gate validators run, and `lint` is what
+# `lint_pass` runs. That is deliberate — it is the same question, and it used
+# to be answered separately from $VISE_TEST_CMD / $VISE_LINT_CMD, which meant
+# editing this file left a stale per-machine copy still winning. Those two
+# variables still override what is here, on the machine that sets them.
+#
 # Shape: a mapping of check name → command. A list is used as argv verbatim; a
 # plain string ("pytest -q") is shlex-split into one. Either way NO SHELL runs
 # it, so `&&`, pipes, globs, and `$VARS` are literal arguments, not syntax.

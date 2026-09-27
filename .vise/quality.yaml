@@ -5,6 +5,12 @@
 # map skip-passes with source="asserted", so the gate stays honest about what
 # it did not look at rather than blocking a repo for lacking a tool.
 #
+# `unit` and `lint` are read by two more validators: `tests_pass`/`tests_fail`
+# run `unit`, and `lint_pass` runs `lint`. They used to answer that from
+# $VISE_TEST_CMD / $VISE_LINT_CMD only, so the same fact lived in two places
+# and the copy in .claude/settings.json kept winning after this file changed.
+# Those variables still override this file on the machine that sets them.
+#
 # Only list what this repo really has. Everything here is installed in .venv.
 #
 # What CI does with each one, per check, because a blanket claim is a claim

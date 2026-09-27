@@ -480,16 +480,23 @@ def write_settings_env(
     Returns ``(written, kept, error)``. ``kept`` holds keys that were already
     there and were left exactly as they were.
 
-    Bootstrap used to print these and tell the person to paste them, on the
-    reasoning that `.claude/settings.json` is theirs and holds things vise has
-    no business touching. The second half of that is true and this keeps it: an
-    existing value is never replaced, unparseable JSON is never overwritten, no
-    other key is read or written, and the write is atomic. The first half was
-    the mistake. Detection has already computed the command; printing it and
-    hoping mostly meant it never got pasted, and the consequence of not pasting
-    it is a `tests_pass` gate that runs `pytest` on a Node repo, reports
-    `unverified`, and reads as green. A step that must be done by hand for the
-    tool to be honest is a step the tool should do.
+    **Opt-in now (`--settings`), and it used to be the default.** The argument
+    for writing them was that detection had already computed the command, and
+    the consequence of nobody pasting it was a `tests_pass` gate running
+    `pytest` on a Node repo, reporting `unverified`, and reading as green — a
+    step needed for the tool to be honest is a step the tool should do.
+
+    That argument is spent: `tests_pass`, `tests_fail` and `lint_pass` now read
+    `checks.unit`/`checks.lint` out of the profile bootstrap just wrote (see
+    `validators._profile_cmd`), so the gate is honest with no env var at all.
+    What writing one still does is leave a second, per-machine copy of the same
+    command in a file nobody re-runs bootstrap over: edit `.vise/quality.yaml`
+    and the stale copy keeps winning, because the env var is checked first.
+    One fact, one place.
+
+    When asked for explicitly, the old guarantees hold: an existing value is
+    never replaced, unparseable JSON is never overwritten, no other key is read
+    or written, and the write is atomic.
     """
     written: dict[str, str] = {}
     kept: dict[str, str] = {}
@@ -556,7 +563,10 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
         return 0
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render(found), encoding="utf-8")
+    # Atomic, like the settings write below: a half-written quality.yaml is a
+    # NO_PROFILE, and NO_PROFILE is silent — every check skip-passes. An
+    # interrupted bootstrap must leave the old file or no file, never a stub.
+    write_atomic(target, render(found))
     print(f"wrote {target}")
     print(f"  bound:   {', '.join(sorted(found['bound'])) or '(nothing — no tools found)'}")
     if found["skipped"]:
@@ -580,17 +590,19 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
     if not (unit or lint):
         return 0
 
-    if getattr(args, "no_settings", False):
-        print("\nAdd to .claude/settings.json under \"env\" so the node-gate")
-        print("validators run this repo's commands instead of their defaults:")
+    if not getattr(args, "settings", False):
+        # The profile is the source: the node-gate validators read `unit:` and
+        # `lint:` straight out of it. Nothing to set, and nothing to go stale.
+        print("\nThe node-gate validators (tests_pass, tests_fail, lint_pass) read")
+        print("these out of .vise/quality.yaml directly:")
         print("")
         if unit:
-            print(f'    "VISE_TEST_CMD": "{" ".join(unit)}",')
+            print(f'    unit: {" ".join(unit)}')
         if lint:
-            print(f'    "VISE_LINT_CMD": "{" ".join(lint)}"')
+            print(f'    lint: {" ".join(lint)}')
         print("")
-        print("Without those two, tests_pass and lint_pass report `unverified`:")
-        print("the gate exists but does not bite.")
+        print("$VISE_TEST_CMD / $VISE_LINT_CMD still override them on this machine")
+        print("if you want that; `--settings` writes them to .claude/settings.json.")
         return 0
 
     written, kept, error = write_settings_env(project, found["bound"])
@@ -624,7 +636,13 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--dry-run", action="store_true", help="print, do not write")
     p.add_argument("--force", action="store_true", help="overwrite an existing profile")
     p.add_argument(
+        "--settings", action="store_true",
+        help="also copy the gate commands into .claude/settings.json as "
+             "VISE_TEST_CMD/VISE_LINT_CMD (the validators read the profile "
+             "without this; the copy can go stale)",
+    )
+    p.add_argument(
         "--no-settings", action="store_true",
-        help="print the gate variables instead of setting them in .claude/settings.json",
+        help=argparse.SUPPRESS,  # now the default; accepted so old scripts keep working
     )
     p.set_defaults(func=_cmd_bootstrap)

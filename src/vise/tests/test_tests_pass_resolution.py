@@ -113,6 +113,24 @@ def test_the_env_override_still_wins_over_the_venv(
 # --- and whether exit 5 is recognised --------------------------------------
 
 
+def test_a_coverage_wrapped_pytest_is_still_pytest() -> None:
+    """`coverage run -m pytest` is what vise's own profile binds `unit` to.
+
+    coverage propagates pytest's exit code verbatim, so 5 still means "no
+    tests collected" there. Missing that reads a zero-test run as a verified
+    pass instead of the unverified skip it is.
+    """
+    assert _invokes_pytest(
+        (".venv/bin/python", "-m", "coverage", "run", "-m", "pytest", "-q")
+    )
+
+
+def test_a_runner_that_merely_mentions_pytest_is_not_pytest() -> None:
+    """The widened window matches whole tokens, not substrings."""
+    assert not _invokes_pytest(("npx", "jest", "--testPathPattern", "pytest-ish"))
+    assert not _invokes_pytest(("cargo", "test"))
+
+
 @pytest.mark.parametrize(
     "cmd",
     [
@@ -145,7 +163,10 @@ def test_exit_five_does_not_block_when_pytest_runs_as_a_module(
     monkeypatch.setenv("VISE_GOAL_DIR", str(tmp_path / "goal"))
     result = MagicMock(returncode=5, stdout="no tests ran in 0.01s\n", stderr="")
 
-    with patch("shutil.which", return_value="/repo/.venv/bin/python"), \
+    # `_runnable`, not `shutil.which`: the validator now pre-checks a
+    # path-like command against the project directory, the way it will run it.
+    # A fabricated absolute path has no file behind it, so the seam moved.
+    with patch("vise.engines.validators._runnable", return_value=True), \
             patch("subprocess.run", return_value=result):
         record = TestsPassValidator(
             test_cmd=("/repo/.venv/bin/python", "-m", "pytest", "-q")

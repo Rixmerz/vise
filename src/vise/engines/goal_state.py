@@ -104,8 +104,15 @@ def _goal_dir() -> Path:
 
 
 def _path_for(project_dir: str) -> Path:
-    name = Path(project_dir).resolve().name or "unnamed"
-    return _goal_dir() / f"{name}.json"
+    """The goal file for *project_dir*, keyed the way every other store is.
+
+    Resolution lives in ``_xdg.goal_path`` — the same collision-proof key
+    ``states/`` and ``project_memories/`` use. A local join here is what let
+    this store keep a bare basename after the others were fixed.
+    """
+    from vise.hooks._xdg import goal_path
+    _goal_dir()  # ensure the directory exists; goal_path only computes
+    return goal_path(project_dir)
 
 
 def default_target_confidence(complexity: Complexity | str) -> float:
