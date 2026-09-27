@@ -22,9 +22,11 @@ Nothing lied — but the gate never ran, and anything reading `passed` reads it
 as green. You can orchestrate an entire migration behind a test gate that never
 executed a test.
 
-So: `.vise/quality.yaml` present, and `VISE_TEST_CMD` / `VISE_LINT_CMD` set in
-`.claude/settings.json`. Missing either → `/bootstrap` first. It is one command,
-and it is the difference between a gate and a decoration.
+So: `.vise/quality.yaml` present, with `unit:` and `lint:` bound. That one file
+is what `tests_pass`, `tests_fail` and `lint_pass` read; `VISE_TEST_CMD` /
+`VISE_LINT_CMD` exist only to override it on one machine. Missing the profile →
+`/bootstrap` first. It is one command, and it is the difference between a gate
+and a decoration.
 
 A `.vise/quality.yaml` that arrived with the clone was never approved on this
 machine, so its checks report `unverified` until someone reads the file and

@@ -6,6 +6,82 @@ file and are described only by their commits.
 Alpha means the tool surface is still moving. Where a change alters behaviour
 you may already depend on, it says so under **Behaviour change**.
 
+## [Unreleased]
+
+### Fixed — two checkouts named the same thing are two projects
+
+`_xdg.project_state_dir` solved basename collisions once: the plain name is
+used until an origin marker shows a different absolute path claimed it, and
+the loser gets a `<basename>-<hash>` sibling. `states/` uses it, and
+`project_memories/` reuses the key it resolves. Two places never got it.
+
+- **Goal state was keyed on the bare basename**, so `~/clientA/api` and
+  `~/clientB/api` shared one `api.json`. Opening the second repo read the
+  first one's objective, `goal_complete` closed the wrong one, and with
+  `VISE_GOAL_GATE=1` the Stop hook held a session open on an objective
+  belonging to another project. It now resolves through `_xdg.goal_path`,
+  the same key as the other two trees. One project per basename — the
+  common case — resolves to the identical path as before, so goals already
+  on disk are found with no migration.
+- **`vise experience gc` and `vise experience stats` rebuilt the store path
+  from the basename** instead of asking the resolver the store itself loads
+  from. `stats` reported a path that was not the one in use; `gc`, which
+  deletes, was pointed at another project's store. Both now call
+  `_xdg.project_memory_path`.
+- **The node gate wrote its failure lesson to the legacy path.** It was the
+  one project-scope `ExperienceMemoryStore.load` that never passed
+  `project_dir`, and without it `load` falls back to the bare basename. Every
+  reader resolves the collision-proof path, so the lesson went where nothing
+  looks — and on a collision, into the other project's store.
+- **Per-goal evidence logs** were filed under the bare basename too, so two
+  twins interleaved theirs in one directory. Timestamps meant nothing was
+  overwritten, only that nothing could be told apart.
+
+### Fixed — `tests_pass`, `tests_fail` and `lint_pass` can find a relative command
+
+They pre-checked the runner with `shutil.which`, which resolves a relative
+path against the MCP server's working directory, while the command itself
+runs with `cwd=project_dir`. `QualityCheckValidator` has used `_runnable` for
+this since it was written; these three had not, so every project-relative
+command — `.venv/bin/python`, `node_modules/.bin/jest`, `./scripts/test.sh`,
+which is the shape `quality.example.yaml` recommends — failed the pre-check and
+skip-passed forever: green gate, evidence reading "not on PATH", nothing run.
+`_invokes_pytest` also now recognises `coverage run -m pytest`, so pytest's
+exit 5 ("no tests collected") is still read as a skip there rather than a pass.
+
+### Fixed — `vise bootstrap` writes the profile atomically
+
+`.vise/quality.yaml` was written with `Path.write_text`, which truncates
+before the new bytes land, while the settings write 25 lines away already
+used `write_atomic`. The profile's second reader is the node gate, on every
+traverse, and an unparseable profile degrades to `NO_PROFILE` — under which
+every quality check skip-passes and says nothing. An interrupted bootstrap
+now leaves the old file or no file, never a stub.
+
+### Behaviour change — one command, one place
+
+`tests_pass`, `tests_fail` and `lint_pass` answered "which command runs this
+repo's tests" from `$VISE_TEST_CMD` / `$VISE_LINT_CMD` alone, while
+`quality_check` answered the same question from `.vise/quality.yaml`. Two
+sources, and `vise bootstrap` wrote both — so editing the profile left a
+per-machine copy behind in `.claude/settings.json` that kept winning,
+because the env var was consulted first.
+
+- **The three validators now read `checks.unit` / `checks.lint` from the
+  profile**, under the same consent rule `quality_check` enforces: a command
+  that arrived with a clone does not run until someone here runs
+  `vise approve`. A declared-but-unapproved command reports `unverified`
+  and names the remedy — it never falls back to `pytest` or `ruff`, which
+  would run a different suite than the one the repo named.
+- Resolution order is now: an explicit `test_cmd:` on the node, then
+  `$VISE_TEST_CMD` / `$VISE_LINT_CMD`, then the profile, then (for tests)
+  the project's own venv, then the bare default.
+- **`vise bootstrap` no longer writes `VISE_TEST_CMD` / `VISE_LINT_CMD` into
+  `.claude/settings.json`.** The reason it did — that without them the gate
+  ran `pytest` on a Node repo and read as green — is answered by the profile
+  being read directly. `--settings` opts back in; `--no-settings` is accepted
+  and is now the default.
+
 ## [0.1.0a30] - 2026-09-24
 
 ### Changed — tasky replaces MemPalace as the other half of memory

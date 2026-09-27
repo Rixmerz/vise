@@ -78,11 +78,9 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
 
 def _cmd_gc(args: argparse.Namespace) -> int:
-    from vise.engines.experience_memory import (
-        GLOBAL_MEMORY_FILE,
-        PROJECT_MEMORIES_DIR,
-    )
+    from vise.engines.experience_memory import GLOBAL_MEMORY_FILE
     from vise.engines.experience_gc import gc, protected_ids_for
+    from vise.hooks._xdg import project_memory_path
 
     project_dir = _project_dir(args)
     apply_flag: bool = getattr(args, "apply", False)
@@ -95,9 +93,11 @@ def _cmd_gc(args: argparse.Namespace) -> int:
     except Exception:
         prot = set()
 
-    # Determine which stores to process
-    project_name = __import__("pathlib").Path(project_dir).name
-    project_store_path = PROJECT_MEMORIES_DIR / project_name / "experience_memory.json"
+    # Determine which stores to process. Resolve through `project_memory_path`
+    # — the collision-proof key the store itself loads from. Rebuilding the
+    # join from a bare basename aimed this command at a *different* project's
+    # store whenever two checkouts shared a directory name, and gc deletes.
+    project_store_path = project_memory_path(project_dir)
 
     stores_to_gc = []
     if GLOBAL_MEMORY_FILE.exists():
@@ -183,8 +183,8 @@ def _cmd_stats(args: argparse.Namespace) -> int:
         get_experience_store,
         get_project_experience_store,
         GLOBAL_MEMORY_FILE,
-        PROJECT_MEMORIES_DIR,
     )
+    from vise.hooks._xdg import project_memory_path
 
     project_dir = _project_dir(args)
     global_store = get_experience_store()
@@ -199,9 +199,9 @@ def _cmd_stats(args: argparse.Namespace) -> int:
         "combined_total": global_stats["total"] + project_stats["total"],
         "storage": {
             "global_file": str(GLOBAL_MEMORY_FILE),
-            "project_file": str(
-                PROJECT_MEMORIES_DIR / Path(project_dir).name / "experience_memory.json"
-            ),
+            # The same resolver the store loaded from: a reported path that
+            # is not the path in use is a lie about where the data lives.
+            "project_file": str(project_memory_path(project_dir)),
         },
         "project_dir": project_dir,
     }

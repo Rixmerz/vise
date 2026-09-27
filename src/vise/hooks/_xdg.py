@@ -163,6 +163,29 @@ def goal_dir() -> Path:
     return Path(override) if override else data_dir() / "goal"
 
 
+def goal_path(project_dir: str | Path) -> Path:
+    """``<goal_dir>/<key>.json`` — same collision-proof key as ``project_state_dir``.
+
+    Third tree resolved through the one key, alongside ``states/`` and
+    ``project_memories/``. It was the last store keyed on a bare basename,
+    so ``~/a/api`` and ``~/b/api`` shared one goal file: opening the second
+    repo read the first one's goal, and ``goal_complete`` closed the wrong
+    one. With ``VISE_GOAL_GATE=1`` that held a session open on an objective
+    belonging to another project.
+
+    The common case (one project per basename) resolves to the plain
+    basename, byte-identical to the path this replaced, so goals already on
+    disk are found with no migration.
+    """
+    # Resolve first: the caller may hand over a relative path, and
+    # `project_state_dir` keys on `Path(...).name`, which is "" for "." and
+    # the last segment for "../api". The store this replaced resolved, so
+    # resolving here keeps the goal tools from moving a project's file the
+    # first time it is reached from a different working directory.
+    key = project_state_dir(Path(project_dir).resolve()).name or "unnamed"
+    return goal_dir() / f"{key}.json"
+
+
 def src_dir() -> Path:
     """Legacy in-place source checkout (pre-package-install layout)."""
     return data_dir() / "src"
@@ -174,6 +197,7 @@ __all__ = [
     "experience_index_dir",
     "experience_memory_path",
     "goal_dir",
+    "goal_path",
     "graph_state_path",
     "project_memory_dir",
     "project_memory_path",

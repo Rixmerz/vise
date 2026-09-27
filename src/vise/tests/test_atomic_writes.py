@@ -174,9 +174,66 @@ def test_goal_state_is_never_readable_in_a_torn_state(tmp_path):
     assert bad == 0, f"{bad} of {reads + bad} reads saw a partial goal file"
 
 
+def _hammer_profile_reads(project_dir: str, stop_after: float, results):
+    """Resolve a check as fast as possible; record every unusable profile."""
+    from vise.engines import quality_profile
+
+    bad = 0
+    reads = 0
+    while time.monotonic() < stop_after:
+        resolved = quality_profile.resolve_check(project_dir, "unit")
+        if isinstance(resolved, quality_profile.UnboundCheck):
+            bad += 1
+            continue
+        reads += 1
+    results["reads"] = reads
+    results["bad"] = bad
+
+
+def test_the_quality_profile_is_never_readable_as_no_profile_mid_write(tmp_path):
+    """A torn `.vise/quality.yaml` is a silent NO_PROFILE: every check skip-passes.
+
+    The second reader is the node gate, which resolves this file on every
+    traverse. `write_text` truncates first, and a reader in that window gets
+    unparseable YAML — which `quality_profile` correctly degrades to
+    NO_PROFILE rather than raising, and NO_PROFILE means every check reports
+    `asserted`/`unverified` and reads as green. Losing the profile for one
+    traverse costs the whole gate, quietly, which is why the write bootstrap
+    makes has to be the atomic one.
+    """
+    from vise.cli.bootstrap_cmd import detect, render
+    from vise.core.atomic import write_atomic
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    profile = tmp_path / ".vise" / "quality.yaml"
+    profile.parent.mkdir(parents=True)
+    # Bulk comments, so a truncating write would leave a real window open.
+    body = render(detect(tmp_path)) + "\n".join(f"# pad {i}" for i in range(4000)) + "\n"
+    write_atomic(profile, body)
+
+    manager = multiprocessing.Manager()
+    results = manager.dict()
+    deadline = time.monotonic() + 2.0
+    reader = multiprocessing.Process(
+        target=_hammer_profile_reads, args=(str(tmp_path), deadline, results)
+    )
+    reader.start()
+    while time.monotonic() < deadline:
+        write_atomic(profile, body)
+    reader.join(timeout=10)
+
+    reads, bad = int(results.get("reads", 0)), int(results.get("bad", 0))
+    assert reads > 0, "the reader never got to read anything"
+    assert bad == 0, (
+        f"{bad} of {reads + bad} resolutions saw an unusable profile — every "
+        f"quality check skip-passes on one of those, and says nothing"
+    )
+
+
 @pytest.mark.parametrize("module,fn", [
     ("vise.engines.goal_state", "_write"),
     ("vise.tools.goal", "_write_settings_atomic"),
+    ("vise.cli.bootstrap_cmd", "_cmd_bootstrap"),
 ])
 def test_atomic_writers_do_not_use_a_predictable_temp_name(module, fn):
     """A fixed `.json.tmp` is one file two processes both write.

@@ -364,18 +364,21 @@ Environment variables (all optional):
 > agents, skills, commands and hooks; it cannot ship the part that is about
 > *your* repo — which command runs its tests, what `sast` means in a Go
 > project. `bootstrap` detects that and writes `.vise/quality.yaml`, binding
-> only checks whose tool it actually found — and sets `VISE_TEST_CMD` /
-> `VISE_LINT_CMD` in `.claude/settings.json`, which is a separate mechanism the
-> profile does not reach. It never replaces a value you set; `--no-settings`
-> prints them instead. Or `/bootstrap` from a session, which does the same and
-> walks the rest of the setup.
+> only checks whose tool it actually found. That one file is the source:
+> `tests_pass`, `tests_fail` and `lint_pass` read `checks.unit` and
+> `checks.lint` out of it, under the same approval rule `quality_check` uses.
+> `--settings` additionally copies the two commands into
+> `.claude/settings.json` as `VISE_TEST_CMD` / `VISE_LINT_CMD` — off by
+> default, because a second copy of a command, in a file nobody re-runs
+> bootstrap over, is a copy that goes stale and still wins. Or `/bootstrap`
+> from a session, which does the same and walks the rest of the setup.
 
 | `VISE_CODELAYER` | Read-by-symbol gate: `off` (default, inert), `warn` (records what it would deny, blocks nothing), `enforce` (denies source reads by path). The kill switch is the point — a gate that can lock you out of fixing the gate gets uninstalled the first time it misfires |
 | `VISE_CODELAYER_SCOPE` | Comma-separated path prefixes the gate covers (default `src/`). Configs, tests, docs, migrations and manifests are never gated regardless |
 | `VISE_LOOP_COST_CAP` | Cost cap for loop recipes |
 | `VISE_EMBED_MODEL` / `VISE_EMBED_IDLE_TIMEOUT` / `VISE_EMBED_CACHE_DIR` / `VISE_EMBED_THREADS` | fastembed model, idle unload, model cache location, and worker threads (default 2) |
 | `VISE_TELEMETRY_DIR` / `VISE_USAGE_DIR` | Telemetry/usage output dirs |
-| `VISE_TEST_CMD` / `VISE_LINT_CMD` | Command the `tests_pass` / `lint_pass` node-gate validators run. Set these when auto-detection picks the wrong runner, or when the repo's linter isn't on PATH — `lint_pass` then reports `lint skipped … set VISE_LINT_CMD to lint this repo` instead of passing unchecked |
+| `VISE_TEST_CMD` / `VISE_LINT_CMD` | Per-machine override of the command `tests_pass` / `tests_fail` / `lint_pass` run. They outrank `checks.unit` / `checks.lint` in `.vise/quality.yaml`, which is where the repository's own answer lives and where these validators look first. Set one only to override the repo on this machine |
 | `VISE_QUALITY_PROFILE` | Override path to the `.vise/quality.yaml` file the `quality_check` node-gate validator reads (`checks: {name: [cmd, ...]}`). Defaults to `<project_dir>/.vise/quality.yaml` |
 | `VISE_OPENSPEC_ROOT` | Override the `openspec/` directory the `openspec` node-gate validator reads. Defaults to `<project_dir>/openspec`. Set it when planning artifacts live outside the code tree |
 
@@ -386,9 +389,9 @@ A workflow node declares `validators:`; the gate runs them all and is
 
 | `type` | Checks | Fail-open when |
 |---|---|---|
-| `tests_pass` | the project's test suite | no runner detected (set `VISE_TEST_CMD`) |
+| `tests_pass` | the project's test suite | no runner detected (declare `unit:` in `.vise/quality.yaml`, or set `VISE_TEST_CMD`) |
 | `tests_fail` | at least one test **fails** — a reproduction | no runner, or the runner never reached the tests |
-| `lint_pass` | the project's linter | linter not on PATH (set `VISE_LINT_CMD`) |
+| `lint_pass` | the project's linter | linter not on PATH (declare `lint:` in `.vise/quality.yaml`, or set `VISE_LINT_CMD`) |
 | `command_exit` | an arbitrary `cmd:` exits 0 | **never** — fails closed on a missing binary |
 | `files_exist` | declared `paths:` are present | never |
 | `capability` | a resolved capability tool returns ok | capability unbound |

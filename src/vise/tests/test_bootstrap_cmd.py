@@ -242,42 +242,46 @@ def _run_bootstrap(tmp_path: Path, **over):
     from vise.cli.bootstrap_cmd import _cmd_bootstrap
 
     ns = argparse.Namespace(
-        project_dir=str(tmp_path), dry_run=False, force=True, no_settings=False
+        project_dir=str(tmp_path), dry_run=False, force=True,
+        settings=False, no_settings=False,
     )
     for k, v in over.items():
         setattr(ns, k, v)
     return _cmd_bootstrap(ns)
 
 
-def test_it_sets_the_env_vars_the_gates_need(tmp_path: Path, monkeypatch, capsys):
-    """Sin VISE_TEST_CMD/VISE_LINT_CMD la puerta existe pero no muerde.
+def test_by_default_it_writes_no_env_vars_because_the_profile_is_the_source(
+    tmp_path: Path, monkeypatch, capsys
+):
+    """The gate reads `.vise/quality.yaml`, so a copy in settings only goes stale.
 
-    Bootstrap las imprimía y pedía pegarlas a mano. Detección ya calculó el
-    comando; imprimirlo y esperar significaba, casi siempre, que nadie lo
-    pegaba — y la consecuencia de no pegarlo es un `tests_pass` que corre
-    `pytest` en un repo Go, reporta `unverified`, y se lee como verde.
+    Bootstrap used to write both, on the reasoning that a gate with no
+    VISE_TEST_CMD runs `pytest` on a Go repo and reads as green. The node-gate
+    validators now read `checks.unit`/`checks.lint` out of the profile
+    directly, so that reason is gone and what is left is a second per-machine
+    copy of the same command that nobody re-runs bootstrap over.
     """
     _write(tmp_path, {"go.mod": "module x\n"})
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
     _run_bootstrap(tmp_path)
+
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+    out = capsys.readouterr().out
+    assert "quality.yaml" in out
+    assert "go test ./..." in out
+
+
+def test_settings_opts_back_in_to_writing_them(tmp_path: Path, monkeypatch, capsys):
+    """The escape hatch for anyone who wants the env vars anyway."""
+    _write(tmp_path, {"go.mod": "module x\n"})
+    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
+    _run_bootstrap(tmp_path, settings=True)
 
     settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
     assert settings["env"]["VISE_TEST_CMD"] == "go test ./..."
     assert "VISE_LINT_CMD" in settings["env"]
     out = capsys.readouterr().out
     assert "VISE_TEST_CMD" in out and str(tmp_path) in out
-
-
-def test_no_settings_prints_them_instead(tmp_path: Path, monkeypatch, capsys):
-    """El escape para quien gestiona ese archivo en otro lado."""
-    _write(tmp_path, {"go.mod": "module x\n"})
-    monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _run_bootstrap(tmp_path, no_settings=True)
-
-    assert not (tmp_path / ".claude" / "settings.json").exists()
-    out = capsys.readouterr().out
-    assert "VISE_TEST_CMD" in out
-    assert "unverified" in out
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +433,7 @@ def test_a_malformed_package_json_does_not_raise(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# .claude/settings.json — dos claves, y nada más
+# .claude/settings.json — two keys, and nothing else (only with --settings)
 # ---------------------------------------------------------------------------
 
 def test_an_existing_value_is_never_replaced(tmp_path: Path, monkeypatch):
@@ -441,7 +445,7 @@ def test_an_existing_value_is_never_replaced(tmp_path: Path, monkeypatch):
         }),
     })
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _run_bootstrap(tmp_path)
+    _run_bootstrap(tmp_path, settings=True)
 
     settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
     assert settings["env"]["VISE_TEST_CMD"] == "go test -race ./..."
@@ -450,15 +454,15 @@ def test_an_existing_value_is_never_replaced(tmp_path: Path, monkeypatch):
 
 
 def test_unreadable_json_is_left_exactly_as_it_was(tmp_path: Path, monkeypatch, capsys):
-    """Ese archivo es del usuario. Un parseo fallido no autoriza a reescribirlo."""
+    """That file is the user's. A failed parse is not permission to rewrite it."""
     _write(tmp_path, {"go.mod": "module x\n", ".claude/settings.json": "{ oops"})
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _run_bootstrap(tmp_path)
+    _run_bootstrap(tmp_path, settings=True)
 
     assert (tmp_path / ".claude" / "settings.json").read_text() == "{ oops"
     out = capsys.readouterr().out
     assert "not readable JSON" in out
-    assert "VISE_TEST_CMD" in out  # y aun así dice qué agregar
+    assert "VISE_TEST_CMD" in out  # and it still says what to add
 
 
 def test_a_non_object_env_is_left_alone(tmp_path: Path, monkeypatch):
@@ -467,12 +471,12 @@ def test_a_non_object_env_is_left_alone(tmp_path: Path, monkeypatch):
         ".claude/settings.json": json.dumps({"env": "nope"}),
     })
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _run_bootstrap(tmp_path)
+    _run_bootstrap(tmp_path, settings=True)
     assert json.loads((tmp_path / ".claude" / "settings.json").read_text()) == {"env": "nope"}
 
 
 def test_dry_run_writes_no_settings(tmp_path: Path, monkeypatch):
     _write(tmp_path, {"go.mod": "module x\n"})
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
-    _run_bootstrap(tmp_path, dry_run=True, force=False)
+    _run_bootstrap(tmp_path, dry_run=True, force=False, settings=True)
     assert not (tmp_path / ".claude").exists()
