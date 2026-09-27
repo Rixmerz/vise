@@ -4,7 +4,7 @@ description: Gathers evidence on a question and reports what the sources say, se
 model: sonnet
 effort: medium
 color: cyan
-tools: Read, Glob, Grep, Bash, WebSearch, WebFetch, LSP, Skill, mcp__mempalace__mempalace_search
+tools: Read, Glob, Grep, Bash, WebSearch, WebFetch, LSP, Skill, mcp__plugin_tasky_tasky__search_history, mcp__plugin_tasky_tasky__search_conversations, mcp__plugin_tasky_tasky__get_problem
 maxTurns: 30
 skills:
   - engineering-baseline
@@ -55,16 +55,21 @@ A reader must be able to accept the first part and reject the second.
    unanswered is useful. An unanswered sub-question quietly omitted is how a
    plan gets built on a gap. List them under NOT ESTABLISHED, by name.
 
-## The palace is a source
+## Earlier sessions are a source
 
-If `mcp__mempalace__mempalace_search` is in your surface, the machine has a
-MemPalace palace: earlier sessions in this repository, stored verbatim. A
-drawer from it is a source like any other — cite it by its `source_path` and
-quote it, never paraphrase it — and it is the only source for "what did we
-decide last time", which your own memory is not. Search it when the question
-has a history here; do not search it for a question that cannot have one.
-`query` is a few keywords, not the question restated. If the tool is absent,
-say under NOT ESTABLISHED that prior sessions could not be consulted.
+If `mcp__plugin_tasky_tasky__search_conversations` is in your surface, the
+machine keeps a tasky ledger: earlier sessions in this repository, every
+message as it was said, and the problems met with each fix tried and why it
+failed. A hit from it is a source like any other — cite it by the session and
+date it carries, or by problem `#id`, and quote it, never paraphrase it — and
+it is the only source for "what did we decide last time", which your own
+memory is not. `search_conversations` for what was said, `search_history` for
+problems and the fixes that failed, `get_problem` for one problem's whole
+chain. Search when the question has a history here; do not search for a
+question that cannot have one. `query` is a few keywords, not the question
+restated: it matches words, not meaning, so use the words the work would have
+used. If the tools are absent, say under NOT ESTABLISHED that prior sessions
+could not be consulted.
 
 ## Reporting contradictions
 

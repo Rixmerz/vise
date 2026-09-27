@@ -314,58 +314,68 @@ def test_precompact_still_silent_when_nothing_active_and_nothing_open(
     assert code == 0
 
 
-# --- the palace note --------------------------------------------------------
+# --- the recall note ---------------------------------------------------------
 #
-# MemPalace's own Claude Code plugin injects nothing at SessionStart, so a
-# palace is a store nobody is told about. vise says so, in three lines, only
-# when one exists, and only as "if the tools are connected".
+# tasky's own SessionStart note is about the tasks it queued, not about what
+# can be recalled, so the ledger is a store nobody is told about. vise says
+# so, in three lines, only when it holds sessions of this repo, and only as
+# "if the tools are connected".
 
-def _palace(config_dir: Path) -> None:
-    (config_dir / "palace").mkdir(parents=True)
-    (config_dir / "config.json").write_text("{}")
-    (config_dir / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+def _ledger(home: Path, project: Path) -> dict[str, str]:
+    from .test_neighbour_state import tasky_db
+
+    tasky_db(home, sessions=[(str(project.resolve()), "2026-09-01T10:00:00Z")],
+             problems=[(str(project.resolve()), "open")])
+    return {"TASKY_HOME": str(home)}
 
 
-def test_session_restore_says_nothing_about_a_palace_that_is_not_there(isolated: Path) -> None:
+def test_session_restore_says_nothing_without_a_ledger(isolated: Path) -> None:
     out, _ = _run(session_restore, isolated, {"source": "startup"})
     assert out == ""
 
 
-def test_session_restore_names_the_palace_and_the_wing(isolated: Path, tmp_path: Path) -> None:
-    _palace(tmp_path / "mp")
-    out, code = _run(session_restore, isolated, {"source": "startup"},
-                     env={"MEMPALACE_CONFIG_DIR": str(tmp_path / "mp")})
+def test_session_restore_says_nothing_about_other_repos_history(
+    isolated: Path, tmp_path: Path,
+) -> None:
+    env = _ledger(tmp_path / "th", tmp_path / "elsewhere")
+    out, _ = _run(session_restore, isolated, {"source": "startup"}, env=env)
+    assert out == ""
+
+
+def test_session_restore_names_the_ledger_and_the_calls(isolated: Path, tmp_path: Path) -> None:
+    env = _ledger(tmp_path / "th", isolated)
+    out, code = _run(session_restore, isolated, {"source": "startup"}, env=env)
     assert code == 0
     context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "MemPalace palace at" in context
-    assert 'mempalace_search(query=<a few keywords>, wing="proj")' in context
-    assert "mempalace_diary_read" in context
+    assert "1 session(s) of this repo since 2026-09-01; 1 open problem(s)" in context
+    assert "search_history(query=<a few keywords>)" in context
+    assert "search_conversations(query=<a few keywords>)" in context
+    assert "last_session" in context
     assert "not connected, say so" in context
     assert len(context.splitlines()) <= 3
 
 
-def test_the_palace_note_precedes_the_state_block(isolated: Path, tmp_path: Path) -> None:
-    _palace(tmp_path / "mp")
+def test_the_recall_note_precedes_the_state_block(isolated: Path, tmp_path: Path) -> None:
+    env = _ledger(tmp_path / "th", isolated)
     _write_graph_state(isolated)
-    out, _ = _run(session_restore, isolated, {"source": "compact"},
-                  env={"MEMPALACE_CONFIG_DIR": str(tmp_path / "mp")})
+    out, _ = _run(session_restore, isolated, {"source": "compact"}, env=env)
     context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert context.index("MemPalace palace") < context.index("Active state restored")
+    assert context.index("tasky ledger") < context.index("Active state restored")
     assert "debug-flow" in context
 
 
-def test_a_palace_that_cannot_be_read_does_not_take_the_state_block_down(
+def test_a_ledger_that_cannot_be_read_does_not_take_the_state_block_down(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from vise.core import neighbour_state
 
-    def boom() -> None:
-        raise RuntimeError("palace on fire")
+    def boom(project) -> None:
+        raise RuntimeError("ledger on fire")
 
-    monkeypatch.setattr(neighbour_state, "palace_state", boom)
+    monkeypatch.setattr(neighbour_state, "ledger_state", boom)
     _write_graph_state(isolated)
     out, code = _run(session_restore, isolated, {"source": "compact"})
     assert code == 0
     context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "debug-flow" in context
-    assert "MemPalace" not in context
+    assert "tasky" not in context

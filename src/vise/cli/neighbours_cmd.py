@@ -17,7 +17,7 @@ import argparse
 from pathlib import Path
 
 from vise.cli._browser_probe import browser_status_quiet
-from vise.core.neighbours import MEMPALACE_ABSENT_HINT, MINIMUM_VERSIONS
+from vise.core.neighbours import MINIMUM_VERSIONS, TASKY_ABSENT_HINT
 
 
 def _render_gates_line(project: Path) -> str:
@@ -45,8 +45,7 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
         cube_state,
         graph_state,
         index_state,
-        mempalace_files,
-        palace_state,
+        ledger_state,
         trace_state,
     )
 
@@ -61,14 +60,8 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
     print(f"  Graphify          {graph.detail}")
     cube = cube_state(project)
     print(f"  delta-cube        {cube.detail}")
-    palace = palace_state()
-    print(f"  MemPalace         {palace.detail}")
-    palace_files = mempalace_files(project)
-    print(
-        "                    "
-        + (f"{', '.join(palace_files)} in the repo root" if palace_files
-           else "no project files in the repo root")
-    )
+    ledger = ledger_state(project)
+    print(f"  tasky             {ledger.detail}")
     print(f"  vise render gates {_render_gates_line(project)}")
 
     print("\nminimum versions vise's guidance assumes:")
@@ -96,30 +89,23 @@ def _cmd_neighbours(args: argparse.Namespace) -> int:
             "\ndelta-cube holds this repo but has never measured it: tensions "
             "appear only after `cube_reindex`, so its zero is not a clean bill."
         )
-    if palace.present:
+    if ledger.present:
         print(
-            "\nA palace exists, so earlier sessions are searchable. vise's "
-            "SessionStart hook says so each session; the orchestration skill "
-            "says when to search it and what to paste into a brief."
+            "\nEarlier sessions of this repo are searchable. vise's SessionStart "
+            "hook says so each session; the orchestration skill says when to "
+            "search them and what to paste into a brief."
         )
-    elif palace.known:
+    elif ledger.known and not ledger.installed:
         print("")
-        for hint in MEMPALACE_ABSENT_HINT:
+        for hint in TASKY_ABSENT_HINT:
             print(hint)
-    if palace_files:
-        print(
-            "\nMemPalace has been initialised here. Its hooks write only to its "
-            "own data dir, but these files sit in the repo root: put them in "
-            "`diff_scope`'s `allow` list or that gate goes red on files nobody "
-            "edited in the phase."
-        )
     return 0
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "neighbours",
-        help="what livespec, flowtrace, Graphify, delta-cube and MemPalace left here",
+        help="what livespec, flowtrace, Graphify, delta-cube and tasky left here",
     )
     p.add_argument("--project-dir", default=None, help="defaults to the cwd")
     p.set_defaults(func=_cmd_neighbours)

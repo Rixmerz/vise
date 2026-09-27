@@ -152,26 +152,26 @@ def test_doctor_reports_every_section_and_never_fails(capsys):
     assert ("declared:" in out) or ("no installed plugin declares" in out)
 
 
-def test_doctor_offers_mempalace_when_no_palace_exists(capsys, tmp_path, monkeypatch):
+def test_doctor_offers_tasky_when_no_ledger_exists(capsys, tmp_path, monkeypatch):
     """`install.sh` prints this section, so it is where someone first learns
-    the palace exists. Only when it is absent, and only as a package name."""
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "no-palace"))
+    tasky exists. Only when it is absent, and only as a plugin name."""
+    monkeypatch.setenv("TASKY_HOME", str(tmp_path / "no-tasky"))
     assert main(["doctor"]) == 0
     out = capsys.readouterr().out
-    assert "mempalace" in out and "needs >= 3.3.0" in out
-    assert "no palace on this machine" in out
-    assert "uv tool install mempalace" in out
+    assert "tasky" in out and "needs >= 0.11.0" in out
+    assert "no tasky ledger on this machine" in out
+    assert "claude plugin install tasky@rixmerz" in out
 
 
-def test_doctor_reports_a_palace_as_machine_wide_not_per_repo(capsys, tmp_path, monkeypatch):
-    """One palace per machine holding every project its owner mined. Labelling
-    it "this repo" would be a lie about what was read."""
-    mp = tmp_path / "mp"
-    (mp / "palace").mkdir(parents=True)
-    (mp / "config.json").write_text("{}")
-    (mp / "palace" / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(mp))
+def test_doctor_reports_the_ledger_for_this_repo(capsys, tmp_path, monkeypatch):
+    """One ledger per machine, but the line counts only this repo's sessions,
+    so it is labelled like the other per-repo footprints."""
+    from .test_neighbour_state import tasky_db
+
+    monkeypatch.setenv("TASKY_HOME", str(tmp_path / "th"))
+    monkeypatch.chdir(tmp_path)
+    tasky_db(tmp_path / "th", sessions=[(str(tmp_path.resolve()), "2026-09-01")])
     assert main(["doctor"]) == 0
     out = capsys.readouterr().out
-    assert "this machine: MemPalace palace at" in out
-    assert "uv tool install mempalace" not in out
+    assert "this repo: tasky ledger at" in out
+    assert "claude plugin install tasky@rixmerz" not in out

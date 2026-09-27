@@ -517,115 +517,148 @@ def test_the_database_location_honours_the_env_override(tmp_path: Path, monkeypa
     assert delta_cube_db() == Path.home() / ".local" / "share" / "jig" / "dcc.db"
 
 
-# --- MemPalace ---------------------------------------------------------------
-
-def test_mempalace_files_are_reported_by_presence_only(tmp_path: Path):
-    from vise.core.neighbour_state import mempalace_files
-
-    assert mempalace_files(tmp_path) == ()
-    (tmp_path / "mempalace.yaml").write_text("palace: ~/.config/mempalace\n")
-    assert mempalace_files(tmp_path) == ("mempalace.yaml",)
-    (tmp_path / "entities.json").write_text("{}")
-    assert mempalace_files(tmp_path) == ("mempalace.yaml", "entities.json")
-
-
-def test_summary_names_the_cube_and_mempalace_even_when_absent(tmp_path: Path, cube_dir: Path):
-    from vise.core.neighbour_state import summary
-
-    out = summary(_repo(tmp_path))
-    assert "delta-cube:" in out and "MemPalace:" in out
-
-
-# --- MemPalace palace ----------------------------------------------------------
+# --- tasky ---------------------------------------------------------------------
 #
-# Machine-wide, resolved the way MemPalace's own config.py resolves it. The
-# conftest points MEMPALACE_CONFIG_DIR at a tmp dir for every test, so the
-# developer's real palace never shows up here.
+# One ledger per machine, resolved the way tasky's own config.py resolves it,
+# and read per repo by the sessions' absolute cwd. The conftest points
+# TASKY_HOME at a tmp dir for every test, so the developer's real ledger never
+# shows up here.
 
-def _palace(config_dir: Path, *, store: bool = True, config: dict | None = None,
-            palace_dir: Path | None = None) -> None:
-    config_dir.mkdir(parents=True, exist_ok=True)
-    if config is not None:
-        (config_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
-    palace = palace_dir or (config_dir / "palace")
-    palace.mkdir(parents=True, exist_ok=True)
-    if store:
-        (palace / "chroma.sqlite3").write_bytes(b"SQLite format 3\x00")
+def tasky_db(home: Path, *, sessions: list[tuple[str, str]] = (),
+             problems: list[tuple[str, str]] = (), tables: bool = True) -> Path:
+    """A ledger with only the columns vise reads: (cwd, started_at) per
+    session, (cwd, state) per problem."""
+    home.mkdir(parents=True, exist_ok=True)
+    db = home / "tasky.db"
+    conn = sqlite3.connect(db)
+    if tables:
+        conn.execute("CREATE TABLE sessions (id TEXT, cwd TEXT, started_at TEXT)")
+        conn.execute("CREATE TABLE problems (id INTEGER, cwd TEXT, state TEXT)")
+        for i, (cwd, started) in enumerate(sessions):
+            conn.execute("INSERT INTO sessions VALUES (?, ?, ?)", (f"s{i}", cwd, started))
+        for i, (cwd, state) in enumerate(problems):
+            conn.execute("INSERT INTO problems VALUES (?, ?, ?)", (i, cwd, state))
+    else:
+        conn.execute("CREATE TABLE unrelated (x)")
+    conn.commit()
+    conn.close()
+    return db
 
 
-def test_no_config_dir_is_a_known_absence(tmp_path: Path, monkeypatch):
-    from vise.core.neighbour_state import palace_state
+@pytest.fixture
+def tasky_home(tmp_path: Path, monkeypatch) -> Path:
+    home = tmp_path / "tasky-home"
+    monkeypatch.setenv("TASKY_HOME", str(home))
+    return home
 
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "nothing"))
-    state = palace_state()
-    assert state.known and not state.configured and not state.present
+
+def test_no_ledger_is_a_known_absence(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import ledger_state
+
+    state = ledger_state(_repo(tmp_path))
+    assert state.known and not state.installed and not state.present
     assert "not set up" in state.detail
 
 
-def test_a_palace_with_a_store_is_present(tmp_path: Path, monkeypatch):
-    from vise.core.neighbour_state import palace_state
+def test_a_ledger_of_other_repos_is_installed_but_holds_nothing_here(
+    tmp_path: Path, tasky_home: Path,
+):
+    from vise.core.neighbour_state import ledger_state
 
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
-    _palace(tmp_path / "mp", config={"palace_path": str(tmp_path / "mp" / "palace")})
-    state = palace_state()
-    assert state.configured and state.present
-    assert "searchable" in state.detail
-
-
-def test_an_install_that_mined_nothing_is_configured_but_not_present(tmp_path: Path, monkeypatch):
-    from vise.core.neighbour_state import palace_state
-
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
-    _palace(tmp_path / "mp", store=False, config={})
-    state = palace_state()
-    assert state.configured and not state.present
-    assert "mined nothing" in state.detail
+    repo = _repo(tmp_path)
+    tasky_db(tasky_home, sessions=[(str(tmp_path / "elsewhere"), "2026-09-01T10:00:00Z")])
+    state = ledger_state(repo)
+    assert state.known and state.installed and not state.present
+    assert "no session of this repo" in state.detail
 
 
-def test_config_json_can_move_the_palace(tmp_path: Path, monkeypatch):
-    """`palace_path` in config.json wins over the default subdirectory."""
-    from vise.core.neighbour_state import palace_state
+def test_sessions_under_the_repo_count_and_date_the_ledger(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import ledger_state
 
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
-    elsewhere = tmp_path / "vault"
-    _palace(tmp_path / "mp", config={"palace_path": str(elsewhere)}, palace_dir=elsewhere)
-    assert palace_state().present
-
-
-def test_a_non_default_backend_is_reported_as_probably_searchable(tmp_path: Path, monkeypatch):
-    """Six backends ship; only the default writes chroma.sqlite3. A palace dir
-    with *something* in it is an install vise cannot name the store of, and
-    saying "absent" there would hide a real palace."""
-    from vise.core.neighbour_state import palace_state
-
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
-    _palace(tmp_path / "mp", store=False, config={})
-    (tmp_path / "mp" / "palace" / "exact.sqlite3").write_bytes(b"x")
-    state = palace_state()
-    assert state.present and "probably" in state.detail
+    repo = _repo(tmp_path).resolve()
+    tasky_db(
+        tasky_home,
+        sessions=[
+            (str(repo), "2026-09-03T10:00:00Z"),
+            (str(repo / "src" / "api"), "2026-08-13T09:00:00Z"),
+            (str(repo) + "-fork", "2026-01-01T00:00:00Z"),  # a shared prefix, not this repo
+        ],
+        problems=[(str(repo), "open"), (str(repo / "src"), "open"),
+                  (str(repo), "solved"), (str(repo) + "-fork", "open")],
+    )
+    state = ledger_state(repo)
+    assert (state.sessions, state.open_problems, state.since) == (2, 2, "2026-08-13")
+    assert state.present
+    assert "2 session(s) of this repo since 2026-08-13; 2 open problem(s)" in state.detail
 
 
-def test_the_config_dir_resolves_like_mempalace_does(tmp_path: Path, monkeypatch):
-    from vise.core.neighbour_state import _mempalace_config_dir
+def test_underscores_in_the_path_are_not_wildcards(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import ledger_state
 
-    monkeypatch.delenv("MEMPALACE_CONFIG_DIR", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    assert _mempalace_config_dir() == tmp_path / "xdg" / "mempalace"
-    # A legacy ~/.mempalace wins only when it really holds an install.
-    (tmp_path / ".mempalace").mkdir()
-    assert _mempalace_config_dir() == tmp_path / "xdg" / "mempalace"
-    (tmp_path / ".mempalace" / "config.json").write_text("{}")
-    assert _mempalace_config_dir() == tmp_path / ".mempalace"
-    monkeypatch.delenv("XDG_CONFIG_HOME")
-    (tmp_path / ".mempalace" / "config.json").unlink()
-    assert _mempalace_config_dir() == tmp_path / ".config" / "mempalace"
+    repo = (tmp_path / "my_repo")
+    repo.mkdir()
+    tasky_db(tasky_home, sessions=[(str(tmp_path / "myXrepo" / "a"), "2026-09-01")])
+    assert not ledger_state(repo).present
 
 
-def test_summary_names_the_palace(tmp_path: Path, monkeypatch):
+def test_an_older_ledger_without_problems_still_counts_sessions(
+    tmp_path: Path, tasky_home: Path,
+):
+    from vise.core.neighbour_state import ledger_state
+
+    repo = _repo(tmp_path).resolve()
+    db = tasky_db(tasky_home, sessions=[(str(repo), "2026-09-01")])
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE problems")
+    conn.commit()
+    conn.close()
+    state = ledger_state(repo)
+    assert state.present and state.open_problems == 0
+
+
+def test_a_ledger_without_sessions_is_installed_and_empty(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import ledger_state
+
+    tasky_db(tasky_home, tables=False)
+    state = ledger_state(_repo(tmp_path))
+    assert state.known and state.installed and not state.present
+    assert "no sessions table" in state.detail
+
+
+def test_an_unreadable_ledger_is_unknown_not_absent(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import ledger_state
+
+    tasky_home.mkdir(parents=True)
+    (tasky_home / "tasky.db").write_bytes(b"not a database at all")
+    state = ledger_state(_repo(tmp_path))
+    assert not state.known and not state.present
+    assert "could not read" in state.detail
+
+
+def test_the_ledger_resolves_like_tasky_does(tmp_path: Path, monkeypatch):
+    from vise.core.neighbour_state import tasky_db as where
+
+    monkeypatch.setenv("TASKY_HOME", str(tmp_path / "custom"))
+    assert where() == tmp_path / "custom" / "tasky.db"
+    monkeypatch.delenv("TASKY_HOME")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert where() == tmp_path / "xdg" / "tasky" / "tasky.db"
+    monkeypatch.delenv("XDG_DATA_HOME")
+    assert where() == Path.home() / ".local" / "share" / "tasky" / "tasky.db"
+
+
+def test_summary_names_the_cube_and_tasky_even_when_absent(
+    tmp_path: Path, cube_dir: Path, tasky_home: Path,
+):
     from vise.core.neighbour_state import summary
 
-    monkeypatch.setenv("MEMPALACE_CONFIG_DIR", str(tmp_path / "mp"))
-    _palace(tmp_path / "mp", config={})
     out = summary(_repo(tmp_path))
-    assert "MemPalace:  MemPalace palace at" in out
+    assert "delta-cube:" in out and "tasky:      no " in out
+
+
+def test_summary_names_the_ledger(tmp_path: Path, tasky_home: Path):
+    from vise.core.neighbour_state import summary
+
+    repo = _repo(tmp_path).resolve()
+    tasky_db(tasky_home, sessions=[(str(repo), "2026-09-01")])
+    assert "tasky:      tasky ledger at" in summary(repo)
