@@ -82,6 +82,17 @@ because the env var was consulted first.
   being read directly. `--settings` opts back in; `--no-settings` is accepted
   and is now the default.
 
+### Behaviour change — `dogfood` is no longer a bundled workflow
+
+`dogfood-graph.yaml` is vise developing vise — its own triage step tags issues
+by vise's areas (CLI, hooks, workflows, adapters) — and the orchestration test
+already kept it off the routing table as "not user-facing". It was bundled
+anyway, so `graph_list_available` offered it in every repo that installs vise.
+It now lives in this repository's `.claude/workflows/`, the project scope
+`graph_activate` reads first, so it still runs here and ships to nobody.
+11 bundled workflows remain. A repo that wants the loop can copy the file into
+its own `.claude/workflows/`.
+
 ## [0.1.0a30] - 2026-09-24
 
 ### Changed — tasky replaces MemPalace as the other half of memory

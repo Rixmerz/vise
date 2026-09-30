@@ -100,11 +100,6 @@ UNVERIFIED_BY_DESIGN: dict[tuple[str, str], str] = {
         "means"
     ),
     ("debug", "report"): _PROSE,
-    # --- dogfood -------------------------------------------------------------
-    ("dogfood", "run-on-self"): _COGNITIVE,
-    ("dogfood", "capture-issues"): _COGNITIVE,
-    ("dogfood", "triage"): _COGNITIVE,
-    ("dogfood", "file"): _EXTERNAL,
     # --- feature-dev ---------------------------------------------------------
     ("feature-dev", "orient"): _COGNITIVE,
     ("feature-dev", "design"): _COGNITIVE,

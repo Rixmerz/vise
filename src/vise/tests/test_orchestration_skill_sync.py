@@ -99,19 +99,19 @@ def test_read_only_phases_named_by_the_skill_really_block_edits(graph_name, node
 # The reverse direction — a workflow nobody routes to is a workflow nobody runs
 # ---------------------------------------------------------------------------
 
-# `dogfood` is vise developing vise; it is not a workflow a user's request maps
-# onto, so it is deliberately absent from the routing table. Every other bundled
-# graph must be reachable, or it ships as a file `graph_activate` accepts and
-# nothing ever names. `sprint-e2e` sat unrouted this way.
+# Every bundled graph must be reachable, or it ships as a file `graph_activate`
+# accepts and nothing ever names. `sprint-e2e` sat unrouted this way. `dogfood`
+# sat on the allowlist below as "not user-facing" while being installed into
+# every user's repo; it now lives in vise's own `.claude/workflows/`, where
+# `graph_activate` still finds it for this repo and nobody else receives it.
 #: Bundled but deliberately not routed by the orchestration skill.
 #:
-#: `dogfood` is vise's own dev loop, not user-facing. `decouple` is unproven:
-#: its own proposal set the bar at three real repositories before it ships in
-#: anyone's live path, the same bar `codelayer` set for `enforce`, and the
+#: `decouple` is unproven: its own proposal set the bar at three real
+#: repositories before it ships in anyone's live path, the same bar `codelayer` set for `enforce`, and the
 #: graph format has no node-level off switch — so shipping it as its own
 #: unrouted workflow is how it can be run at all without being run by default.
 #: The row moves into the Step 0 table when the bar is met.
-_INTENTIONALLY_UNROUTED = {"dogfood", "decouple"}
+_INTENTIONALLY_UNROUTED = {"decouple"}
 
 
 def test_every_bundled_workflow_is_routable():
