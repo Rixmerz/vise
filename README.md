@@ -103,8 +103,9 @@ Inside a Claude Code session with vise loaded:
 
 1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 12 bundled workflows.
 2. **Work the phases** — `graph_traverse` advances between nodes. The enforcer blocks tools the current phase forbids; validator gates (tests, lint, capabilities) must pass before a gated transition.
-3. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
-4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
+3. **Let it run** — `vise bootstrap --loop` writes `.claude/loop.md`, and from then on a bare `/loop` advances the active workflow one phase per iteration: the session keeps the loop, subagents do each phase's work, and the node validators decide every transition. Without the file, `/loop` runs Claude Code's built-in maintenance prompt, which knows nothing about the workflow.
+4. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
+5. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
 
 > Note: vise's MCP tools take a `project_dir` argument — pass the absolute project root on the first call of a session; it is remembered and later calls can omit it.
 
@@ -114,7 +115,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 
 | Event | Matcher | Hook | Does |
 |---|---|---|---|
-| UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
+| UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts, and `/loop` for work that outlives the turn ("keep going until CI is green"), including while a workflow is active. Silent when `CLAUDE_CODE_DISABLE_CRON` is set |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
 | PreToolUse | `Read\|Grep\|Glob\|Bash` | `codelayer_gate.py` | Redirects source reads to the symbol tools (`find_symbol`, `read_unit`) — **opt-in**, `warn` records what it would deny, `enforce` denies, `off` (default) is inert, and it stands down entirely where livespec has no index |
@@ -370,7 +371,10 @@ Environment variables (all optional):
 > `--settings` additionally copies the two commands into
 > `.claude/settings.json` as `VISE_TEST_CMD` / `VISE_LINT_CMD` — off by
 > default, because a second copy of a command, in a file nobody re-runs
-> bootstrap over, is a copy that goes stale and still wins. Or `/bootstrap`
+> bootstrap over, is a copy that goes stale and still wins. `--loop` also
+> writes `.claude/loop.md`, so a bare `/loop` advances the active workflow; it
+> is off by default because it changes what `/loop` does for everyone who opens
+> the repo, and an existing file is never replaced. Or `/bootstrap`
 > from a session, which does the same and walks the rest of the setup.
 
 | `VISE_CODELAYER` | Read-by-symbol gate: `off` (default, inert), `warn` (records what it would deny, blocks nothing), `enforce` (denies source reads by path). The kill switch is the point — a gate that can lock you out of fixing the gate gets uninstalled the first time it misfires |

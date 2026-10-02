@@ -9,6 +9,14 @@ Quiet by default: emits nothing for trivial prompts, questions, or when
 a graph is already active. The hint is advisory — the agent can still
 proceed without a workflow.
 
+A second, narrower hint: when the request asks for work that outlives the turn
+("keep going until CI is green", "vigila el deploy"), it points at `/loop` and
+at how a loop fits the active workflow. This one also fires while a workflow is
+active, since that is when a loop has a phase to advance. It is skipped when
+Claude Code's scheduler is off (`CLAUDE_CODE_DISABLE_CRON`), because `/loop`
+does not exist then. Only the model can start a loop; the hook says when one
+fits.
+
 Protocol:
   stdin:  {"prompt": "...", "hook_event_name": "UserPromptSubmit", ...}
   stdout: optional context block (shown to Claude)
@@ -72,6 +80,31 @@ MULTI_STEP_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+#: The request is for work that outlives this turn: watch something, keep going
+#: until a condition holds, check back on a schedule. Narrow on purpose — a
+#: bare "watch" or "monitor" is as often a noun in a codebase (watch mode, a
+#: monitor component) as a request, so each verb needs an object after it.
+LOOP_INTENT = re.compile(
+    r"\b("
+    r"keep\s+(going|working|at\s+it|an\s+eye\s+on)|"
+    r"until\s+(it'?s\s+|everything\s+is\s+|ci\s+is\s+)?(done|green|finished|passing)|"
+    r"watch\s+(the|for|ci|it|this)|monitor\s+(the|it|this|ci|until)|"
+    r"babysit|check\s+back|every\s+\d+\s*(s|sec|secs|m|min|mins|minutes?|h|hours?)|"
+    r"unattended|overnight|while\s+i'?m\s+(away|gone|out)|"
+    r"sigue\s+(trabajando|hasta)|segu[ií]\s+(trabajando|hasta)|"
+    r"hasta\s+que\s+(termine|terminen|pase|pasen|quede|este|est[eé])|"
+    r"vigila|monitorea|revisa\s+cada|"
+    r"cada\s+\d+\s*(s|seg|m|min|minutos?|h|horas?)|"
+    r"mientras\s+no\s+estoy|sin\s+supervisi[oó]n|toda\s+la\s+noche"
+    r")\b",
+    re.IGNORECASE,
+)
+
+#: First line of the `.claude/loop.md` that `vise bootstrap --loop` writes. A
+#: repo's own loop prompt is somebody's instructions for an unattended session,
+#: and vise does not describe it as its own.
+_VISE_LOOP_MARKER = "Written by `vise bootstrap --loop`"
+
 QUESTION_PATTERNS = re.compile(
     r"^\s*(why|how|what|when|where|which|que|por\s*que|como|cuando|donde|"
     r"can\s+you\s+explain|explain|explica|tell\s+me)\b",
@@ -126,6 +159,75 @@ def _has_active_workflow() -> bool:
         or data.get("graph_name")
         or data.get("current_node")
         or data.get("current_nodes")
+    )
+
+
+def _active_workflow_name() -> str | None:
+    """The active workflow's id, when it can be read and is safe to print."""
+    p = _state_path()
+    if not p:
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        name = str(data.get("active_graph") or data.get("graph_name") or "")
+    except Exception:
+        return None
+    return name if _SAFE_STEM.fullmatch(name) else None
+
+
+def _loop_prompt_kind(project_dir: str) -> str:
+    """Whose `.claude/loop.md` a bare `/loop` would run here: vise, repo, none."""
+    if not project_dir:
+        return "none"
+    path = Path(project_dir) / ".claude" / "loop.md"
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            head = fh.read(512)
+    except OSError:
+        return "none"
+    return "vise" if _VISE_LOOP_MARKER in head else "repo"
+
+
+def _loop_hint(prompt: str, project_dir: str, workflow: str | None) -> str:
+    """Context pointing at `/loop`, or an empty string when it does not apply.
+
+    The hook cannot start a loop: only the model can, by invoking the `loop`
+    skill. What it can do is notice that the request is for work that outlives
+    this turn, and say how a loop fits the workflow that is holding the session.
+    """
+    if os.environ.get("CLAUDE_CODE_DISABLE_CRON"):
+        # The scheduler is off, so `/loop` and the cron tools do not exist.
+        return ""
+    if not LOOP_INTENT.search(prompt):
+        return ""
+
+    kind = _loop_prompt_kind(project_dir)
+    if workflow and kind == "vise":
+        how = (
+            "invoke the `loop` skill with no arguments: `.claude/loop.md` makes each "
+            f"iteration advance `{workflow}` by one phase, and the node validators "
+            "decide every transition."
+        )
+    elif workflow:
+        how = "invoke the `loop` skill with the request as its prompt."
+        how += (
+            " A bare `/loop` here runs this repo's own `.claude/loop.md`, which vise "
+            "did not write."
+            if kind == "repo" else
+            " `vise bootstrap --loop` writes a `.claude/loop.md` that makes a bare "
+            "`/loop` advance the workflow instead."
+        )
+    else:
+        how = "invoke the `loop` skill with the request as its prompt."
+    active = f"Workflow `{workflow}` is active. " if workflow else ""
+    return (
+        "## This request outlives the turn — consider /loop\n"
+        f"{active}The request asks for work that continues after this reply. To "
+        f"keep it running, {how}\n"
+        "Schedule it from this session and give each iteration's work to "
+        "subagents: a subagent's turn ends when it returns, so the loop needs "
+        "this session to take each result and decide what comes next. Skip this "
+        "if the user is steering turn by turn."
     )
 
 
@@ -202,10 +304,24 @@ def main() -> None:
     # them and risk auto-activating a workflow that fights the command.
     if prompt.startswith("/"):
         sys.exit(0)
-    if not prompt or not _looks_multi_step(prompt):
+    if not prompt:
         sys.exit(0)
 
-    if _has_active_workflow():
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    active = _has_active_workflow()
+    try:
+        loop = _loop_hint(prompt, project_dir, _active_workflow_name() if active else None)
+    except Exception:
+        # A suggestion is never worth the user's prompt.
+        loop = ""
+
+    if active or not _looks_multi_step(prompt):
+        # An active workflow already holds the session, and a request that is
+        # not multi-step needs no workflow — but either may still be asking for
+        # work that outlives the turn.
+        if loop:
+            _emit("loop_prompt", prompt, workflow_active=active)
+            print(loop)
         sys.exit(0)
 
     # Picking the workflow is the AGENT's job, not this hook's. An intent tier
@@ -215,7 +331,6 @@ def main() -> None:
     # keyword match is worse than the model reading the request. So the hook
     # stops nudging and starts equipping: hand over the real inventory and let
     # the model choose. No env flag, no threshold, no guess.
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     workflows = _available_workflows(project_dir) if project_dir else []
     inventory = (
         f"Available: {', '.join(workflows)}\n" if workflows
@@ -235,6 +350,10 @@ def main() -> None:
         "  3. `graph_builder_create` — none fits and this shape of task will recur.\n"
         "If none fits, say so in one line and proceed without one."
     )
+    if loop:
+        _emit("loop_prompt", prompt, workflow_active=False)
+        print()
+        print(loop)
     sys.exit(0)
 
 

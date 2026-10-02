@@ -550,6 +550,43 @@ The render gates also need at least one `design.targets` entry in
 `.vise/quality.yaml`; without it they fail closed rather than skipping, which
 is deliberate and reads as a bug the first time.
 
+## Work that outlives the turn — `/loop`
+
+When the user asks for work that should keep going after your reply (watch CI
+until it is green, check the deploy every ten minutes, finish the workflow while
+they are away), run it as a loop: invoke the `loop` skill. Do not hold the turn
+open by polling.
+
+**The loop lives in this session. The work goes to subagents.** A subagent's
+turn ends when it returns, so nothing would be left to read its result, verify
+the diff and decide the next step. Each iteration is one wave:
+
+1. `graph_status()`: which phase you are in, and which edges leave it.
+2. Dispatch that phase's work by the rules above: the fleet, a self-contained
+   English brief, file ownership.
+3. Verify the actual diff, then cross the edge with `graph_traverse(edge_id=...)`
+   and let the validators decide.
+4. Schedule the next iteration, or end the loop.
+
+Which form to use:
+
+| Request | Loop |
+|---|---|
+| Advance the active workflow | bare `/loop`, when `.claude/loop.md` is vise's (`vise bootstrap --loop` writes it) |
+| One check on a cadence | `/loop 30m /vise:quality`, or another command as the prompt |
+| Waiting on something whose pace you cannot predict | no interval, so the delay is chosen each iteration |
+
+The budgets below count per loop, not per iteration. When the same gate refuses
+for the same reason twice in a row, end the loop and say what is blocking: a
+self-paced loop ends with `ScheduleWakeup` and `stop: true`, and a fixed one
+with `CronDelete`. Never re-run a refusal on a timer. Skip the loop when the user
+is steering turn by turn, or when the work fits in this turn.
+
+`/goal` and `VISE_GOAL_GATE=1` both act at the end of the turn, through a Stop
+hook, so use one of them, not both. vise's gate decides with validators that
+run commands. `/goal` decides with a small model that reads the conversation
+and runs nothing. A goal vise has to verify belongs to vise's gate.
+
 ## Hard rules
 
 - **Never two agents writing the same file in one wave.** Partition scope

@@ -47,6 +47,9 @@ SPEAKERS = (
     # Both are as silent about a rename as any skill.
     REPO / "src" / "vise" / "assets" / "workflows" / "debug-graph.yaml",
     REPO / "src" / "vise" / "runtime" / "verify.py",
+    # What a bare `/loop` runs, unattended, once `vise bootstrap --loop` writes
+    # it. A call there that no server exposes fails every iteration.
+    REPO / "src" / "vise" / "assets" / "loop.md",
 )
 
 #: Backticked call-shaped identifiers: `read_unit(qname)`, `locate("x")`.

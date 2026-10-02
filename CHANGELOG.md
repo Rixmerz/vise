@@ -8,6 +8,43 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — `/loop` advances the active workflow
+
+Claude Code's `/loop` reruns a prompt on an interval, or at a delay the model
+picks each iteration, and a bare `/loop` runs `.claude/loop.md` when the repo
+has one. vise used none of it. A session that should keep working while its
+user is away had two options: someone typing "continue" every phase, or the
+built-in maintenance prompt, which tends the branch's pull request and knows
+nothing about the workflow holding the session.
+
+- **`vise bootstrap --loop`** writes `.claude/loop.md` from
+  `assets/loop.md`. Each iteration reads `graph_status()`, gives the phase's
+  work to subagents, crosses the edge with `graph_traverse(edge_id=...)` so
+  the validators decide, and ends the loop on a refusal that repeats or a
+  decision only the user can make. It is off by default, because the file
+  changes what `/loop` does for everyone who opens the repo. An existing
+  file, a dangling symlink included, is never replaced, `--force` included.
+  It also works on a repo whose profile already exists, which is the common
+  way to ask for it.
+- **The suggester points at `/loop`** when a prompt asks for work that
+  outlives the turn ("keep going until CI is green", "vigila el deploy"). It
+  says which form fits: a bare `/loop` when the file is vise's, the request as
+  the prompt otherwise. It names `vise bootstrap --loop` when the file is
+  missing and never calls a repo's own `loop.md` vise's. Every verb needs an
+  object, so "watch mode" and "the monitor component" stay quiet. The hint is
+  skipped under `CLAUDE_CODE_DISABLE_CRON`, where `/loop` does not exist, and
+  is recorded as `loop_prompt` in `orchestration.jsonl`.
+- **`orchestration` says where the loop lives**: in the session, with each
+  iteration's work handed to subagents, because a subagent's turn ends when it
+  returns. It also says `/goal` and `VISE_GOAL_GATE=1` are both Stop hooks and
+  should not run together. vise's gate decides with validators that run;
+  `/goal` decides with a small model that reads the conversation.
+
+**Behaviour change.** The suggester was silent whenever a workflow was active.
+It now speaks there too, but only for the `/loop` hint and only on a prompt
+that asks for continuing work, because that is when a loop has a phase to
+advance.
+
 ### Fixed — two checkouts named the same thing are two projects
 
 `_xdg.project_state_dir` solved basename collisions once: the plain name is
