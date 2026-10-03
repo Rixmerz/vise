@@ -16,7 +16,7 @@ stated below.
 ## DO
 - Use type hints on all function signatures
 - Use `dataclass(frozen=True, slots=True)` for value objects
-- Validate at system boundaries with the project's validation layer (Pydantic if greenfield); plain dataclasses internally
+- Validate at system boundaries with the project's validation layer; plain dataclasses internally
 - Use `pathlib.Path` instead of `os.path`
 - Use f-strings for string formatting
 - Use `match`/`case` for structural pattern matching (3.10+)
@@ -38,7 +38,7 @@ stated below.
 - Don't use mutable default arguments (`def f(items=[])`)
 - Don't use `type()` for type checks — use `isinstance()` or Protocol
 - Don't use `os.system()` or `subprocess` with `shell=True`
-- Don't ignore the GIL — use `asyncio.to_thread()` for blocking in async
+- Don't expect `asyncio.to_thread()` to parallelise CPU-bound work — the GIL serialises it; use a process pool
 - Don't mix sync and async without `to_thread()`
 - Don't use strings for structured data (dates, money, IDs) — use proper types
 - Don't create metaclasses when `__init_subclass__` or decorators suffice
@@ -53,6 +53,7 @@ an unrelated change.
 
 - New project: `uv` for dependency management, `ruff check` + `ruff format` and
   `mypy --strict` in CI (one tool instead of Flake8 + Black + isort)
+- New project validating external input: `Pydantic` at the boundary
 - New project needing machine-readable logs: `structlog` with JSON output
 
 ## Navigation — the language server, not grep

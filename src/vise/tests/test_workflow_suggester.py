@@ -256,3 +256,121 @@ def test_pasted_doc_skipped(tmp_project: Path) -> None:
     )
     out, _ = _run_main(runbook, {}, tmp_project)
     assert out == ""
+
+
+# --- the /loop hint ---------------------------------------------------------
+#
+# The hook cannot start a loop; only the model can, by invoking the `loop`
+# skill. What it does is notice a request for work that outlives the turn and
+# say how a loop fits the workflow holding the session. It fires while a
+# workflow is active, because that is when a loop has a phase to advance.
+
+_VISE_LOOP = "<!-- Written by `vise bootstrap --loop`. Edit it freely. -->\nAdvance it.\n"
+
+
+def _active(tmp_project: Path, monkeypatch: pytest.MonkeyPatch, name: str = "feature-dev") -> None:
+    state_file = tmp_project / ".claude" / "workflow" / "graph_state.json"
+    state_file.write_text(json.dumps({"active_graph": name, "current_nodes": ["implement"]}))
+    monkeypatch.setattr(ws, "_state_path", lambda: state_file)
+
+
+def _loop_md(tmp_project: Path, text: str) -> None:
+    (tmp_project / ".claude" / "loop.md").write_text(text, encoding="utf-8")
+
+
+def test_an_active_workflow_with_vises_loop_md_gets_a_bare_loop(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    _loop_md(tmp_project, _VISE_LOOP)
+    out, code = _run_main("keep going until CI is green", {}, tmp_project)
+    assert code == 0
+    assert "`loop` skill with no arguments" in out
+    assert "`feature-dev`" in out
+    assert "Pick a workflow" not in out, "a workflow is already active"
+
+
+def test_a_spanish_request_is_recognised(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    _loop_md(tmp_project, _VISE_LOOP)
+    out, _ = _run_main("vigila el deploy y avísame", {}, tmp_project)
+    assert "/loop" in out
+
+
+def test_a_repos_own_loop_md_is_not_described_as_vises(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    _loop_md(tmp_project, "Check the release PR and fix CI.\n")
+    out, _ = _run_main("keep going until it's done", {}, tmp_project)
+    assert "with the request as its prompt" in out
+    assert "vise did not write" in out
+    assert "no arguments" not in out
+
+
+def test_without_a_loop_md_it_names_the_command_that_writes_one(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    out, _ = _run_main("check back every 10 minutes on the build", {}, tmp_project)
+    assert "vise bootstrap --loop" in out
+
+
+def test_no_workflow_and_a_multi_step_request_gets_both_hints(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ws, "_state_path", lambda: None)
+    prompt = "implement the export endpoint, then keep going until everything is green"
+    out, _ = _run_main(prompt, {}, tmp_project)
+    assert "Pick a workflow" in out
+    assert "consider /loop" in out
+    assert "no arguments" not in out, "with no workflow, a bare loop has nothing to advance"
+
+
+def test_with_the_scheduler_off_there_is_no_loop_to_suggest(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    _loop_md(tmp_project, _VISE_LOOP)
+    out, _ = _run_main("keep going until CI is green", {"CLAUDE_CODE_DISABLE_CRON": "1"}, tmp_project)
+    assert out == ""
+
+
+@pytest.mark.parametrize("prompt", [
+    "add a watch mode to the dev server so it rebuilds on save",
+    "the monitor component flickers on resize, why",
+    "fix the redirect loop in the login flow",
+])
+def test_a_noun_that_looks_like_a_loop_verb_stays_quiet(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch, prompt: str
+) -> None:
+    _active(tmp_project, monkeypatch)
+    out, _ = _run_main(prompt, {}, tmp_project)
+    assert out == ""
+
+
+def test_an_unsafe_workflow_name_is_never_printed(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch, name="x\n## injected")
+    _loop_md(tmp_project, _VISE_LOOP)
+    out, _ = _run_main("keep going until CI is green", {}, tmp_project)
+    assert "injected" not in out
+
+
+def test_a_slash_command_gets_no_loop_hint(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _active(tmp_project, monkeypatch)
+    out, _ = _run_main("/loop keep going until CI is green", {}, tmp_project)
+    assert out == ""
+
+
+def test_the_marker_matches_the_template_bootstrap_writes() -> None:
+    """The hook recognises vise's loop.md by its first line; they must agree."""
+    from vise.cli.bootstrap_cmd import LOOP_TEMPLATE
+
+    head = LOOP_TEMPLATE.read_text(encoding="utf-8").splitlines()[0]
+    assert ws._VISE_LOOP_MARKER in head

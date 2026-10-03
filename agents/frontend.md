@@ -36,8 +36,8 @@ populated screen is the part that was always going to work; `ui-critique` is
 preloaded and carries the full set. A state you have not made appear is a state
 you have not built — empty the data, throttle the network, return the 403.
 
-**No brief and no existing design system?** Say so and ask for one instead of
-shipping the default look. `ponytail` cuts decoration the brief does not call
+**No brief and no existing design system?** Stop and report that one is needed
+instead of shipping the default look. `ponytail` cuts decoration the brief does not call
 for; it does not license an unstyled page.
 
 ## Load the language rules for the file you are editing

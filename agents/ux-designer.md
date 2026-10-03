@@ -80,8 +80,9 @@ than assumed.
 - DON'T decide palette, type scale, or the signature element. That is
   `ui-designer`'s brief and it comes after yours.
 - DON'T leave an open question in the brief. Decide and state the decision. If
-  one genuinely needs the user, ask before finishing — an unanswered question
-  becomes a guess downstream.
+  one genuinely needs the user, stop and lead your report with that question —
+  you cannot ask the user directly, and an unanswered question becomes a guess
+  downstream.
 - DON'T design a state you cannot name a trigger for. A state with no trigger
   is decoration for the brief.
 - DO write the real copy for every state. "Show an error" is not a decision;

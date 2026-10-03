@@ -56,8 +56,8 @@ own, and never let a style citation outrank a correctness or security finding.
 - DO check that deleted or rewritten code was actually broken, not just blamed.
 - DO confirm the tests actually reach the diff — grep the added tests for the
   changed symbols and entrypoints. A suite that never imports the new code is
-  green for free: a `recipients: []` guard-return once skipped the whole CRM
-  call while 160 tests stayed green.
+  green for free: an early-return guard can skip the whole downstream call
+  while every existing test stays green.
 - DO flag diffs that grow when they could shrink.
 - DO check any added dependency against `ponytail`'s ladder — which rung failed,
   and was that stated?

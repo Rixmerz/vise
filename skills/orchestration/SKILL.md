@@ -37,8 +37,7 @@ it is live.
 
 Do this before dispatching anything. Delegation says *who does the work*; a
 workflow says *what has to be true before the work is allowed to advance*.
-They are different axes, and this skill used to ignore the second one
-entirely — so orchestrated work skipped every phase gate on the repo.
+They are different axes, and delegating does not satisfy a phase gate.
 
 1. Call `graph_status`. If a workflow is already active, **do not activate
    another** — read the current node's `tools_blocked` and plan around it
@@ -62,8 +61,9 @@ entirely — so orchestrated work skipped every phase gate on the repo.
    these obviously fits.
 3. **Say which one you activated and why, in one line.** A workflow blocks
    tools; the user must never discover it by hitting a wall.
-4. Nothing fits, or the task is a one-off? Say so in one line and orchestrate
-   without one. A wrong activation costs more than no activation.
+4. Nothing fits, the task is a one-off, or it changes no contract? Say so in
+   one line and orchestrate without a workflow. A wrong activation costs more
+   than no activation.
 
 ## Step 0.5 — the spec phase is mandatory, and you cannot talk your way past it
 
@@ -92,7 +92,7 @@ Three things that are *not* escape hatches:
   prompt. Dispatching a builder from `spec` does not move the workflow.
 - **The agent runtime.** `vise runtime run` dispatches a `dag` node's tasks as
   their own sessions, which never traverse the graph and so never reach a node
-  gate. That was a real hole and it is now closed by a second gate: the
+  gate. A second gate covers them: the
   scheduler asks, once before its first dispatch, whether the project has a
   well-formed change to implement, and a run that fails it spends nothing.
   `vise runtime plan` shows the same verdict for free. See
@@ -100,26 +100,22 @@ Three things that are *not* escape hatches:
 - **`VISE_NODE_GATE_OVERRIDE=1`.** It bypasses the block and records the
   attempt. Using it because the proposal is unwritten is the habit the gate
   exists to prevent; using it because the *gate* is wrong is a bug report.
-- **Skipping the workflow.** If the work genuinely doesn't change the system's
-  contract, don't activate `feature-dev` for it — say so in one line and
-  orchestrate bare. A wrong activation costs more than no activation.
 
 Bug fixes are the honest exception: `debug` has no spec phase on purpose. A fix
 that restores specified behaviour changes no contract, and forcing a proposal
 for it would be ceremony. A fix that *changes* behaviour is a feature — use
 `feature-dev`.
 
-### The conflict rule — this is not optional
+### The conflict rule
 
-A node's `tools_blocked` applies to subagents too. This is verified, not
-assumed: with `feature-dev` on `orient`, a `general-purpose` subagent asked to
-Edit a file was denied by the same PreToolUse hook that denies the main agent.
-Delegation is **not** an escape hatch from a phase gate, and must never be
-used as one.
+A node's `tools_blocked` applies to subagents too: the same PreToolUse hook
+that denies the main agent denies a subagent's Edit. Delegation is not an
+escape hatch from a phase gate.
 
 Two consequences:
 
-- **`debug-graph` blocks `Task` on every node except `fix`.** Under that
+- **`debug-graph` blocks the subagent tool (`Agent`, once named `Task`; the
+  gate blocks both names) on every node except `fix`.** Under that
   workflow you cannot dispatch at all until you reach the fix phase. That is
   deliberate — evidence-gathering is the engineer's job — so do the reproduce
   and analyze phases yourself and delegate only once you are on `fix`.
@@ -549,6 +545,43 @@ vise reads neither, so the gates use whatever their own Playwright resolves.
 The render gates also need at least one `design.targets` entry in
 `.vise/quality.yaml`; without it they fail closed rather than skipping, which
 is deliberate and reads as a bug the first time.
+
+## Work that outlives the turn — `/loop`
+
+When the user asks for work that should keep going after your reply (watch CI
+until it is green, check the deploy every ten minutes, finish the workflow while
+they are away), run it as a loop: invoke the `loop` skill. Do not hold the turn
+open by polling.
+
+**The loop lives in this session. The work goes to subagents.** A subagent's
+turn ends when it returns, so nothing would be left to read its result, verify
+the diff and decide the next step. Each iteration is one wave:
+
+1. `graph_status()`: which phase you are in, and which edges leave it.
+2. Dispatch that phase's work by the rules above: the fleet, a self-contained
+   English brief, file ownership.
+3. Verify the actual diff, then cross the edge with `graph_traverse(edge_id=...)`
+   and let the validators decide.
+4. Schedule the next iteration, or end the loop.
+
+Which form to use:
+
+| Request | Loop |
+|---|---|
+| Advance the active workflow | bare `/loop`, when `.claude/loop.md` is vise's (`vise bootstrap --loop` writes it) |
+| One check on a cadence | `/loop 30m /vise:quality`, or another command as the prompt |
+| Waiting on something whose pace you cannot predict | no interval, so the delay is chosen each iteration |
+
+The budgets below count per loop, not per iteration. When the same gate refuses
+for the same reason twice in a row, end the loop and say what is blocking: a
+self-paced loop ends with `ScheduleWakeup` and `stop: true`, and a fixed one
+with `CronDelete`. Never re-run a refusal on a timer. Skip the loop when the user
+is steering turn by turn, or when the work fits in this turn.
+
+`/goal` and `VISE_GOAL_GATE=1` both act at the end of the turn, through a Stop
+hook, so use one of them, not both. vise's gate decides with validators that
+run commands. `/goal` decides with a small model that reads the conversation
+and runs nothing. A goal vise has to verify belongs to vise's gate.
 
 ## Hard rules
 

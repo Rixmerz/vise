@@ -480,3 +480,73 @@ def test_dry_run_writes_no_settings(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda c: f"/usr/bin/{c}")
     _run_bootstrap(tmp_path, dry_run=True, force=False, settings=True)
     assert not (tmp_path / ".claude").exists()
+
+
+# --- .claude/loop.md ---------------------------------------------------------
+#
+# Off by default: the file changes what a bare `/loop` does for everyone who
+# opens the repo. Once asked for, it is written once and never replaced.
+
+
+def test_by_default_it_mentions_loop_md_and_writes_nothing(tmp_path: Path, capsys):
+    _write(tmp_path, {"go.mod": "module x\n"})
+    _run_bootstrap(tmp_path)
+    assert not (tmp_path / ".claude" / "loop.md").exists()
+    assert "vise bootstrap --loop" in capsys.readouterr().out
+
+
+def test_loop_writes_the_bundled_prompt(tmp_path: Path, capsys):
+    _write(tmp_path, {"go.mod": "module x\n"})
+    _run_bootstrap(tmp_path, loop=True)
+    written = (tmp_path / ".claude" / "loop.md").read_text(encoding="utf-8")
+    assert written == bootstrap_cmd.LOOP_TEMPLATE.read_text(encoding="utf-8")
+    assert "wrote" in capsys.readouterr().out
+
+
+def test_an_existing_loop_md_is_never_replaced_even_with_force(tmp_path: Path, capsys):
+    _write(tmp_path, {"go.mod": "module x\n", ".claude/loop.md": "mine\n"})
+    _run_bootstrap(tmp_path, loop=True, force=True)
+    assert (tmp_path / ".claude" / "loop.md").read_text() == "mine\n"
+    assert "left as it is" in capsys.readouterr().out
+
+
+def test_a_dangling_symlink_counts_as_an_existing_loop_md(tmp_path: Path):
+    _write(tmp_path, {"go.mod": "module x\n"})
+    (tmp_path / ".claude").mkdir()
+    link = tmp_path / ".claude" / "loop.md"
+    link.symlink_to(tmp_path / "nowhere.md")
+    status, _ = bootstrap_cmd.write_loop_prompt(tmp_path)
+    assert status == "kept"
+    assert link.is_symlink() and not (tmp_path / "nowhere.md").exists()
+
+
+def test_loop_with_dry_run_writes_nothing(tmp_path: Path, capsys):
+    _write(tmp_path, {"go.mod": "module x\n"})
+    _run_bootstrap(tmp_path, loop=True, dry_run=True)
+    assert not (tmp_path / ".claude" / "loop.md").exists()
+    assert "would write" in capsys.readouterr().out
+
+
+def test_loop_still_works_when_the_profile_already_exists(tmp_path: Path):
+    """Re-running bootstrap on a set-up repo is the common way to ask for it."""
+    _write(tmp_path, {"go.mod": "module x\n", ".vise/quality.yaml": "checks: {}\n"})
+    _run_bootstrap(tmp_path, loop=True, force=False)
+    assert (tmp_path / ".claude" / "loop.md").exists()
+    assert (tmp_path / ".vise" / "quality.yaml").read_text() == "checks: {}\n"
+
+
+def test_an_unwritable_loop_md_is_reported_not_raised(tmp_path: Path, monkeypatch):
+    def boom(*_a, **_k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(bootstrap_cmd, "write_atomic", boom)
+    status, detail = bootstrap_cmd.write_loop_prompt(tmp_path)
+    assert status == "error" and "read-only" in detail
+
+
+def test_the_cli_accepts_loop(tmp_path: Path):
+    from vise.cli.main import main
+
+    _write(tmp_path, {"go.mod": "module x\n"})
+    assert main(["bootstrap", "--project-dir", str(tmp_path), "--loop"]) == 0
+    assert (tmp_path / ".claude" / "loop.md").exists()

@@ -2,9 +2,15 @@
   "mcpServers": {
     "vise": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/vise-run",
-      "args": ["-m", "vise"],
+      "args": [
+        "-m",
+        "vise"
+      ],
       "env": {
-        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/src"
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/src",
+        "CLAUDE_PLUGIN_OPTION_GOAL_GATE": "${user_config.goal_gate}",
+        "CLAUDE_PLUGIN_OPTION_SNAPSHOT_ON_EDIT": "${user_config.snapshot_on_edit}",
+        "CLAUDE_PLUGIN_OPTION_CODELAYER": "${user_config.codelayer}"
       }
     }
   }

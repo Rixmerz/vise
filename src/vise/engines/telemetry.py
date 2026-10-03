@@ -7,6 +7,7 @@ Two logs, two shapes:
 
 ``orchestration.jsonl`` via ``record_intervention``
   workflow_prompt     — the suggester told the agent to pick a workflow
+  loop_prompt         — the suggester pointed at `/loop` for work that outlives the turn
 
 ``runs.jsonl`` via ``record_run_event`` — the agent runtime
   run_started / dispatched / collected / verified / deferred / not_admitted /
@@ -46,12 +47,13 @@ from vise.core import paths as _paths
 
 log = logging.getLogger(__name__)
 
-# One real event. The previous four all belonged to the auto-activate classifier
-# and the override detector that measured its false-positive rate — none of which
-# ship anymore: a regex deciding the workflow was replaced by the model reading
-# the request. An allowlist naming kinds nothing emits is not an allowlist, it is
-# a wish list, so it shrinks with its producers.
-_VALID_KINDS = frozenset({"workflow_prompt"})
+# Two real events, both from the UserPromptSubmit suggester: the workflow hint
+# and the `/loop` hint. The previous four all belonged to the auto-activate
+# classifier and the override detector that measured its false-positive rate —
+# none of which ship anymore: a regex deciding the workflow was replaced by the
+# model reading the request. An allowlist naming kinds nothing emits is not an
+# allowlist, it is a wish list, so it shrinks with its producers.
+_VALID_KINDS = frozenset({"workflow_prompt", "loop_prompt"})
 
 # Gate-lifecycle kinds. Same rule as above: a kind with no producer does not
 # belong here. Each of these is emitted from exactly one call site.

@@ -20,6 +20,8 @@ Treat those files with the same care as the code.
 | `skills/` | 24 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, `ui-critique`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 14 hook registrations across 12 scripts, 6 events |
+| `mod/` | `vise-mod`, an opt-in second plugin: TypeScript Claude Code runs in-process, the one place vise *calls* a neighbour (`$.mcp.call`). Its own tests run under `claude plugin test mod` |
+| `bin/vise-run` | the launcher every hook and the MCP server go through, and the one place a plugin option becomes a `VISE_*` switch |
 | `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
 | `.vise/quality.yaml` | what vise's own quality gate runs |
@@ -115,12 +117,12 @@ reports `asserted`/`unverified`. `src/vise/core/consent.py` has the reasoning.
 Every hook in `src/vise/hooks/` must never break the user's session. A hook that
 raises takes Claude Code down with it, so broad `try/except/pass` around the
 outermost handler is the contract, not sloppiness. This is why `bandit` is
-gated at Medium and above. There are 137 Low findings: 34 `B110`/`B112` on
-exactly those handlers, 88 `B404`/`B603`/`B607` on the `subprocess` calls the
-CLI and the validators are made of, 14 `B101` on asserts, and one `B105` that
-reads `PASS = "pass"` in an enum as a hardcoded password. This file said "the 89
-Low findings are all `B110`/`B112`", which was true of neither the count nor the
-composition — restate a number here only after running the command.
+gated at Medium and above. There are 139 Low findings (`bandit -q -r src/vise
+-x src/vise/tests`, the command CI runs): 36 `B110`/`B112` on exactly those
+handlers, 88 `B404`/`B603`/`B607` on the `subprocess` calls the CLI and the
+validators are made of, 14 `B101` on asserts, and one `B105` that reads
+`PASS = "pass"` in an enum as a hardcoded password. Restate a count here only
+after running that command.
 
 Medium and above is zero and gates. Keep it there: `bandit` is the one check in
 CI that reads vise's own code for a security defect, and a High finding it
@@ -152,6 +154,7 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
 | `test_neighbour_contract.py` | every tool name an asset teaches belongs to vise or to a neighbour in `core/neighbours.py` — and every pinned name is still referenced somewhere |
 | `test_tool_annotations.py` | every MCP tool declares what it does to the world, the four hints are internally consistent, and the four destructive ones say so in the title a host shows |
+| `test_mod.py` | `mod/` validates and its own tests pass under the `claude` CLI (skips where no 2.1.287+ CLI is on `PATH`) |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.
