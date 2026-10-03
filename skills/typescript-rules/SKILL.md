@@ -23,7 +23,7 @@ stated below.
 - Use exhaustive checking with `assertNever` in switch defaults
 - Model expected (non-exceptional) failures as values rather than throws, and be consistent per module — a single `Result` island in a throwing codebase is worse than either convention alone
 - Use `using`/`await using` for resource cleanup (TS 5.2+)
-- Validate at system boundaries (user input, external APIs) with the project's schema library — Zod or Valibot if the project has not chosen one
+- Validate at system boundaries (user input, external APIs) with the project's schema library
 - Before changing an exported signature, run `findReferences` on it; for an interface or abstract member run `goToImplementation`. Structural typing means anything with a matching shape conforms, so check re-exported and type-only call sites in that list too. Every entry type-checks against the new signature or is updated in this change
 
 ## DON'T

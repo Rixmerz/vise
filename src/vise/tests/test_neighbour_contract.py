@@ -120,3 +120,37 @@ def test_the_union_is_the_whole_of_both():
     assert len(sets) >= 2
     missing = {n: v - NEIGHBOUR_TOOLS for n, v in sets.items() if v - NEIGHBOUR_TOOLS}
     assert not missing, f"contracted but outside NEIGHBOUR_TOOLS: {missing}"
+
+
+# --- the mod ------------------------------------------------------------------
+#
+# `mod/` is the one place vise calls a tool rather than naming it: `$.mcp.call`
+# in a mod reaches every connected server. A wrong name there does not mislead
+# an agent, it fails a call nobody sees, so the same contract holds.
+
+MOD_HOOKS = REPO / "mod" / "hooks"
+
+
+def _mod_source() -> str:
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted(MOD_HOOKS.glob("*.ts*"))
+        if not p.name.endswith((".test.ts", ".test.tsx"))
+    )
+
+
+def test_every_tool_the_mod_calls_belongs_to_its_server():
+    from vise.core.neighbours import TASKY_TOOLS
+
+    calls = re.findall(r"call\(\$,\s*'([a-z_]+)',\s*'([a-z]+)'", _mod_source())
+    assert calls, "the mod calls no tool at all any more: update this test"
+    owners = {"vise": VISE_TOOLS, "tasky": TASKY_TOOLS}
+    strays = [(tool, server) for tool, server in calls if tool not in owners.get(server, set())]
+    assert not strays, f"the mod calls tools its server does not expose: {strays}"
+
+
+def test_every_tool_the_mod_watches_is_one_vise_registers():
+    block = _mod_source().split("MOVING_TOOLS: readonly string[] = [", 1)[1].split("]", 1)[0]
+    watched = set(re.findall(r"'([a-z_]+)'", block))
+    assert "graph_traverse" in watched
+    assert watched <= VISE_TOOLS, watched - VISE_TOOLS

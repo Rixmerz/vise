@@ -19,6 +19,10 @@ Advance the active vise workflow by one step, then stop or schedule the next.
    A third attempt at the same refusal costs a turn and teaches nothing.
 5. Do not push, delete, or restore a snapshot unless the conversation already
    authorized that exact action.
+6. If Claude Code says the session limit was reached and you are wrapping up,
+   do not start the next phase. Finish the step in hand, then write down where
+   the workflow stands (phase, the last gate's verdict, the next step) so the
+   next session resumes from there instead of rediscovering it.
 
 End every iteration with one line: the phase you are in, what changed, and what
 comes next.

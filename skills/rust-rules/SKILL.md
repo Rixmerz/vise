@@ -14,7 +14,7 @@ stated below.
 
 ## DO
 - Use `?` for error propagation
-- Give libraries a concrete error enum and applications a boxed/erased error; `thiserror` and `anyhow` are the greenfield defaults for those two shapes
+- Give libraries a concrete error enum and applications a boxed/erased error
 - Use `expect("reason")` over `unwrap()` when panic is intentional
 - Add `// SAFETY:` comment to every `unsafe` block
 - Use iterators (`.iter().map().filter().collect()`) over manual index loops
@@ -43,6 +43,13 @@ stated below.
 - Don't use `Box<dyn FnMut>` callbacks for observer — use channels
 - Don't add `#[inline]` without profiling data
 - Don't ignore `cargo audit` results in CI
+
+## Tooling — greenfield defaults only
+
+These are recommendations for a project that has **not** already chosen. Never
+migrate a project's toolchain as a side effect of an unrelated change.
+
+- `thiserror` for a library's error enum, `anyhow` for an application's erased error
 
 ## Navigation — the language server, not grep
 

@@ -22,13 +22,15 @@ fi
 
 DEV=0
 DESIGN=0
+MOD=0
 for arg in "$@"; do
   case "$arg" in
     --dev) DEV=1 ;;
     --design) DESIGN=1 ;;
+    --mod) MOD=1 ;;
     -h|--help)
       cat <<'USAGE'
-usage: ./install.sh [--dev] [--design]
+usage: ./install.sh [--dev] [--design] [--mod]
 
   --dev     also install the [dev] extras (pytest, ruff, mypy, coverage)
   --design  also install the [design] extra and a Chromium for it. The three
@@ -36,6 +38,11 @@ usage: ./install.sh [--dev] [--design]
             so without this they refuse every run in a repo that wires them.
             Left opt-in because it downloads a browser (~150MB) and most repos
             never turn those gates on.
+  --mod     also install vise-mod, the in-process companion: the phase on the
+            status line and in a pane, the phase in the system prompt, and
+            tasky's failed fixes in a debug session. Left opt-in because a mod
+            runs inside Claude Code with no sandbox, and needs Claude Code
+            2.1.287 or later.
 USAGE
       exit 0
       ;;
@@ -122,28 +129,75 @@ else
   claude plugin marketplace add "$REPO_DIR"
 fi
 
-if claude plugin list 2>/dev/null | grep -q "vise@${MARKETPLACE}"; then
-  # Already installed. Reinstall rather than update, because `claude plugin
-  # update` compares the *version* in plugin.json and short-circuits when it
-  # matches — and a dev checkout pulls a hundred changes between version bumps.
-  #
-  # This is the second time this promise broke. The first fix added the
-  # `update` call to replace a bare "already installed" that did no work; the
-  # update then did no work either, for the same reason one layer down, and the
-  # installed copy under ~/.claude/plugins/cache silently stayed at whatever
-  # commit it was first installed from. Anything that reads the plugin — every
-  # skill, every agent, every hook — was reading that stale copy while
-  # `vise doctor`, which runs from the venv's editable install, reported the
-  # working tree. The two disagreeing is exactly how a fixed bug looks unfixed.
-  #
-  # Uninstall-then-install is safe here: vise declares no `userConfig`, so
-  # there are no stored option values for the uninstall to drop.
-  claude plugin uninstall "vise@${MARKETPLACE}" >/dev/null 2>&1 || true
-  rm -rf "${HOME}/.claude/plugins/cache/${MARKETPLACE}/vise"
-  claude plugin install "vise@${MARKETPLACE}" --yes
-  echo "ok: vise plugin reinstalled from this checkout — restart Claude Code to apply."
-else
-  claude plugin install "vise@${MARKETPLACE}" --yes
+# Reinstall rather than update, because `claude plugin update` compares the
+# *version* in plugin.json and short-circuits when it matches — and a dev
+# checkout pulls a hundred changes between version bumps.
+#
+# This is the second time this promise broke. The first fix added the `update`
+# call to replace a bare "already installed" that did no work; the update then
+# did no work either, for the same reason one layer down, and the installed copy
+# under ~/.claude/plugins/cache silently stayed at whatever commit it was first
+# installed from. Anything that reads the plugin — every skill, every agent,
+# every hook — was reading that stale copy while `vise doctor`, which runs from
+# the venv's editable install, reported the working tree. The two disagreeing is
+# exactly how a fixed bug looks unfixed.
+#
+# Both plugins declare `userConfig`, so an uninstall may take the stored option
+# values with it. They live under `pluginConfigs` in ~/.claude/settings.json:
+# keep a copy of the plugin's entry and put it back if the reinstall left none.
+# Values in the secure store (neither plugin has one) are not in that file.
+SETTINGS="${HOME}/.claude/settings.json"
+_options() {  # print the plugin's pluginConfigs entry as JSON, or nothing
+  [ -f "$SETTINGS" ] || return 0
+  python3 - "$SETTINGS" "$1" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    configs = json.load(open(sys.argv[1])).get("pluginConfigs") or {}
+except Exception:
+    configs = {}
+entry = configs.get(sys.argv[2])
+print(json.dumps(entry) if entry else "")
+PY
+}
+_restore_options() {  # $1 plugin id, $2 the JSON _options printed
+  [ -n "$2" ] || return 0
+  python3 - "$SETTINGS" "$1" "$2" <<'PY' || echo "warn: could not restore $1's options; set them again in /plugin" >&2
+import json, os, sys, tempfile
+path, plugin, saved = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+data = json.load(open(path)) if os.path.exists(path) else {}
+configs = data.setdefault("pluginConfigs", {})
+if plugin not in configs:
+    configs[plugin] = saved
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+PY
+}
+_install() {  # $1 plugin name; installs or reinstalls <name>@$MARKETPLACE
+  local id="$1@${MARKETPLACE}"
+  if claude plugin list 2>/dev/null | grep -q "$id"; then
+    local saved
+    saved="$(_options "$id")"
+    claude plugin uninstall "$id" >/dev/null 2>&1 || true
+    rm -rf "${HOME}/.claude/plugins/cache/${MARKETPLACE}/$1"
+    claude plugin install "$id" --yes || return 1
+    _restore_options "$id" "$saved"
+    echo "ok: $1 reinstalled from this checkout — restart Claude Code to apply."
+  else
+    claude plugin install "$id" --yes || return 1
+  fi
+}
+
+_install vise
+
+# 3b. vise-mod (--mod). A mod runs inside Claude Code with the same reach as
+#     Claude Code itself, so it is never installed unasked.
+if [ "$MOD" = 1 ]; then
+  if ! _install vise-mod; then
+    echo "warn: vise-mod did not install. Mods need Claude Code 2.1.287 or later." >&2
+  fi
 fi
 
 # 4. LSP binaries: vise declares NO language servers — the official

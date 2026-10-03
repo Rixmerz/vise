@@ -37,8 +37,7 @@ it is live.
 
 Do this before dispatching anything. Delegation says *who does the work*; a
 workflow says *what has to be true before the work is allowed to advance*.
-They are different axes, and this skill used to ignore the second one
-entirely — so orchestrated work skipped every phase gate on the repo.
+They are different axes, and delegating does not satisfy a phase gate.
 
 1. Call `graph_status`. If a workflow is already active, **do not activate
    another** — read the current node's `tools_blocked` and plan around it
@@ -62,8 +61,9 @@ entirely — so orchestrated work skipped every phase gate on the repo.
    these obviously fits.
 3. **Say which one you activated and why, in one line.** A workflow blocks
    tools; the user must never discover it by hitting a wall.
-4. Nothing fits, or the task is a one-off? Say so in one line and orchestrate
-   without one. A wrong activation costs more than no activation.
+4. Nothing fits, the task is a one-off, or it changes no contract? Say so in
+   one line and orchestrate without a workflow. A wrong activation costs more
+   than no activation.
 
 ## Step 0.5 — the spec phase is mandatory, and you cannot talk your way past it
 
@@ -92,7 +92,7 @@ Three things that are *not* escape hatches:
   prompt. Dispatching a builder from `spec` does not move the workflow.
 - **The agent runtime.** `vise runtime run` dispatches a `dag` node's tasks as
   their own sessions, which never traverse the graph and so never reach a node
-  gate. That was a real hole and it is now closed by a second gate: the
+  gate. A second gate covers them: the
   scheduler asks, once before its first dispatch, whether the project has a
   well-formed change to implement, and a run that fails it spends nothing.
   `vise runtime plan` shows the same verdict for free. See
@@ -100,26 +100,22 @@ Three things that are *not* escape hatches:
 - **`VISE_NODE_GATE_OVERRIDE=1`.** It bypasses the block and records the
   attempt. Using it because the proposal is unwritten is the habit the gate
   exists to prevent; using it because the *gate* is wrong is a bug report.
-- **Skipping the workflow.** If the work genuinely doesn't change the system's
-  contract, don't activate `feature-dev` for it — say so in one line and
-  orchestrate bare. A wrong activation costs more than no activation.
 
 Bug fixes are the honest exception: `debug` has no spec phase on purpose. A fix
 that restores specified behaviour changes no contract, and forcing a proposal
 for it would be ceremony. A fix that *changes* behaviour is a feature — use
 `feature-dev`.
 
-### The conflict rule — this is not optional
+### The conflict rule
 
-A node's `tools_blocked` applies to subagents too. This is verified, not
-assumed: with `feature-dev` on `orient`, a `general-purpose` subagent asked to
-Edit a file was denied by the same PreToolUse hook that denies the main agent.
-Delegation is **not** an escape hatch from a phase gate, and must never be
-used as one.
+A node's `tools_blocked` applies to subagents too: the same PreToolUse hook
+that denies the main agent denies a subagent's Edit. Delegation is not an
+escape hatch from a phase gate.
 
 Two consequences:
 
-- **`debug-graph` blocks `Task` on every node except `fix`.** Under that
+- **`debug-graph` blocks the subagent tool (`Agent`, once named `Task`; the
+  gate blocks both names) on every node except `fix`.** Under that
   workflow you cannot dispatch at all until you reach the fix phase. That is
   deliberate — evidence-gathering is the engineer's job — so do the reproduce
   and analyze phases yourself and delegate only once you are on `fix`.

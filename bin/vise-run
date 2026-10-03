@@ -5,6 +5,40 @@
 # script decides which interpreter runs vise.
 set -euo pipefail
 
+# The plugin's options (`/plugin` → vise → Configure, or a row in `/config`)
+# reach a hook process as CLAUDE_PLUGIN_OPTION_<KEY>, and the MCP server through
+# the `env` block of .mcp.json. vise's code reads the VISE_* switches, so this
+# is the one place an option becomes one. A VISE_* already in the environment
+# wins: it is the more specific choice, made for this machine or this shell.
+# Only exact values map. Anything else, including a placeholder an older
+# Claude Code left unsubstituted, leaves the switch at its default.
+_vise_truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+_vise_falsy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    false|0|no|off) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [ -z "${VISE_GOAL_GATE+set}" ] && _vise_truthy "${CLAUDE_PLUGIN_OPTION_GOAL_GATE:-}"; then
+  export VISE_GOAL_GATE=1
+fi
+if [ -z "${VISE_SNAPSHOT_ON_EDIT+set}" ] && _vise_truthy "${CLAUDE_PLUGIN_OPTION_SNAPSHOT_ON_EDIT:-}"; then
+  export VISE_SNAPSHOT_ON_EDIT=1
+fi
+if [ -z "${VISE_WORKFLOW_SUGGEST+set}" ] && _vise_falsy "${CLAUDE_PLUGIN_OPTION_WORKFLOW_SUGGEST:-}"; then
+  export VISE_WORKFLOW_SUGGEST=0
+fi
+if [ -z "${VISE_CODELAYER+set}" ]; then
+  case "${CLAUDE_PLUGIN_OPTION_CODELAYER:-}" in
+    off|warn|enforce) export VISE_CODELAYER="${CLAUDE_PLUGIN_OPTION_CODELAYER}" ;;
+  esac
+fi
+
 # Same data-dir rule as vise.hooks._xdg: honor XDG_DATA_HOME only when it is
 # set AND absolute, else ~/.local/share. Hardcoding the latter here is how the
 # launcher and the rest of vise would drift apart on an XDG install.

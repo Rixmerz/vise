@@ -1,6 +1,35 @@
 {
   "name": "vise",
   "description": "Phase-gated workflow enforcer, cross-project experience memory, and git snapshots for Claude Code",
+  "author": {
+    "name": "Rixmerz"
+  },
   "version": "0.1.0a30",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "goal_gate": {
+      "type": "boolean",
+      "title": "Goal gate",
+      "description": "Hold the turn open while an active vise goal is unfinished (the Stop hook). Same as VISE_GOAL_GATE=1, which wins when set.",
+      "default": false
+    },
+    "snapshot_on_edit": {
+      "type": "boolean",
+      "title": "Snapshot on every edit",
+      "description": "Take a git snapshot before edits and destructive shell commands, not only on phase transitions. Same as VISE_SNAPSHOT_ON_EDIT=1, which wins when set.",
+      "default": false
+    },
+    "codelayer": {
+      "type": "string",
+      "title": "Read-by-symbol gate",
+      "description": "off (inert), warn (records what it would deny, blocks nothing) or enforce (denies source reads by path). Any other value leaves it off. Same as VISE_CODELAYER, which wins when set.",
+      "default": "off"
+    },
+    "workflow_suggest": {
+      "type": "boolean",
+      "title": "Workflow and /loop suggestions",
+      "description": "Suggest a workflow for multi-step prompts, and /loop for work that outlives the turn. Same as VISE_WORKFLOW_SUGGEST=0 to turn it off, which wins when set.",
+      "default": true
+    }
+  }
 }

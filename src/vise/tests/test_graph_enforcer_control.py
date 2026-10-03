@@ -346,3 +346,39 @@ def test_block_reason_names_the_node_the_workflow_and_both_exits(
     assert "graph_traverse" in reason
     assert "graph_deactivate" in reason
     assert "vise graph reset" in reason
+
+
+def _seed_single_block(project_dir: str, blocked: str) -> None:
+    state_dir = _get_centralized_state_dir(project_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "graph_state.json").write_text(json.dumps({
+        "active_graph": "test-delegation",
+        "current_nodes": ["solo"],
+    }))
+    workflow_dir = Path(project_dir) / ".claude" / "workflow"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "graph.yaml").write_text(
+        "nodes:\n"
+        "  - id: solo\n"
+        "    tools_blocked:\n"
+        f"      - {blocked}\n"
+    )
+
+
+@pytest.mark.parametrize("blocked,called", [
+    ("Task", "Agent"),
+    ("Agent", "Task"),
+    ("Agent", "Agent"),
+])
+def test_a_block_on_delegation_holds_under_either_name(
+    isolated_xdg, fake_project, blocked, called,
+):
+    """Claude Code renamed Task to Agent. debug-graph blocks `Task` on five
+    nodes, and an exact match let every `Agent` call through all of them."""
+    _seed_single_block(fake_project, blocked)
+    assert _run_hook(called, fake_project, isolated_xdg)["decision"] == "block"
+
+
+def test_the_rename_does_not_widen_a_block_to_unrelated_tools(isolated_xdg, fake_project):
+    _seed_single_block(fake_project, "Task")
+    assert _run_hook("TaskCreate", fake_project, isolated_xdg)["decision"] == "approve"

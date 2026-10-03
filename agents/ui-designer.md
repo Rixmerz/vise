@@ -71,8 +71,9 @@ command you did not check can leave you reading an older screenshot.
   and you style the states it named rather than the happy path alone.
 - DON'T invent a palette when the repo has one.
 - DON'T hand over a brief with an open question in it. Decide, and state the
-  decision. If a decision genuinely needs the user, ask before finishing —
-  an unanswered question in a brief becomes a guess downstream.
+  decision. If a decision genuinely needs the user, stop and lead your report
+  with that question — you cannot ask the user directly, and an unanswered
+  question in a brief becomes a guess downstream.
 - DON'T exceed one signature element. Two signatures is zero.
 - DO name every colour by role, never by hue. `--accent`, not `--purple`.
 - DO state the dark-mode counterpart of every colour, or state that this UI is

@@ -90,6 +90,6 @@ tagged with the CWE to cite when you report one:
 - Never render user-controlled HTML through `innerHTML`, `dangerouslySetInnerHTML`, or `v-html` without sanitizing — the most common XSS sink in UI code (CWE-79)
 - Never build a URL scheme from user input; `javascript:` and `data:` in an `href` execute (CWE-79)
 - Escape user data into inline styles and attributes, not only into text nodes (CWE-79)
-- Keep tokens out of `localStorage` where an XSS can read them — prefer an httpOnly cookie (CWE-1004)
+- Keep tokens out of `localStorage` where an XSS can read them (CWE-922) — prefer an httpOnly cookie
 - Never put a secret, API key, or internal hostname in client-side code; anything shipped to the browser is public (CWE-798)
 - Set `rel="noopener noreferrer"` on any `target="_blank"` link to an external origin (CWE-1022)
