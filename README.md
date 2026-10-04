@@ -103,8 +103,9 @@ Inside a Claude Code session with vise loaded:
 
 1. **Activate a workflow** — ask for a feature; the `workflow_suggester` hook proposes one, or call `graph_activate(graph_name="feature-dev-graph")`. `graph_list_available` shows all 12 bundled workflows.
 2. **Work the phases** — `graph_traverse` advances between nodes. The enforcer blocks tools the current phase forbids; validator gates (tests, lint, capabilities) must pass before a gated transition.
-3. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
-4. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
+3. **Let it run** — `vise bootstrap --loop` writes `.claude/loop.md`, and from then on a bare `/loop` advances the active workflow one phase per iteration: the session keeps the loop, subagents do each phase's work, and the node validators decide every transition. Without the file, `/loop` runs Claude Code's built-in maintenance prompt, which knows nothing about the workflow.
+4. **Roll back** — `snapshot_list` then `snapshot_restore(snapshot_id=...)` to undo an edit cycle without `git reset`. Defaults to `dry_run=True` (previews the diff) — pass `dry_run=False` to actually apply it.
+5. **Recover a stuck loop** — the bundled `agent-autoheal` skill walks a hot/cold recovery protocol.
 
 > Note: vise's MCP tools take a `project_dir` argument — pass the absolute project root on the first call of a session; it is remembered and later calls can omit it.
 
@@ -114,7 +115,7 @@ vise wires into Claude Code through `hooks/hooks.json`:
 
 | Event | Matcher | Hook | Does |
 |---|---|---|---|
-| UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts |
+| UserPromptSubmit | `*` | `workflow_suggester.py` | Suggests activating a workflow for task-shaped prompts, and `/loop` for work that outlives the turn ("keep going until CI is green"), including while a workflow is active. Silent when `CLAUDE_CODE_DISABLE_CRON` is set |
 | PreToolUse | `*` | `graph_enforcer.py` | Blocks tools the active phase forbids (fail-open) |
 | PreToolUse | `Edit\|Write` | `experience_injector.py` | Injects past learnings for the touched file |
 | PreToolUse | `Read\|Grep\|Glob\|Bash` | `codelayer_gate.py` | Redirects source reads to the symbol tools (`find_symbol`, `read_unit`) — **opt-in**, `warn` records what it would deny, `enforce` denies, `off` (default) is inert, and it stands down entirely where livespec has no index |
@@ -348,6 +349,28 @@ Reads only, and an absent log is an empty report rather than an error.
 
 ## Configuration
 
+The four opt-in switches are also plugin options: `/plugin` → vise →
+Configure, or a row each in `/config`, so nobody has to edit `settings.json` to
+turn one on. Claude Code hands them to the hooks as
+`CLAUDE_PLUGIN_OPTION_<KEY>` and to the MCP server through `.mcp.json`, and
+`bin/vise-run` is the one place they become the variables below. An explicit
+variable always wins over the option, and a value that is not exactly on (or a
+placeholder an older Claude Code left unsubstituted) leaves the switch off.
+
+| Option | Variable | Default |
+|---|---|---|
+| `goal_gate` | `VISE_GOAL_GATE=1` | off |
+| `snapshot_on_edit` | `VISE_SNAPSHOT_ON_EDIT=1` | off |
+| `codelayer` | `VISE_CODELAYER=off\|warn\|enforce` | `off` |
+| `workflow_suggest` | `VISE_WORKFLOW_SUGGEST=0` turns it off | on |
+
+One interaction to know about with the goal gate: Claude Code's wrap-up
+allowance finishes the step in hand when a session reaches its usage limit, and
+a Stop hook that holds the turn open on an unfinished goal works against it. The
+gate's attempt cap and plateau detection still bound it, but with the limit
+close, `touch .claude/state/goal-cancel` to unlock it, and the goal stays
+where it is for the next session.
+
 Environment variables (all optional):
 
 | Variable | Purpose |
@@ -370,7 +393,10 @@ Environment variables (all optional):
 > `--settings` additionally copies the two commands into
 > `.claude/settings.json` as `VISE_TEST_CMD` / `VISE_LINT_CMD` — off by
 > default, because a second copy of a command, in a file nobody re-runs
-> bootstrap over, is a copy that goes stale and still wins. Or `/bootstrap`
+> bootstrap over, is a copy that goes stale and still wins. `--loop` also
+> writes `.claude/loop.md`, so a bare `/loop` advances the active workflow; it
+> is off by default because it changes what `/loop` does for everyone who opens
+> the repo, and an existing file is never replaced. Or `/bootstrap`
 > from a session, which does the same and walks the rest of the setup.
 
 | `VISE_CODELAYER` | Read-by-symbol gate: `off` (default, inert), `warn` (records what it would deny, blocks nothing), `enforce` (denies source reads by path). The kill switch is the point — a gate that can lock you out of fixing the gate gets uninstalled the first time it misfires |
@@ -494,6 +520,8 @@ partition is exactly the case worth catching.
 
 vise runs *beside* other MCP servers, not above them, and MCP has no
 server-to-server channel — so vise can name their tools and never call one.
+The one exception is [vise-mod](#vise-mod--the-part-that-runs-inside-claude-code),
+which runs inside Claude Code rather than beside it, and calls two of them.
 Three come up often enough that the bundled assets teach when to reach for
 them, and `vise/core/neighbours.py` is the single place those names and the
 versions they assume are written down.
@@ -596,6 +624,46 @@ after an ingest, a caller count from `analyze_impact` includes a type used only
 in an annotation, so `who_calls` is the number to use when it decides
 something; and two extractors agreeing is still static analysis, never evidence
 that a path runs.
+
+## vise-mod — the part that runs inside Claude Code
+
+An opt-in second plugin in this repository, under `mod/`. It is a
+[mod](https://code.claude.com/docs/en/plugins/mods/reference): TypeScript that Claude Code
+2.1.287 and later loads into its own process, where `$.mcp.call` reaches every
+connected MCP server. vise's server cannot do that, which is why everything
+above names its neighbours' tools and leaves the calling to the agent. The mod
+is the first place vise makes the call itself.
+
+```sh
+./install.sh --mod                         # from a clone
+claude plugin install vise-mod@vise-dev    # or by hand, once the marketplace is added
+```
+
+What it does, each from a read of vise's own `graph_status`, taken at session
+start, at the start of every turn, and after any vise tool call that can move
+the workflow:
+
+| What | Where | Option |
+|---|---|---|
+| `vise · <workflow> › <phase> 2/10` | the status line | always |
+| The workflow, the phase, what it blocks, its exits, warnings, and what tasky said | the `vise-workflow` command opens it in a pane | always |
+| The phase, what it blocks and how to leave it, as a section of the system prompt, so it survives a compaction | the system prompt | `phase_in_system_prompt`, on |
+| When a debug workflow reaches `hypothesize` or `fix`, tasky's `dead_ends` for this repository, added to the conversation once per visit | the conversation | `tasky_dead_ends`, on |
+
+The last row is the bridge the [tasky section](#tasky--the-other-half-of-memory)
+describes the debugger doing by hand: it is no longer something the agent has
+to remember to ask. An empty answer adds nothing. tasky stays the only writer of
+its ledger. The mod reads from it, and what it adds goes into the conversation.
+
+It fails open, like every hook in vise: an unreachable vise leaves the last
+status on screen, an unreachable tasky skips the bridge, and neither costs the
+call it rode on. Two things to know before installing it. A mod is **not
+sandboxed**: it runs with the same reach as Claude Code. That is why it is a
+separate plugin that `install.sh` installs only when asked. And the mod API is
+early access and moves between releases, so `mod/` carries its own tests
+(`claude plugin test mod`), which `src/vise/tests/test_mod.py` runs wherever a
+recent enough `claude` is on `PATH`. The tool names it calls are held to the
+neighbour contract like every other asset.
 
 ## Project agents
 

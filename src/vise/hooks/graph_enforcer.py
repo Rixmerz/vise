@@ -280,6 +280,21 @@ ENFORCER_ALLOWLIST = GRAPH_INNER_ALLOWLIST | frozenset({
 _EXECUTE_MCP_TOOL_SUFFIX = "execute_mcp_tool"
 
 
+#: Claude Code renamed its subagent tool from ``Task`` to ``Agent``. A workflow
+#: that blocks either name blocks both: the bundled ``debug-graph`` was written
+#: against ``Task``, and an exact match on a name the session no longer calls
+#: let every delegation through a phase that forbids it.
+_SAME_TOOL = {"Task": "Agent", "Agent": "Task"}
+
+
+def _blocks(tools_blocked, tool):
+    """Whether ``tools_blocked`` covers ``tool``, its renamed twin included."""
+    if "*" in tools_blocked or tool in tools_blocked:
+        return True
+    twin = _SAME_TOOL.get(tool)
+    return twin is not None and twin in tools_blocked
+
+
 def _tool_suffix(tool_name):
     """Return the trailing segment of a namespaced MCP tool name.
 
@@ -364,7 +379,7 @@ def main():
             effective = hook_input.get("tool_input", {}).get("tool_name", tool_name)
 
         # 3. Check if tool is blocked ("*" = block everything)
-        if "*" in tools_blocked or effective in tools_blocked:
+        if _blocks(tools_blocked, effective):
             reason = (
                 f"[Graph Enforcer] Tool '{effective}' is blocked at node "
                 f"'{current_node}' (workflow: {active_graph}). "

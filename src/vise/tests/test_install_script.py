@@ -100,3 +100,57 @@ def test_it_says_which_missing_pieces_actually_block_a_run(script: str):
     do the opposite — they fail closed. An installer that reports both in one
     undifferentiated list teaches the reader to ignore both."""
     assert "dormant" in script and "fail closed" in script
+
+
+def test_every_plugin_it_installs_is_one_the_dev_marketplace_lists(script: str):
+    """`claude plugin install x@vise-dev` on a name the index lacks fails at
+    the end of an install that otherwise looked fine."""
+    import json
+
+    listed = {p["name"] for p in json.loads(
+        (REPO / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))["plugins"]}
+    installed = set(re.findall(r"^\s*(?:if ! )?_install ([a-z-]+)", script, re.MULTILINE))
+    assert {"vise", "vise-mod"} <= installed, installed
+    assert installed <= listed, installed - listed
+
+
+def _heredoc(script: str, function: str) -> str:
+    body = script.split(f"{function}() {{", 1)[1]
+    after = body.split("<<'PY'", 1)[1]
+    return after.split("\n", 1)[1].split("\nPY\n", 1)[0]
+
+
+def test_a_reinstall_keeps_the_options_someone_set(script: str, tmp_path: Path):
+    """Both plugins declare userConfig, and the reinstall goes through an
+    uninstall. The values live in settings.json; the script copies the entry
+    out before and back after, and never over one the reinstall kept."""
+    import json
+
+    settings = tmp_path / "settings.json"
+    entry = {"goal_gate": True, "codelayer": "warn"}
+    settings.write_text(json.dumps({"pluginConfigs": {"vise@vise-dev": entry}, "theme": "dark"}))
+
+    read = subprocess.run(
+        [sys.executable, "-", str(settings), "vise@vise-dev"],
+        input=_heredoc(script, "_options"), capture_output=True, text=True, check=True,
+    )
+    saved = read.stdout.strip()
+    assert json.loads(saved) == entry
+
+    # The uninstall dropped it.
+    settings.write_text(json.dumps({"pluginConfigs": {}, "theme": "dark"}))
+    subprocess.run(
+        [sys.executable, "-", str(settings), "vise@vise-dev", saved],
+        input=_heredoc(script, "_restore_options"), capture_output=True, text=True, check=True,
+    )
+    after = json.loads(settings.read_text())
+    assert after["pluginConfigs"]["vise@vise-dev"] == entry
+    assert after["theme"] == "dark", "nothing else in settings.json is touched"
+
+    # The reinstall kept a newer value: it wins.
+    settings.write_text(json.dumps({"pluginConfigs": {"vise@vise-dev": {"goal_gate": False}}}))
+    subprocess.run(
+        [sys.executable, "-", str(settings), "vise@vise-dev", saved],
+        input=_heredoc(script, "_restore_options"), capture_output=True, text=True, check=True,
+    )
+    assert json.loads(settings.read_text())["pluginConfigs"]["vise@vise-dev"] == {"goal_gate": False}

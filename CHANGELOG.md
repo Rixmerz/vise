@@ -8,6 +8,134 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
+### Added — vise-mod: the part of vise that runs inside Claude Code
+
+Claude Code 2.1.287 added mods: TypeScript a plugin ships that runs in Claude
+Code's own process. A mod's `$.mcp.call` reaches every connected MCP server.
+That is the one thing vise's MCP server cannot do, and the reason every asset
+names livespec's and tasky's tools and leaves the calling to the agent.
+
+`mod/` is a second plugin, `vise-mod`, listed in the dev marketplace and
+installed only by `./install.sh --mod`. A mod is not sandboxed, so it is never
+installed unasked. From a read of vise's `graph_status`, taken at session start,
+at each turn and after any vise call that can move the workflow, it:
+
+- shows `vise · <workflow> › <phase> v/max` on the status line;
+- opens a pane with the `vise-workflow` command: phase, blocked tools, exits,
+  warnings, and what tasky said;
+- adds the phase, what it blocks and how to leave it as a system prompt
+  section, so it survives compaction (option `phase_in_system_prompt`, on);
+- when a debug workflow reaches `hypothesize` or `fix`, asks tasky's
+  `dead_ends` once per visit and adds the answer to the conversation (option
+  `tasky_dead_ends`, on). The debugger was told to do this in prose. Now
+  nothing has to remember to.
+
+It fails open. The tool names it calls and the vise tools it watches are held
+to the neighbour contract (`test_neighbour_contract.py`), and its own tests
+run under `claude plugin test` from `test_mod.py` wherever a `claude` at
+2.1.287 or later is on `PATH`.
+
+### Added — the opt-in switches are plugin options
+
+`goal_gate`, `snapshot_on_edit`, `codelayer` and `workflow_suggest` are
+`userConfig` options now, set from `/plugin` or `/config` instead of
+`settings.json`. Claude Code hands them to hooks as `CLAUDE_PLUGIN_OPTION_<KEY>`
+and to the MCP server through `.mcp.json`. `bin/vise-run` is the one place they
+become the `VISE_*` variables the code already reads. An explicit variable
+wins. A value that is not exactly on leaves the switch off, and so does a
+placeholder an older Claude Code left unsubstituted. The two shell-gated hooks
+open on the option too, and still spawn no interpreter at the default.
+
+`install.sh` reinstalls through an uninstall, which may drop stored option
+values. It now keeps each plugin's `pluginConfigs` entry and puts it back when
+the reinstall left none.
+
+### Fixed — a workflow that blocks delegation blocks it again
+
+Claude Code renamed its subagent tool from `Task` to `Agent`, and the graph
+enforcer matched tool names exactly. `debug-graph` blocks `Task` on every node
+but `fix`, so every `Agent` call went through phases that forbid delegation.
+The enforcer now treats the two names as one tool in either direction, and
+nothing else: `TaskCreate` is still its own tool. `/doctor prompt-audit` found
+it, as a conflict between the orchestration skill and the workflow.
+
+### Changed — the shipped skills and agents, after `/doctor prompt-audit`
+
+Claude Code 2.1.283 added `/doctor prompt-audit`. Run against `skills/` and
+`agents/`, it found the following, and each was checked against the files
+before it changed:
+
+- **`orchestration`** said "three things" and listed four. The fourth repeated
+  Step 0, and its one new condition ("changes no contract") moved there. Two
+  sentences that described an earlier version of the skill now state the
+  current rule.
+- **`reviewer`** carried a reporting system's vocabulary (`recipients: []`, a
+  CRM call). It is now the shape: an early-return guard that skips the
+  downstream call while every test stays green.
+- **`web-ui-rules`** cited CWE-1004 (a cookie without `HttpOnly`) for a token
+  in `localStorage`. The weakness is CWE-922.
+- **`python-rules`** told agents `asyncio.to_thread()` gets around the GIL. It
+  does not for CPU-bound work, and the rule now says that.
+- **Pydantic, Zod/Valibot, `thiserror`/`anyhow`** were named outside
+  `## Tooling — greenfield defaults only`. They are under it now, and
+  `rust-rules` has that section for the first time.
+- **`ux-designer`, `ui-designer` and `frontend`** told a subagent to ask the
+  user. A subagent cannot. It now stops and leads its report with the
+  question.
+- **`docs-writer`** dropped a maintainer note that named a model version.
+  `test_agents_and_skills.py` already pins that rule.
+
+Two conflicts are left for a person to decide, because the audit could not
+tell which side is current. One is the retry cap: `orchestration` allows three
+dispatches, `agent-autoheal` stops at two. The other is whether an explicit user
+request outranks a safety rule in `engineering-baseline`.
+
+### Changed — `loop.md` stops cleanly at the usage limit
+
+Claude Code's wrap-up allowance (2.1.277) finishes the step in hand when a
+session reaches its limit. The loop prompt now says not to start the next phase
+then, and to write down where the workflow stands so the next session resumes
+from there. The README notes the one interaction to know about:
+`VISE_GOAL_GATE` holds the turn open on an unfinished goal, which works against
+a wrap-up, so `touch .claude/state/goal-cancel` unlocks it.
+
+### Added — `/loop` advances the active workflow
+
+Claude Code's `/loop` reruns a prompt on an interval, or at a delay the model
+picks each iteration, and a bare `/loop` runs `.claude/loop.md` when the repo
+has one. vise used none of it. A session that should keep working while its
+user is away had two options: someone typing "continue" every phase, or the
+built-in maintenance prompt, which tends the branch's pull request and knows
+nothing about the workflow holding the session.
+
+- **`vise bootstrap --loop`** writes `.claude/loop.md` from
+  `assets/loop.md`. Each iteration reads `graph_status()`, gives the phase's
+  work to subagents, crosses the edge with `graph_traverse(edge_id=...)` so
+  the validators decide, and ends the loop on a refusal that repeats or a
+  decision only the user can make. It is off by default, because the file
+  changes what `/loop` does for everyone who opens the repo. An existing
+  file, a dangling symlink included, is never replaced, `--force` included.
+  It also works on a repo whose profile already exists, which is the common
+  way to ask for it.
+- **The suggester points at `/loop`** when a prompt asks for work that
+  outlives the turn ("keep going until CI is green", "vigila el deploy"). It
+  says which form fits: a bare `/loop` when the file is vise's, the request as
+  the prompt otherwise. It names `vise bootstrap --loop` when the file is
+  missing and never calls a repo's own `loop.md` vise's. Every verb needs an
+  object, so "watch mode" and "the monitor component" stay quiet. The hint is
+  skipped under `CLAUDE_CODE_DISABLE_CRON`, where `/loop` does not exist, and
+  is recorded as `loop_prompt` in `orchestration.jsonl`.
+- **`orchestration` says where the loop lives**: in the session, with each
+  iteration's work handed to subagents, because a subagent's turn ends when it
+  returns. It also says `/goal` and `VISE_GOAL_GATE=1` are both Stop hooks and
+  should not run together. vise's gate decides with validators that run;
+  `/goal` decides with a small model that reads the conversation.
+
+**Behaviour change.** The suggester was silent whenever a workflow was active.
+It now speaks there too, but only for the `/loop` hint and only on a prompt
+that asks for continuing work, because that is when a loop has a phase to
+advance.
+
 ### Fixed — two checkouts named the same thing are two projects
 
 `_xdg.project_state_dir` solved basename collisions once: the plain name is

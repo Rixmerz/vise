@@ -62,6 +62,14 @@ Recommend `warn` over `enforce` for the last one and say why in one line: it
 logs what it *would* have denied, so the false-positive rate gets measured
 before anything blocks.
 
+One more opt-in, a flag rather than a variable: `vise bootstrap --loop` writes
+`.claude/loop.md`, so a bare `/loop` advances the active workflow one phase per
+iteration instead of running Claude Code's built-in maintenance prompt. It is
+off by default because the file changes what `/loop` does for everyone who
+opens the repo. If a `.claude/loop.md` already exists, it is someone's
+instructions for an unattended session: bootstrap leaves it alone, and so do
+you.
+
 **5. If livespec is mounted**, suggest `index_project` and then
 `debt_baseline_capture` — without a baseline, `search_similar` reports every
 pre-existing near-duplicate in the repo and the noise buries the finding that

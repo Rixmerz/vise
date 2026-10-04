@@ -531,6 +531,70 @@ def write_settings_env(
     return written, kept, ""
 
 
+#: The prompt a bare `/loop` runs once this repo has it. Claude Code reads
+#: `.claude/loop.md` in the project, then `~/.claude/loop.md`, and falls back
+#: to its built-in maintenance prompt — which tends the branch's pull request
+#: and knows nothing about the workflow vise holds the session in.
+LOOP_TEMPLATE = Path(__file__).resolve().parent.parent / "assets" / "loop.md"
+
+
+def _loop_path(project: Path) -> Path:
+    return project / ".claude" / "loop.md"
+
+
+def write_loop_prompt(project: Path) -> tuple[str, str]:
+    """Put vise's `/loop` prompt at `.claude/loop.md`, unless one is there.
+
+    Returns ``(status, detail)``, status one of ``written``, ``kept`` or
+    ``error``. An existing file is never replaced, ``--force`` included:
+    `--force` is about the quality profile, and a loop prompt somebody wrote is
+    their instructions for an unattended session. A symlink counts as existing
+    even when it dangles, because writing through it would replace the link.
+    """
+    path = _loop_path(project)
+    if path.exists() or path.is_symlink():
+        return "kept", str(path)
+    try:
+        text = LOOP_TEMPLATE.read_text(encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(path, text)
+    except OSError as exc:
+        return "error", f"could not write {path} ({exc})"
+    return "written", str(path)
+
+
+def _loop_report(project: Path, args: argparse.Namespace) -> str:
+    """The `/loop` line of the bootstrap output, writing the file when asked.
+
+    Off by default: the file changes what a bare `/loop` does for everyone who
+    opens this repo, and the prompt it replaces is a reasonable one. So the
+    default is to say it exists, once, and let the person decide.
+    """
+    path = _loop_path(project)
+    wanted = getattr(args, "loop", False)
+    if not wanted:
+        if path.exists() or path.is_symlink():
+            return ""
+        return (
+            "\n/loop: `vise bootstrap --loop` writes .claude/loop.md, so a bare "
+            "`/loop`\n  advances the active workflow one phase at a time "
+            "instead of running Claude Code's\n  built-in maintenance prompt."
+        )
+    if getattr(args, "dry_run", False):
+        if path.exists() or path.is_symlink():
+            return f"\n/loop: {path} exists — would leave it alone."
+        return f"\n/loop: would write {path}"
+    status, detail = write_loop_prompt(project)
+    if status == "written":
+        return (
+            f"\nwrote {detail}\n  a bare `/loop` now advances the active "
+            "workflow; edit the file to change what each iteration does."
+        )
+    if status == "kept":
+        return f"\n/loop: {detail} already exists — left as it is. vise never replaces it."
+    return f"\n/loop: {detail}"
+
+
 def _cmd_bootstrap(args: argparse.Namespace) -> int:
     project = Path(args.project_dir or ".").expanduser().resolve()
     target = project / ".vise" / "quality.yaml"
@@ -543,12 +607,14 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
         print(render(found))
         print(_design_gates_report())
         print(_neighbours_report(project))
+        _print_if(_loop_report(project, args))
         return 0
 
     if args.dry_run:
         print(render(found))
         print(_design_gates_report())
         print(_neighbours_report(project))
+        _print_if(_loop_report(project, args))
         return 0
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -573,6 +639,7 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
 
     print(_design_gates_report())
     print(_neighbours_report(project))
+    _print_if(_loop_report(project, args))
 
     unit = found["bound"].get("unit")
     lint = found["bound"].get("lint")
@@ -616,6 +683,11 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_if(text: str) -> None:
+    if text:
+        print(text)
+
+
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "bootstrap",
@@ -629,6 +701,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="also copy the gate commands into .claude/settings.json as "
              "VISE_TEST_CMD/VISE_LINT_CMD (the validators read the profile "
              "without this; the copy can go stale)",
+    )
+    p.add_argument(
+        "--loop", action="store_true",
+        help="also write .claude/loop.md, so a bare `/loop` advances the active "
+             "workflow (an existing file is never replaced)",
     )
     p.add_argument(
         "--no-settings", action="store_true",
