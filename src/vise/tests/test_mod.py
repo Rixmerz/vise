@@ -1,7 +1,7 @@
-"""`mod/` is TypeScript that Claude Code loads, and only Claude Code can check it.
+"""`hooks/mod/` is TypeScript that Claude Code loads, and only Claude Code can check it.
 
-`claude plugin validate` reads the manifest and the hooks module the way the
-engine will, and `claude plugin test` runs the mod's own tests against the
+`claude plugin validate` reads vise's manifest and `hooks/hooks.json` — command
+hooks and the mod's module side by side — the way the engine will, and `claude plugin test` runs the mod's own tests against the
 engine's hooks. Both need the `claude` CLI at 2.1.287 or later, the release
 that added mods, so on a machine without it these skip and say why. Where it is
 present, a mod that no longer loads fails here rather than in someone's session.
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
-MOD = REPO / "mod"
+MOD = REPO  # the mod ships inside vise: the plugin root is what loads
 MINIMUM = (2, 1, 287)
 
 

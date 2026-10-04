@@ -520,7 +520,7 @@ partition is exactly the case worth catching.
 
 vise runs *beside* other MCP servers, not above them, and MCP has no
 server-to-server channel — so vise can name their tools and never call one.
-The one exception is [vise-mod](#vise-mod--the-part-that-runs-inside-claude-code),
+The one exception is [the mod](#the-mod--the-part-that-runs-inside-claude-code),
 which runs inside Claude Code rather than beside it, and calls two of them.
 Three come up often enough that the bundled assets teach when to reach for
 them, and `vise/core/neighbours.py` is the single place those names and the
@@ -625,19 +625,16 @@ in an annotation, so `who_calls` is the number to use when it decides
 something; and two extractors agreeing is still static analysis, never evidence
 that a path runs.
 
-## vise-mod — the part that runs inside Claude Code
+## The mod — the part that runs inside Claude Code
 
-An opt-in second plugin in this repository, under `mod/`. It is a
+Part of the vise plugin, under `hooks/mod/`, loaded from the same
+`hooks/hooks.json` as the command hooks. It is a
 [mod](https://code.claude.com/docs/en/plugins/mods/reference): TypeScript that Claude Code
 2.1.287 and later loads into its own process, where `$.mcp.call` reaches every
 connected MCP server. vise's server cannot do that, which is why everything
 above names its neighbours' tools and leaves the calling to the agent. The mod
-is the first place vise makes the call itself.
-
-```sh
-./install.sh --mod                         # from a clone
-claude plugin install vise-mod@vise-dev    # or by hand, once the marketplace is added
-```
+is the first place vise makes the call itself. There is nothing extra to
+install, and its two options sit with vise's others in `/plugin`.
 
 What it does, each from a read of vise's own `graph_status`, taken at session
 start, at the start of every turn, and after any vise tool call that can move
@@ -657,11 +654,11 @@ its ledger. The mod reads from it, and what it adds goes into the conversation.
 
 It fails open, like every hook in vise: an unreachable vise leaves the last
 status on screen, an unreachable tasky skips the bridge, and neither costs the
-call it rode on. Two things to know before installing it. A mod is **not
-sandboxed**: it runs with the same reach as Claude Code. That is why it is a
-separate plugin that `install.sh` installs only when asked. And the mod API is
-early access and moves between releases, so `mod/` carries its own tests
-(`claude plugin test mod`), which `src/vise/tests/test_mod.py` runs wherever a
+call it rode on. Two things to know. A mod is **not sandboxed**: it runs with
+the same reach as Claude Code — the same reach vise's command hooks already
+have, which is why it ships in the same plugin rather than beside it. And the
+mod API is early access and moves between releases, so `hooks/mod/` carries
+its own tests (`claude plugin test .`), which `src/vise/tests/test_mod.py` runs wherever a
 recent enough `claude` is on `PATH`. The tool names it calls are held to the
 neighbour contract like every other asset.
 

@@ -6,6 +6,7 @@
   },
   "version": "0.1.0a30",
   "mcpServers": "./.mcp.json",
+  "types": "./types/index.d.ts",
   "userConfig": {
     "goal_gate": {
       "type": "boolean",
@@ -29,6 +30,18 @@
       "type": "boolean",
       "title": "Workflow and /loop suggestions",
       "description": "Suggest a workflow for multi-step prompts, and /loop for work that outlives the turn. Same as VISE_WORKFLOW_SUGGEST=0 to turn it off, which wins when set.",
+      "default": true
+    },
+    "phase_in_system_prompt": {
+      "type": "boolean",
+      "title": "Phase in the system prompt",
+      "description": "Add the active workflow's phase, its blocked tools and its exits as a section of the system prompt, rebuilt from graph_status every turn. Needs Claude Code 2.1.287 or later (the in-process part of vise).",
+      "default": true
+    },
+    "tasky_dead_ends": {
+      "type": "boolean",
+      "title": "Failed fixes from tasky",
+      "description": "When a debug workflow reaches its hypothesize or fix phase, ask tasky for fixes this repository already saw fail and add them to the conversation. Needs Claude Code 2.1.287 or later and the tasky plugin.",
       "default": true
     }
   }

@@ -8,16 +8,18 @@ you may already depend on, it says so under **Behaviour change**.
 
 ## [Unreleased]
 
-### Added — vise-mod: the part of vise that runs inside Claude Code
+### Added — the mod: the part of vise that runs inside Claude Code
 
 Claude Code 2.1.287 added mods: TypeScript a plugin ships that runs in Claude
 Code's own process. A mod's `$.mcp.call` reaches every connected MCP server.
 That is the one thing vise's MCP server cannot do, and the reason every asset
 names livespec's and tasky's tools and leaves the calling to the agent.
 
-`mod/` is a second plugin, `vise-mod`, listed in the dev marketplace and
-installed only by `./install.sh --mod`. A mod is not sandboxed, so it is never
-installed unasked. From a read of vise's `graph_status`, taken at session start,
+It ships inside the vise plugin, under `hooks/mod/`, listed in
+`hooks/hooks.json` as a module beside the command hooks — there is no second
+plugin and no install flag. It needs Claude Code 2.1.287 or later. A mod is not
+sandboxed, but neither is a command hook, and each feature that adds to the
+conversation has its own option in `/plugin`. From a read of vise's `graph_status`, taken at session start,
 at each turn and after any vise call that can move the workflow, it:
 
 - shows `vise · <workflow> › <phase> v/max` on the status line;

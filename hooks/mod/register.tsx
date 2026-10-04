@@ -1,4 +1,4 @@
-// vise-mod: the part of vise that has to run inside Claude Code.
+// The mod: the part of vise that has to run inside Claude Code.
 //
 // vise is an MCP server, and an MCP server cannot call another server's tools:
 // that is why vise names livespec's and tasky's tools in prose and never calls
@@ -12,7 +12,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { DeadEnds, ViseStatus } from '../types'
+import type { DeadEnds, ViseStatus } from '../../types'
 import {
   deadEndsNote,
   fixPhaseKey,
@@ -28,8 +28,8 @@ import {
 const PANE = 'vise-workflow'
 const COMMAND = 'vise-workflow'
 
-const status = atom({ plugin: 'vise-mod', key: 'status' } as const, null as ViseStatus | null)
-const deadEnds = atom({ plugin: 'vise-mod', key: 'deadEnds' } as const, null as DeadEnds | null)
+const status = atom({ plugin: 'vise', key: 'status' } as const, null as ViseStatus | null)
+const deadEnds = atom({ plugin: 'vise', key: 'deadEnds' } as const, null as DeadEnds | null)
 
 /** Spellings `$.mcp.call` accepts for a server installed from a marketplace, or added by hand. */
 const FALLBACK = {
@@ -137,7 +137,7 @@ export const register: Register = (on, options) => {
       if (!now) return composed
       return {
         ...composed,
-        sections: [...composed.sections, { id: 'vise-mod:phase', text: phaseSection(now), scope: 'session' as const }],
+        sections: [...composed.sections, { id: 'vise:phase', text: phaseSection(now), scope: 'session' as const }],
       }
     } catch {
       return composed

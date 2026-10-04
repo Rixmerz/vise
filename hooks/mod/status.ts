@@ -1,7 +1,7 @@
 // Pure functions over what vise's and tasky's MCP tools answer. No `$` here,
 // so the tests can hold them to the shapes the Python side actually returns.
 
-import type { ViseStatus } from '../types'
+import type { ViseStatus } from '../../types'
 
 /** The debug workflow's phases where a fix is chosen or applied. */
 export const FIX_PHASES: readonly string[] = ['hypothesize', 'fix']

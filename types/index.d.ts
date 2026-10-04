@@ -15,7 +15,7 @@ export type DeadEnds = { phase: string; text: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'vise-mod': {
+    'vise': {
       status: ViseStatus | null
       deadEnds: DeadEnds | null
     }
