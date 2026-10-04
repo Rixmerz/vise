@@ -124,11 +124,11 @@ def test_the_union_is_the_whole_of_both():
 
 # --- the mod ------------------------------------------------------------------
 #
-# `mod/` is the one place vise calls a tool rather than naming it: `$.mcp.call`
+# `hooks/mod/` is the one place vise calls a tool rather than naming it: `$.mcp.call`
 # in a mod reaches every connected server. A wrong name there does not mislead
 # an agent, it fails a call nobody sees, so the same contract holds.
 
-MOD_HOOKS = REPO / "mod" / "hooks"
+MOD_HOOKS = REPO / "hooks" / "mod"
 
 
 def _mod_source() -> str:

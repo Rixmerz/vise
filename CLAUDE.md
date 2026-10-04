@@ -20,7 +20,7 @@ Treat those files with the same care as the code.
 | `skills/` | 24 bundled skills (`engineering-baseline`, `security-baseline`, `ponytail`, `orchestration`, `architecture`, `agent-autoheal`, `codelayer`, `design-brief`, `ui-critique`, and the 15 `*-rules`) |
 | `commands/` | `/debug` `/feature` `/quality` `/status` `/codelayer` `/debt` `/bootstrap` |
 | `hooks/hooks.json` | 14 hook registrations across 12 scripts, 6 events |
-| `mod/` | `vise-mod`, an opt-in second plugin: TypeScript Claude Code runs in-process, the one place vise *calls* a neighbour (`$.mcp.call`). Its own tests run under `claude plugin test mod` |
+| `hooks/mod/` | the mod: TypeScript Claude Code 2.1.287+ runs in-process, loaded from `hooks/hooks.json` beside the command hooks — the one place vise *calls* a neighbour (`$.mcp.call`). Its state contract is `types/index.d.ts`; its own tests run under `claude plugin test .` |
 | `bin/vise-run` | the launcher every hook and the MCP server go through, and the one place a plugin option becomes a `VISE_*` switch |
 | `src/vise/tools/_annotations.py` | what every MCP tool does to the world — the destructive set, readable in one screen |
 | `.claude/` | vise's *own* dev-time skills (OpenSpec) — not shipped to users |
@@ -154,7 +154,7 @@ Facts restated in prose drift from their source. The suite pins them:
 | `test_gate_visibility.py` | the `static` node carries both kinds: named checks that skip when unbound, and `design_tokens`, which never can |
 | `test_neighbour_contract.py` | every tool name an asset teaches belongs to vise or to a neighbour in `core/neighbours.py` — and every pinned name is still referenced somewhere |
 | `test_tool_annotations.py` | every MCP tool declares what it does to the world, the four hints are internally consistent, and the four destructive ones say so in the title a host shows |
-| `test_mod.py` | `mod/` validates and its own tests pass under the `claude` CLI (skips where no 2.1.287+ CLI is on `PATH`) |
+| `test_mod.py` | the plugin, mod included, validates and its own tests pass under the `claude` CLI (skips where no 2.1.287+ CLI is on `PATH`) |
 
 **Adding an agent, a skill, or a workflow means updating what asserts it.** If a
 change makes one of these tests fail, the fix is almost never to loosen the test.

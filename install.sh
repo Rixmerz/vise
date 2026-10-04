@@ -22,15 +22,13 @@ fi
 
 DEV=0
 DESIGN=0
-MOD=0
 for arg in "$@"; do
   case "$arg" in
     --dev) DEV=1 ;;
     --design) DESIGN=1 ;;
-    --mod) MOD=1 ;;
     -h|--help)
       cat <<'USAGE'
-usage: ./install.sh [--dev] [--design] [--mod]
+usage: ./install.sh [--dev] [--design]
 
   --dev     also install the [dev] extras (pytest, ruff, mypy, coverage)
   --design  also install the [design] extra and a Chromium for it. The three
@@ -38,11 +36,6 @@ usage: ./install.sh [--dev] [--design] [--mod]
             so without this they refuse every run in a repo that wires them.
             Left opt-in because it downloads a browser (~150MB) and most repos
             never turn those gates on.
-  --mod     also install vise-mod, the in-process companion: the phase on the
-            status line and in a pane, the phase in the system prompt, and
-            tasky's failed fixes in a debug session. Left opt-in because a mod
-            runs inside Claude Code with no sandbox, and needs Claude Code
-            2.1.287 or later.
 USAGE
       exit 0
       ;;
@@ -191,14 +184,6 @@ _install() {  # $1 plugin name; installs or reinstalls <name>@$MARKETPLACE
 }
 
 _install vise
-
-# 3b. vise-mod (--mod). A mod runs inside Claude Code with the same reach as
-#     Claude Code itself, so it is never installed unasked.
-if [ "$MOD" = 1 ]; then
-  if ! _install vise-mod; then
-    echo "warn: vise-mod did not install. Mods need Claude Code 2.1.287 or later." >&2
-  fi
-fi
 
 # 4. LSP binaries: vise declares NO language servers — the official
 #    marketplace ships one plugin per language, and `lspServers` has no

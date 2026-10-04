@@ -148,7 +148,7 @@ describe('in the engine', () => {
     // What tasky said is drawn in the pane, and deadEndsNote is tested above.
     for (const surface of ['terminal', 'desktop'] as const) {
       const pane = await $.ui.mount({
-        plugin: 'vise-mod',
+        plugin: 'vise',
         surface,
         component: 'Pane',
         requestId: 'vise-workflow',
@@ -174,7 +174,7 @@ describe('in the engine', () => {
       outputStyle: null,
       traits: [],
     })
-    const section = composed.sections.find(s => s.id === 'vise-mod:phase')
+    const section = composed.sections.find(s => s.id === 'vise:phase')
     expect(section?.scope).toBe('session')
     expect(section?.text).toContain('phase `Fix`')
 

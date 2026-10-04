@@ -110,7 +110,7 @@ def test_every_plugin_it_installs_is_one_the_dev_marketplace_lists(script: str):
     listed = {p["name"] for p in json.loads(
         (REPO / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))["plugins"]}
     installed = set(re.findall(r"^\s*(?:if ! )?_install ([a-z-]+)", script, re.MULTILINE))
-    assert {"vise", "vise-mod"} <= installed, installed
+    assert "vise" in installed, installed
     assert installed <= listed, installed - listed
 
 
@@ -121,7 +121,7 @@ def _heredoc(script: str, function: str) -> str:
 
 
 def test_a_reinstall_keeps_the_options_someone_set(script: str, tmp_path: Path):
-    """Both plugins declare userConfig, and the reinstall goes through an
+    """vise declares userConfig, and the reinstall goes through an
     uninstall. The values live in settings.json; the script copies the entry
     out before and back after, and never over one the reinstall kept."""
     import json
